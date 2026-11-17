@@ -233,3 +233,17 @@ click-through + regression green. Supersedes v1.25/v1.26.
   distinct bands; child convention C55 added. Fixes "white paper" rail + picker left/right mismatch.
 - v1.39: layout dropdown popup polish — left-anchored, min-width 220, strong drop shadow, r8, 34px
   inset rows, group separators (Auto | templates | Custom), max-height 60vh scroll-safe (no clip).
+- v1.40 (adjudicated A, Synology channel-player model): PlayerTile "little TV" — cell fills grid slot
+  (black letterbox, container-type:size); inner .tile-stage keeps 16:9 (min(100cqw,100cqh*16/9)) and
+  hosts media+all overlays; per-stage container queries adapt controls; layout/featured rows 1fr fill.
+  Fixes resize overlap + aspect break.
+- v1.41 (adjudicated A refinement): overlays (bar/actions/stats/live) moved back to the CELL (whole
+  player) so letterbox bars are used (title at player top, live at bottom); stage keeps only
+  media+scan+idle+deadmsg; per-cell container queries prevent overlap; aspect still via stage.
+- v1.42 (adjudicated A): removed stats-header state (st-head) — stats purely numeric; state stays with
+  bottom-left LIVE/OFF badge + top-bar dot (de-duplicated).
+- v1.43 (adjudicated A): hide the remove (×) button while zoomed (focused inspection ≠ layout edit);
+  only exit-zoom remains; removal stays in multi-grid hover × + rail footer drag. Synology-consistent.
+- v1.44: layout set expanded to Synology browser tier (+25/36 symmetric, +1+9/1+12 featured; Auto cap
+  16) and picker became an icon-thumbnail gallery (mini-grid previews, grouped, keyboard-navigable),
+  replacing the text-only dropdown.

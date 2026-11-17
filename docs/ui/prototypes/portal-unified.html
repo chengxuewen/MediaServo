@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.39</title>
+<title>MediaServo Portal — Unified Prototype v1.44</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'dark';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -165,7 +165,7 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 .caret{font-size:10px;color:var(--tx3);flex:none;transition:transform .15s}
 .combo-trigger[aria-expanded="true"] .caret{transform:rotate(180deg)}
 /* anchored to the trigger's right edge so it never overflows the canvas */
-/* v1.39: layout popup — left-anchored, wider, stronger elevation, grouped, scroll-safe. */
+/* v1.44: layout popup — left-anchored, wider, stronger elevation, grouped, scroll-safe. */
 .combo-pop{position:absolute;top:calc(100% + 6px);left:0;right:auto;min-width:220px;width:max-content;max-width:280px;max-height:min(60vh,420px);overflow-y:auto;background:var(--raised);border:1px solid var(--bd2);border-radius:var(--r8);box-shadow:0 8px 24px rgba(0,0,0,.5);padding:var(--sp6);z-index:80;display:none;list-style:none;margin:0}
 .combo.open .combo-pop{display:block}
 .combo-sep{height:1px;background:var(--bd);margin:var(--sp4) var(--sp6)}
@@ -234,11 +234,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .rail-headrow .rail-title{margin-bottom:0}
 .btn-block{width:100%}
 .rail-list{flex:1;overflow-y:auto;padding:var(--sp8)}
-/* v1.39 unified card-row language: bordered card + hover + selected; bg=sunken on surface panels. */
+/* v1.44 unified card-row language: bordered card + hover + selected; bg=sunken on surface panels. */
 .stream-item{display:flex;align-items:center;gap:var(--sp8);padding:var(--sp8);border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);margin-bottom:var(--sp2);cursor:pointer}
 .stream-item:hover{background:var(--hover);border-color:var(--bd2)}
 .stream-item.active{background:var(--accent-tint);border-color:var(--accent)}
-/* v1.39 (A): rail rows are text-first (no fake thumbnail); two lines name + res·state; del on hover. */
+/* v1.44 (A): rail rows are text-first (no fake thumbnail); two lines name + res·state; del on hover. */
 .stream-meta{flex:1;min-width:0}
 .stream-name{font-size:var(--fs12);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .stream-sub{font-size:var(--fs11);color:var(--tx3);font-family:var(--mono);display:block}
@@ -334,10 +334,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .wall-scroll{flex:1;overflow:auto;padding:var(--sp16);display:flex;flex-direction:column}
 .tiles{display:grid;gap:var(--sp12);grid-template-columns:repeat(var(--cols,3),1fr);flex:none}
 /* layout-grid: named-area template fills the wall height; tiles stretch to their slot (big spans 2×2) */
-.tiles.layout-grid{flex:1;min-height:0;align-content:start}
-/* v1.39: restore video-like 16:9 tiles (the fill-height stretch read as flat banners, not video). */
-.tiles.layout-grid .tile{aspect-ratio:16/9;min-height:0;height:auto}
-.tiles.layout-grid .tile-empty{aspect-ratio:16/9}
+.tiles.layout-grid{flex:1;min-height:0}
+/* v1.44: restore video-like 16:9 tiles (the fill-height stretch read as flat banners, not video). */
+.tiles.layout-grid .tile{aspect-ratio:auto;min-height:0;height:100%}
+.tiles.layout-grid .tile-empty{aspect-ratio:auto;height:100%}
 /* P3.1 elastic custom grid: dense-flow, tiles keep 16:9, per-tile 2×2 span */
 .tiles.elastic-grid{grid-auto-flow:dense;align-content:start;position:relative}
 .tiles.elastic-grid .tile{aspect-ratio:16/9;height:auto;min-height:0}
@@ -345,7 +345,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .col-handle::after{content:'';position:absolute;left:5px;top:0;bottom:0;width:2px;border-radius:1px;background:var(--bd2);opacity:0;transition:opacity .12s}
 .col-handle:hover::after,.col-handle.drag::after{opacity:1;background:var(--accent)}
 .chip.solo{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
-.tiles.elastic-grid .tile:hover .tile-bar{padding-right:88px}
+
 .tile-btn.size-b.on{color:var(--accent-ink);border-color:var(--accent)}
 .tile-empty{border:1px dashed var(--bd2);border-radius:var(--r6);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:var(--sp6);color:var(--tx3);font-size:var(--fs11);background:var(--sunken);min-height:0}
 .tile-empty .ic{width:20px;height:20px;opacity:.5}
@@ -358,7 +358,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tile-empty.drag-over{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink)}
 .rail-foot.drop-remove{margin:var(--sp8);padding:var(--sp12);border:1px dashed var(--danger);border-radius:var(--r6);background:var(--danger-tint);color:var(--danger-ink);text-align:center;font-weight:600}
 .rail-foot.drag-over{background:var(--danger);color:#fff}
-.tile{position:relative;border-radius:0;overflow:hidden;border:1px solid var(--bd);background:var(--video);aspect-ratio:16/9;cursor:pointer;container-type:inline-size}
+/* v1.44 PlayerTile ("little TV"): cell fills the grid slot (any shape, black letterbox); inner
+   .tile-stage keeps 16:9 and hosts media + all overlays, so resize never distorts or overlaps. */
+.tile{position:relative;border-radius:0;overflow:hidden;border:1px solid var(--bd);background:var(--video);aspect-ratio:16/9;cursor:pointer;container-type:size;container-name:cell;display:grid;place-items:center}
+.tile-stage{position:relative;aspect-ratio:16/9;width:min(100cqw,calc(100cqh * 16 / 9));max-width:100%;max-height:100%;overflow:hidden;container-type:inline-size;container-name:tile}
 .tile:hover{border-color:var(--bd2)}
 .tile.selected{border:2px solid var(--accent)}
 .tile.degraded{border:1px dashed var(--warn)}
@@ -372,7 +375,10 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 /* per-tile actions: top-right, layered ABOVE the stats card; revealed on hover or while zoomed */
 .tile-actions{position:absolute;right:4px;top:0;height:28px;display:none;align-items:center;gap:var(--sp6);z-index:5}
 .tile:hover .tile-actions,.tile.zoomed .tile-actions{display:flex}
-.tile:hover .tile-bar,.tile.zoomed .tile-bar{padding-right:62px}
+.tile:hover .tile-bar,.tile.zoomed .tile-bar{padding-right:96px}
+/* v1.44: zoom = focused inspection; removal is a layout-edit action, not offered here (Synology). */
+.tile.zoomed .tile-actions .del{display:none}
+.tile.zoomed .tile-bar{padding-right:40px}
 .tile-btn{width:22px;height:22px;border-radius:var(--r4);border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.55);color:rgba(255,255,255,.85);display:grid;place-items:center;padding:0}
 .tile-btn:hover{background:rgba(0,0,0,.8);color:#fff}
 .tile-btn.del:hover{background:rgba(200,45,45,.9);color:#fff}
@@ -380,7 +386,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 /* controls stay in the same corner when zoomed; only their size grows */
 .tile.zoomed .tile-btn{width:28px;height:28px}
 .tile.zoomed .tile-btn svg.ic{width:15px;height:15px}
-.tile.zoomed .tile-bar{padding-right:74px}
+
 /* LIVE / OFF badge bottom-left (the name bar moved to the top) */
 .tile-live{position:absolute;left:var(--sp6);bottom:var(--sp6);z-index:2;font-size:var(--fs11);font-weight:600;padding:var(--sp2) var(--sp6);border-radius:var(--r2);display:flex;align-items:center;gap:var(--sp4)}
 .tile-live.solid{background:var(--ok);color:#04140c}
@@ -389,15 +395,14 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tile-stats{position:absolute;left:8px;top:30px;z-index:4;display:none;max-width:calc(100% - 16px);max-height:40px;overflow:hidden;padding:6px 9px 7px;border-radius:var(--r4);pointer-events:none;background:rgba(8,12,20,.58);border:1px solid rgba(255,255,255,.08);box-shadow:0 2px 10px rgba(0,0,0,.32);font-size:11px;line-height:1.55;color:rgba(255,255,255,.9)}
 .tiles.show-stats .tile-stats{display:block}
 .tiles.show-stats .tile-idle{opacity:0}
-.st-head{display:none;align-items:center;gap:5px;margin-bottom:3px;font-size:10px;font-weight:600;letter-spacing:.06em;color:var(--ok-ink)}
+
 .st-grid{display:grid;grid-template-columns:auto 40px auto 40px;column-gap:8px;row-gap:0;align-items:baseline;font-family:var(--mono);font-size:11px}
 .st-grid .k{color:rgba(255,255,255,.5)}
 .st-grid .v{color:rgba(255,255,255,.95);text-align:right;white-space:nowrap}
 /* density follows the tile's own width, not the column count:
    <160px nothing fits · 160–229 compact rows · >=230 full readout + LIVE head */
 @container (max-width:159px){.tile-stats{display:none!important}}
-@container (min-width:230px){.tile-stats{max-height:none;overflow:visible}.st-head{display:flex}}
-.tile.zoomed .st-head{display:flex}
+@container (min-width:230px){.tile-stats{max-height:none;overflow:visible}}
 .tile.zoomed .tile-stats{max-height:none;overflow:visible}
 /* codec placeholder centred (fades out while stats are on) */
 .tile-idle{position:absolute;inset:0;z-index:1;display:flex;align-items:center;justify-content:center;text-align:center;font-family:var(--mono);font-size:var(--fs11);color:rgba(255,255,255,.26);padding:0 var(--sp12);pointer-events:none;transition:opacity .15s}
@@ -465,7 +470,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .play-ctl .iconbtn{width:34px;height:34px;font-size:15px}
 /* ---- Live: slim real-time bridge (recorded review lives in Playback) ---- */
 .live-bridge{display:flex;align-items:center;gap:var(--sp12);border-top:1px solid var(--bd);background:var(--surface);padding:var(--sp8) var(--sp16)}
-/* v1.39: status cluster aligns to the single --ctl-h token (C54); badge/clock no longer mismatched. */
+/* v1.44: status cluster aligns to the single --ctl-h token (C54); badge/clock no longer mismatched. */
 .live-badge{display:inline-flex;align-items:center;gap:var(--sp6);height:var(--ctl-h);padding:0 var(--sp8);font-size:var(--fs11);font-weight:600;letter-spacing:.5px;color:var(--ok-ink);background:var(--ok-tint);border:1px solid var(--ok);border-radius:var(--r6)}
 .live-clock{display:inline-flex;align-items:center;height:var(--ctl-h);font-size:var(--fs12);font-weight:600;color:var(--tx1)}
 .bridge-note{font-size:var(--fs11);color:var(--tx3)}
@@ -737,10 +742,10 @@ body[data-badge="on"] #proto-bar{display:flex}
   .board-row{grid-template-columns:1fr;gap:var(--sp6)}
   .tower-grid{grid-template-columns:1fr}
 }
-/* ---- Responsive audit fix (v1.39): below 1500px the side panels become overlay drawers so the
+/* ---- Responsive audit fix (v1.44): below 1500px the side panels become overlay drawers so the
    center wall keeps FULL width instead of being squeezed between two fixed columns. Above 1500px
    they remain grid columns. Open panels show as drawers; collapsed stay hidden (R7). ---- */
-/* v1.39: keep the integrated 3-column look at desktop widths; only narrow (<1200) uses drawers.
+/* v1.44: keep the integrated 3-column look at desktop widths; only narrow (<1200) uses drawers.
    Mid widths (1201–1500) slim the side panels so both-open never squeezes the wall. */
 @media (min-width:1201px) and (max-width:1500px){
   #live-layout{--rail-w:210px;--alerts-w:260px}
@@ -800,6 +805,34 @@ body[data-badge="on"] #proto-bar{display:flex}
 .region-collapse .ic,.pin-btn .ic{width:14px;height:14px}
 #guardTip.neutral{border-color:var(--bd2)}
 #guardTip.neutral .gt-ico{display:none}
+/* v1.44 per-tile (stage) container queries: overlays adapt to the video box, never overlap. */
+/* v1.44: overlays anchor the whole player (cell) so letterbox bars are used; per-cell CQ prevents
+   overlap; idle (in-stage) keeps its own stage CQ. */
+@container cell (max-width:320px){
+  .tile-drift{display:none}
+  .tile .tile-stats{display:none}
+}
+@container cell (max-width:230px){
+  .tile-bar{font-size:10px}
+  .tile-btn{width:22px;height:22px}
+  .tile-btn svg.ic{width:12px;height:12px}
+}
+@container tile (max-width:230px){
+  .tile-idle{display:none}
+}
+/* v1.44 layout picker gallery: icon thumbnails (Synology-style), grouped, keyboard-navigable. */
+.combo.open .combo-pop{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp4);width:300px;max-width:320px}
+.combo-pop .combo-opt{flex-direction:column;align-items:center;height:auto;padding:var(--sp6);gap:4px;margin-bottom:0;position:relative}
+.combo-pop .combo-sep{grid-column:1/-1;height:1px;margin:0}
+.lo-thumb{display:grid;gap:1px;width:48px;height:32px}
+.lo-thumb i{background:var(--bd2);border-radius:1px;min-width:0;min-height:0}
+.lo-thumb i.big{background:var(--accent)}
+.lo-thumb.lo-auto{place-items:center}
+.lo-thumb.lo-auto .ic{width:20px;height:20px;color:var(--tx2)}
+.lo-label{font-size:10px;color:var(--tx2);font-family:var(--mono)}
+.combo-opt[aria-selected="true"] .lo-thumb i{background:var(--accent)}
+.combo-opt[aria-selected="true"] .lo-label{color:var(--accent-ink);font-weight:600}
+.combo-pop .opt-check{position:absolute;top:2px;right:2px;width:10px;height:10px;margin:0}
 </style>
 </head>
 <body>
@@ -854,7 +887,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <nav id="sidebar" aria-label="Portal navigation">
       <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation">⟨</button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.39 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.44 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -880,7 +913,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.39</span> · prototype watermark · drag to move</div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.44</span> · prototype watermark · drag to move</div>
 <div class="toast" id="toast"></div>
 <div id="guardTip" role="tooltip" aria-hidden="true"></div>
 <div id="devtools">
@@ -897,7 +930,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.39</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.44</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -1009,10 +1042,13 @@ const LAYOUTS=[
  {id:'1+3',name:'1+3',cols:2,rows:3,slots:['big','s1','s2','s3'],areas:['big s1','big s2','big s3']},
  {id:'1+5',name:'1+5',cols:3,rows:3,slots:['big','s1','s2','s3','s4','s5'],areas:['big big s1','big big s2','s3 s4 s5']},
  {id:'1+7',name:'1+7',cols:4,rows:3,slots:['big','s1','s2','s3','s4','s5','s6','s7','s8'],areas:['big big s1 s2','big big s3 s4','s5 s6 s7 s8']},
+ {id:'1+9',name:'1+9',cols:5,rows:3,slots:['big','s1','s2','s3','s4','s5','s6','s7','s8','s9'],areas:['big big s1 s2 s3','big big s4 s5 s6','big big s7 s8 s9']},
+ {id:'1+12',name:'1+12',cols:6,rows:3,slots:['big','s1','s2','s3','s4','s5','s6','s7','s8','s9','s10','s11','s12'],areas:['big big s1 s2 s3 s4','big big s5 s6 s7 s8','big big s9 s10 s11 s12']},
+ symLayout('25',25),symLayout('36',36),
  {id:'custom',name:'Custom',cols:4,rows:0,slots:null,areas:null,elastic:true}
 ];
 let layoutId=(()=>{try{const v=localStorage.getItem('ms_mon_layout');return (v==='auto'||LAYOUTS.some(l=>l.id===v))?v:'9';}catch(_){return '9';}})();
-/* E (v1.39): single layout control. 'auto' = template picked by stream count, live-re-evaluated;
+/* E (v1.44): single layout control. 'auto' = template picked by stream count, live-re-evaluated;
    manual ids = fixed template. Width responsiveness is built-in (minmax 230px), not a user mode. */
 const autoTemplateId=n=>n<=1?'1':n<=4?'4':n<=6?'1+5':n<=9?'9':'16';
 const layout=()=>layoutId==='auto'?(LAYOUTS.find(l=>l.id===autoTemplateId(selected.length))||LAYOUTS[2]):(LAYOUTS.find(l=>l.id===layoutId)||LAYOUTS[2]);
@@ -1035,7 +1071,7 @@ function buildPages(){
  const m=$('#main');m.innerHTML='';
  const mk=(id,html)=>{const s=document.createElement('section');s.className='page';s.id='page-'+id;s.innerHTML=html;m.appendChild(s);};
  mk('overview',head('Overview','Fleet health at a glance','<button class="btn btn-sm" id="ovRefresh">↻ Refresh</button>')+`<div class="page-body"><div class="stats" id="ovStats"></div><div class="grid" style="grid-template-columns:1.4fr 1fr;margin-top:16px"><div class="card"><div class="card-title">Alerts · last 24 h</div><div id="ovAlerts"></div></div><div class="card"><div class="card-title">Quick check <span class="chip">≤4 tiles</span></div><div class="mini-wall" id="ovQuick" style="height:220px"></div><div style="margin-top:10px;font-size:11px;color:var(--tx3)">Multi-tile wall monitoring lives in <a href="#" data-goto="monitor">Monitor</a> / <a href="#" data-goto="tower">Tower</a>.</div></div></div></div>`);
- mk('monitor',head('Monitor Center','Surveillance wall + timeline review','')+`<div id="live-layout"><aside class="stream-rail"><div class="rail-head"><div class="rail-headrow"><div class="rail-title">Selected streams</div><div class="spacer"></div><button class="iconbtn pin-btn" id="railPin" title="Pin panel (dock when wide)" aria-label="Pin left panel"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button><button class="iconbtn region-collapse" id="railCollapse" title="Hide left panel" aria-label="Hide left panel"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button></div><button class="btn btn-primary btn-block" id="openPicker">＋ Select streams</button></div><div class="rail-list" id="railList"></div><div class="rail-foot" id="railFoot"></div></aside><div class="canvas"><div class="stage-bar"><div class="tb-group"><button class="iconbtn" id="railToggle" title="Show / hide left panel" aria-label="Toggle left panel"><svg class="ic" aria-hidden="true"><use href="#i-panel-left"/></svg></button><button class="iconbtn" id="alertsToggle" title="Show / hide alerts panel" aria-label="Toggle alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-panel-right"/></svg><span class="al-badge" id="alBadge">5</span></button><button class="iconbtn" id="tlToggle" title="Show / hide timeline" aria-label="Toggle timeline"><svg class="ic" aria-hidden="true"><use href="#i-timeline"/></svg></button></div><div class="tb-sep"></div><div class="tb-group"><div class="combo" id="colsCombo"><button class="combo-trigger" id="colsTrigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="colsPop" aria-label="Wall layout" title="Wall layout"><span class="combo-value" id="colsValue">Layout 9</span><span class="caret">▾</span></button><ul class="combo-pop" id="colsPop" role="listbox"><li class="combo-opt" role="option" data-layout="auto" aria-selected="false"><span>Auto · by count</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-sep" role="separator"></li><li class="combo-opt" role="option" data-layout="1" aria-selected="false"><span>1 · single</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="4" aria-selected="false"><span>4 · 2×2</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="9" aria-selected="true"><span>9 · 3×3</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="16" aria-selected="false"><span>16 · 4×4</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+3" aria-selected="false"><span>1+3 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+5" aria-selected="false"><span>1+5 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-opt" role="option" data-layout="1+7" aria-selected="false"><span>1+7 · featured</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li><li class="combo-sep" role="separator"></li><li class="combo-opt" role="option" data-layout="custom" aria-selected="false"><span>Custom · elastic</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li></ul></div><div class="pager"><button id="pgPrev" title="Previous page" aria-label="Previous page"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span class="pg-label" id="pgLabel">1 / 1</span><button id="pgNext" title="Next page" aria-label="Next page"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><button class="iconbtn" id="carouselToggle" title="Carousel: auto-cycle pages (off)" aria-label="Toggle carousel" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button><div class="spin" id="carouselSpin" title="Carousel interval"><button data-c="-1" title="Shorter interval" aria-label="Shorter interval"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="carouselVal">5s</span><button data-c="1" title="Longer interval" aria-label="Longer interval"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div></div><div class="tb-sep"></div><div class="tb-group tb-status"><button class="chip-btn warn-chip" id="healthChip" hidden aria-label="Problem streams — click to focus"></button><span class="live-badge" id="liveBadge"><span class="g g-online"></span>LIVE</span><span class="live-clock mono" id="liveClock">18:43:15</span></div><div class="spacer"></div><div class="tb-group"><button class="iconbtn on" id="syncBtn" title="Sync drift display across streams" aria-label="Toggle drift sync" aria-pressed="true"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg></button><button class="iconbtn" id="statsToggle" title="Stream statistics" aria-label="Toggle stream statistics"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg></button></div></div><div class="error-banner" id="liveStale"><span class="g g-warn"></span>Stream list is stale. Showing the last known state.<div class="spacer"></div><button class="btn btn-sm" id="liveRetry">Retry</button></div><div class="wall-scroll" id="wallScroll"><div class="tiles" id="tiles" style="--cols:3"></div><div id="wallLoading"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="stage-empty" id="stageEmpty"><div class="big">▣</div><h2>No streams selected</h2><p>Pick devices and streams from the left rail to start monitoring.</p><button class="btn btn-primary" id="emptyPicker">＋ Select streams</button></div></div><div class="ctl-bar"><div class="ctl-top"><div class="tb-group"><span class="ctl-time mono" id="ctlTime">18:43:15</span><div class="spin" id="winSpin"><button data-w="-1" title="Wider time window" aria-label="Wider time window"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="zoomVal">24h</span><button data-w="1" title="Narrower time window" aria-label="Narrower time window"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div><div class="ctl-date"><div class="date-nav"><button id="dayPrev" title="Previous day" aria-label="Previous day"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span id="calBtn">2026-11-13</span><button id="dayNext" title="Next day" aria-label="Next day"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="cal-pop" id="calPop" hidden><div class="cal-head"><button class="cal-nav" id="calPrev" title="Previous month" aria-label="Previous month"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span id="calMonth">November 2026</span><button class="cal-nav" id="calNext" title="Next month" aria-label="Next month"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="cal-grid" id="calGrid"></div><div class="cal-foot"><input id="calTime" value="18:43" aria-label="Jump to time"><button class="btn btn-sm" id="calGo">Go</button></div></div></div></div><div class="spacer"></div><div class="tb-group"><div class="spin" id="speedSpin"><button data-s="-1" title="Slower" aria-label="Slower"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="speedVal">1×</span><button data-s="1" title="Faster" aria-label="Faster"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div></div><div class="tb-sep"></div><div class="tb-group"><button class="iconbtn" id="pbSyncChip" title="Sync-seek: all cameras play the same wall-clock time" aria-label="Sync-seek indicator"><svg class="ic" aria-hidden="true"><use href="#i-link"/></svg></button><button class="iconbtn" id="soloBtn" title="Solo time: each zoomed channel keeps its own playhead" aria-label="Toggle solo time" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg></button><button class="btn-live" id="liveBtn" title="Jump to the live edge">LIVE</button></div><div class="tb-sep"></div><div class="tb-group"><button class="iconbtn" id="toPlayback" title="Open Recordings library" aria-label="Open Recordings library"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg></button><button class="iconbtn region-collapse" id="tlCollapse" title="Hide timeline" aria-label="Hide timeline"><svg class="ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></div></div><div class="ctl-bot"><div class="tl-track" id="tlTrack"></div><div class="play-ctl"><button class="iconbtn" id="btnRew" aria-label="Play backwards" title="Play backwards"><svg class="ic" aria-hidden="true"><use href="#i-rew"/></svg></button><button class="iconbtn" id="btnPause" aria-label="Pause" title="Pause / play"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg></button><button class="iconbtn" id="btnFwd" aria-label="Play forwards" title="Play forwards"><svg class="ic" aria-hidden="true"><use href="#i-fwd"/></svg></button></div><div class="tl-scale" id="tlScale"></div></div></div></div><aside class="mon-alerts" id="monAlerts"><div class="al-head"><span class="al-title">Alerts</span><span class="al-unread" id="alUnread">5</span><div class="spacer"></div><button class="chip-btn al-arm" id="alarmWallToggle" aria-pressed="false" title="Alarm-to-wall: auto-focus the wall on new alarms/motion (default off)">Auto-wall</button><button class="iconbtn pin-btn" id="alertsPin" title="Pin panel (dock when wide)" aria-label="Pin alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button><button class="iconbtn region-collapse" id="alCollapse" title="Hide alerts panel" aria-label="Hide alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="al-filter" id="alFilter"><button class="al-chip on" data-f="all">All</button><button class="al-chip" data-f="motion">Motion</button><button class="al-chip" data-f="alarm">Alarm</button><button class="al-chip" data-f="bookmark">Bookmark</button></div><div class="al-list" id="alList"></div><div class="al-foot"><button class="btn btn-sm btn-block" id="alMarkAll">Mark all read</button></div></aside></div>`);
+ mk('monitor',head('Monitor Center','Surveillance wall + timeline review','')+`<div id="live-layout"><aside class="stream-rail"><div class="rail-head"><div class="rail-headrow"><div class="rail-title">Selected streams</div><div class="spacer"></div><button class="iconbtn pin-btn" id="railPin" title="Pin panel (dock when wide)" aria-label="Pin left panel"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button><button class="iconbtn region-collapse" id="railCollapse" title="Hide left panel" aria-label="Hide left panel"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button></div><button class="btn btn-primary btn-block" id="openPicker">＋ Select streams</button></div><div class="rail-list" id="railList"></div><div class="rail-foot" id="railFoot"></div></aside><div class="canvas"><div class="stage-bar"><div class="tb-group"><button class="iconbtn" id="railToggle" title="Show / hide left panel" aria-label="Toggle left panel"><svg class="ic" aria-hidden="true"><use href="#i-panel-left"/></svg></button><button class="iconbtn" id="alertsToggle" title="Show / hide alerts panel" aria-label="Toggle alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-panel-right"/></svg><span class="al-badge" id="alBadge">5</span></button><button class="iconbtn" id="tlToggle" title="Show / hide timeline" aria-label="Toggle timeline"><svg class="ic" aria-hidden="true"><use href="#i-timeline"/></svg></button></div><div class="tb-sep"></div><div class="tb-group"><div class="combo" id="colsCombo"><button class="combo-trigger" id="colsTrigger" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="colsPop" aria-label="Wall layout" title="Wall layout"><span class="combo-value" id="colsValue">Layout 9</span><span class="caret">▾</span></button><ul class="combo-pop" id="colsPop" role="listbox"></ul></div><div class="pager"><button id="pgPrev" title="Previous page" aria-label="Previous page"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span class="pg-label" id="pgLabel">1 / 1</span><button id="pgNext" title="Next page" aria-label="Next page"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><button class="iconbtn" id="carouselToggle" title="Carousel: auto-cycle pages (off)" aria-label="Toggle carousel" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-refresh"/></svg></button><div class="spin" id="carouselSpin" title="Carousel interval"><button data-c="-1" title="Shorter interval" aria-label="Shorter interval"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="carouselVal">5s</span><button data-c="1" title="Longer interval" aria-label="Longer interval"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div></div><div class="tb-sep"></div><div class="tb-group tb-status"><button class="chip-btn warn-chip" id="healthChip" hidden aria-label="Problem streams — click to focus"></button><span class="live-badge" id="liveBadge"><span class="g g-online"></span>LIVE</span><span class="live-clock mono" id="liveClock">18:43:15</span></div><div class="spacer"></div><div class="tb-group"><button class="iconbtn on" id="syncBtn" title="Sync drift display across streams" aria-label="Toggle drift sync" aria-pressed="true"><svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg></button><button class="iconbtn" id="statsToggle" title="Stream statistics" aria-label="Toggle stream statistics"><svg class="ic" aria-hidden="true"><use href="#i-info"/></svg></button></div></div><div class="error-banner" id="liveStale"><span class="g g-warn"></span>Stream list is stale. Showing the last known state.<div class="spacer"></div><button class="btn btn-sm" id="liveRetry">Retry</button></div><div class="wall-scroll" id="wallScroll"><div class="tiles" id="tiles" style="--cols:3"></div><div id="wallLoading"><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div><div class="stage-empty" id="stageEmpty"><div class="big">▣</div><h2>No streams selected</h2><p>Pick devices and streams from the left rail to start monitoring.</p><button class="btn btn-primary" id="emptyPicker">＋ Select streams</button></div></div><div class="ctl-bar"><div class="ctl-top"><div class="tb-group"><span class="ctl-time mono" id="ctlTime">18:43:15</span><div class="spin" id="winSpin"><button data-w="-1" title="Wider time window" aria-label="Wider time window"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="zoomVal">24h</span><button data-w="1" title="Narrower time window" aria-label="Narrower time window"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div><div class="ctl-date"><div class="date-nav"><button id="dayPrev" title="Previous day" aria-label="Previous day"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span id="calBtn">2026-11-13</span><button id="dayNext" title="Next day" aria-label="Next day"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="cal-pop" id="calPop" hidden><div class="cal-head"><button class="cal-nav" id="calPrev" title="Previous month" aria-label="Previous month"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button><span id="calMonth">November 2026</span><button class="cal-nav" id="calNext" title="Next month" aria-label="Next month"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="cal-grid" id="calGrid"></div><div class="cal-foot"><input id="calTime" value="18:43" aria-label="Jump to time"><button class="btn btn-sm" id="calGo">Go</button></div></div></div></div><div class="spacer"></div><div class="tb-group"><div class="spin" id="speedSpin"><button data-s="-1" title="Slower" aria-label="Slower"><svg class="ic" aria-hidden="true"><use href="#i-minus"/></svg></button><span class="spin-val" id="speedVal">1×</span><button data-s="1" title="Faster" aria-label="Faster"><svg class="ic" aria-hidden="true"><use href="#i-plus"/></svg></button></div></div><div class="tb-sep"></div><div class="tb-group"><button class="iconbtn" id="pbSyncChip" title="Sync-seek: all cameras play the same wall-clock time" aria-label="Sync-seek indicator"><svg class="ic" aria-hidden="true"><use href="#i-link"/></svg></button><button class="iconbtn" id="soloBtn" title="Solo time: each zoomed channel keeps its own playhead" aria-label="Toggle solo time" aria-pressed="false"><svg class="ic" aria-hidden="true"><use href="#i-clock"/></svg></button><button class="btn-live" id="liveBtn" title="Jump to the live edge">LIVE</button></div><div class="tb-sep"></div><div class="tb-group"><button class="iconbtn" id="toPlayback" title="Open Recordings library" aria-label="Open Recordings library"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg></button><button class="iconbtn region-collapse" id="tlCollapse" title="Hide timeline" aria-label="Hide timeline"><svg class="ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button></div></div><div class="ctl-bot"><div class="tl-track" id="tlTrack"></div><div class="play-ctl"><button class="iconbtn" id="btnRew" aria-label="Play backwards" title="Play backwards"><svg class="ic" aria-hidden="true"><use href="#i-rew"/></svg></button><button class="iconbtn" id="btnPause" aria-label="Pause" title="Pause / play"><svg class="ic" aria-hidden="true"><use href="#i-pause"/></svg></button><button class="iconbtn" id="btnFwd" aria-label="Play forwards" title="Play forwards"><svg class="ic" aria-hidden="true"><use href="#i-fwd"/></svg></button></div><div class="tl-scale" id="tlScale"></div></div></div></div><aside class="mon-alerts" id="monAlerts"><div class="al-head"><span class="al-title">Alerts</span><span class="al-unread" id="alUnread">5</span><div class="spacer"></div><button class="chip-btn al-arm" id="alarmWallToggle" aria-pressed="false" title="Alarm-to-wall: auto-focus the wall on new alarms/motion (default off)">Auto-wall</button><button class="iconbtn pin-btn" id="alertsPin" title="Pin panel (dock when wide)" aria-label="Pin alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-pin"/></svg></button><button class="iconbtn region-collapse" id="alCollapse" title="Hide alerts panel" aria-label="Hide alerts panel"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="al-filter" id="alFilter"><button class="al-chip on" data-f="all">All</button><button class="al-chip" data-f="motion">Motion</button><button class="al-chip" data-f="alarm">Alarm</button><button class="al-chip" data-f="bookmark">Bookmark</button></div><div class="al-list" id="alList"></div><div class="al-foot"><button class="btn btn-sm btn-block" id="alMarkAll">Mark all read</button></div></aside></div>`);
  mk('recordings',head('Recordings library','Search, bookmarks & export','<button class="btn btn-sm" id="pbBackLive" title="Return to the monitor wall">← Back to Monitor</button><button class="btn btn-sm" id="pbExport" title="Export the selected clip">Export clip</button>')+`<div class="page-body rec-body"><div class="honesty"><span class="g g-warn"></span>Recording + sync-seek backend not landed yet (recording-recon). The clip list shows event-based design samples; recorded playback and export stay honestly disabled until it lands.</div><div class="rec-toolbar"><div class="search rec-search"><svg class="ic" aria-hidden="true"><use href="#i-search"/></svg><input id="recQ" type="text" placeholder="Search camera, event or time…" aria-label="Search recordings"></div><div class="rec-filters" id="recType"><button class="al-chip on" data-t="all">All</button><button class="al-chip" data-t="motion">Motion</button><button class="al-chip" data-t="alarm">Alarm</button><button class="al-chip" data-t="continuous">Continuous</button><button class="al-chip" data-t="bookmark">Bookmark</button></div><button class="chip-btn" id="recBmOnly" aria-pressed="false" title="Show bookmarked only"><svg class="ic" aria-hidden="true"><use href="#i-star"/></svg> Bookmarked</button></div><div class="rec-layout"><div class="rec-list" id="recList"></div><aside class="rec-player" id="recPlayer"></aside></div></div>`);
  mk('intercom',head('Intercom board','Floor control across groups','<span class="chip">capability: floor ✓</span><div class="toggle on" id="cueToggle"><span class="sw"></span>Cues</div>')+`<div class="page-body"><div id="boardWrap"><div id="boardList"></div><div class="canvas-foot" style="border:1px solid var(--bd);border-radius:8px;margin-top:8px"><span class="legend"><span class="g g-online"></span>Held</span><span class="legend"><span class="segbar"><i class="f"></i><i class="f"></i><i></i></span>Queued</span><span class="legend"><span class="g g-offline"></span>Idle</span><div class="spacer"></div><span>Click a group to enter · hold Space / PTT to talk · Esc back</span></div></div><div id="chanView" hidden></div></div>`);
  mk('meeting',head('Meeting','Multi-party conferences','<button class="btn btn-primary btn-sm" id="newMeet">＋ New meeting</button>')+`<div class="page-body"><div class="grid" id="meetGrid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))"></div></div>`);
@@ -1110,15 +1146,15 @@ function renderWall(){
  t.classList.toggle('has-zoomed',!!zoomed);t.classList.toggle('layout-grid',!zoomed&&!elastic);t.classList.toggle('elastic-grid',elastic);
  if(zoomed){t.style.gridTemplateAreas='none';t.style.gridTemplateColumns='1fr';t.style.gridTemplateRows='auto';t.style.gridAutoFlow='row';t.style.setProperty('--cols',1);}
  else if(elastic){t.style.gridTemplateAreas='none';t.style.gridTemplateColumns=colWeights.slice(0,L.cols).map(w=>`minmax(230px,${w}fr)`).join(' ');t.style.gridTemplateRows='none';t.style.gridAutoFlow='dense';t.style.setProperty('--cols',L.cols);}
- else if(isSymLayout(L)){t.style.gridTemplateAreas='none';t.style.gridAutoFlow='row';t.style.setProperty('--cols',L.cols);t.style.gridTemplateColumns=`repeat(${L.cols},minmax(230px,1fr))`;t.style.gridTemplateRows='repeat(2,auto)';t.style.minWidth='';}
- else{t.style.gridAutoFlow='row';t.style.setProperty('--cols',L.cols);t.style.setProperty('--rows',L.rows);t.style.gridTemplateColumns=`repeat(${L.cols},minmax(230px,1fr))`;t.style.gridTemplateRows=`repeat(${L.rows},auto)`;t.style.gridTemplateAreas=L.areas.map(r=>`"${r}"`).join(' ');}
+ else if(isSymLayout(L)){t.style.gridTemplateAreas='none';t.style.gridAutoFlow='row';t.style.setProperty('--cols',L.cols);t.style.gridTemplateColumns=`repeat(${L.cols},minmax(230px,1fr))`;t.style.gridTemplateRows='repeat(2,minmax(0,1fr))';t.style.minWidth='';}
+ else{t.style.gridAutoFlow='row';t.style.setProperty('--cols',L.cols);t.style.setProperty('--rows',L.rows);t.style.gridTemplateColumns=`repeat(${L.cols},minmax(230px,1fr))`;t.style.gridTemplateRows=`repeat(${L.rows},minmax(0,1fr))`;t.style.gridTemplateAreas=L.areas.map(r=>`"${r}"`).join(' ');}
  const start=page*pageSize(),slice=zoomed?[zoomedId]:selected.slice(start,start+pageSize());t.innerHTML='';
  slice.forEach((id,i)=>{const s=STREAMS[id];if(!s)return;const dead=s.state==='offline';const el=document.createElement('div');
  el.className='tile'+(id===activeStream?' selected':'')+(s.state==='degraded'?' degraded':'')+(dead?' dead':'')+(zoomed&&id===zoomedId?' zoomed':'');
  el.dataset.stream=id;if(!zoomed){el.draggable=true;if(elastic){const sp=tileSpans[id]?2:1;el.style.gridColumn='span '+sp;el.style.gridRow='span '+sp;}else if(!isSymLayout(L)&&L.slots&&L.slots[i])el.style.gridArea=L.slots[i];}
  const lat=dead?'—':Math.abs(s.drift)+' ms',dec=dead?'—':(s.jit/9).toFixed(1)+' ms',bitShort=s.bit.replace(' Mbps','M').replace(' kbps','k');
  const sizeBtn=elastic?'<button class="tile-btn size-b'+(tileSpans[id]?' on':'')+'" type="button" aria-label="'+(tileSpans[id]?'Shrink to 1×1':'Enlarge to 2×2')+'" data-tip="'+(tileSpans[id]?'Shrink to 1×1':'Enlarge to 2×2')+'"><svg class="ic" aria-hidden="true"><use href="#i-resize"/></svg></button>':'';
- el.innerHTML=`<div class="tile-media" ${dead?'data-reason="No signal on this camera — nothing to region-zoom. Reconnect the stream first."':''} style="background:${feedBg(s,start+i)}"></div><div class="tile-scan"></div><div class="tile-bar"><span class="tile-name">${s.device} · ${s.label}</span><div class="spacer"></div><span class="tile-drift mono">${driftTxt(s)}</span>${glyph(s.state)}</div><div class="tile-actions">${sizeBtn}<button class="tile-btn zoom-b" type="button" aria-label="${zoomed?'Exit zoom':'Zoom'}" data-tip="${zoomed?'Exit zoom':'Zoom'}"><svg class="ic" aria-hidden="true"><use href="${zoomed?'#i-zoom-out':'#i-zoom'}"/></svg></button><button class="tile-btn del" type="button" aria-label="Remove from grid" data-tip="Remove from grid"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="tile-stats"><div class="st-head">${glyph(s.state)} ${s.state.toUpperCase()}</div><div class="st-grid"><span class="k">FPS</span><span class="v">${s.fps}</span><span class="k">RES</span><span class="v">${s.res}</span><span class="k">BIT</span><span class="v">${bitShort}</span><span class="k">JIT</span><span class="v">${s.jit} ms</span><span class="k">LAT</span><span class="v">${lat}</span><span class="k">RTT</span><span class="v">${s.rtt} ms</span><span class="k">DEC</span><span class="v">${dec}</span><span class="k">LOSS</span><span class="v">${s.loss}%</span></div></div><div class="tile-idle">${dead?'reconnecting — last frame 2 min ago':s.codec+' · '+s.res+' · '+s.fps+' fps · '+s.bit}</div><span class="tile-live ${dead?'outline':'solid'}">${dead?'□ OFF':'■ LIVE'}</span>${dead?'<div class="deadmsg"><span class="g g-offline"></span>SIGNAL LOST</div>':''}`;
+ el.innerHTML=`<div class="tile-stage"><div class="tile-media" ${dead?'data-reason="No signal on this camera — nothing to region-zoom. Reconnect the stream first."':''} style="background:${feedBg(s,start+i)}"></div><div class="tile-scan"></div><div class="tile-idle">${dead?'reconnecting — last frame 2 min ago':s.codec+' · '+s.res+' · '+s.fps+' fps · '+s.bit}</div>${dead?'<div class="deadmsg"><span class="g g-offline"></span>SIGNAL LOST</div>':''}</div><div class="tile-bar"><span class="tile-name">${s.device} · ${s.label}</span><div class="spacer"></div><span class="tile-drift mono">${driftTxt(s)}</span>${glyph(s.state)}</div><div class="tile-actions">${sizeBtn}<button class="tile-btn zoom-b" type="button" aria-label="${zoomed?'Exit zoom':'Zoom'}" data-tip="${zoomed?'Exit zoom':'Zoom'}"><svg class="ic" aria-hidden="true"><use href="${zoomed?'#i-zoom-out':'#i-zoom'}"/></svg></button><button class="tile-btn del" type="button" aria-label="Remove from grid" data-tip="Remove from grid"><svg class="ic" aria-hidden="true"><use href="#i-close"/></svg></button></div><div class="tile-stats"><div class="st-grid"><span class="k">FPS</span><span class="v">${s.fps}</span><span class="k">RES</span><span class="v">${s.res}</span><span class="k">BIT</span><span class="v">${bitShort}</span><span class="k">JIT</span><span class="v">${s.jit} ms</span><span class="k">LAT</span><span class="v">${lat}</span><span class="k">RTT</span><span class="v">${s.rtt} ms</span><span class="k">DEC</span><span class="v">${dec}</span><span class="k">LOSS</span><span class="v">${s.loss}%</span></div></div><span class="tile-live ${dead?'outline':'solid'}">${dead?'□ OFF':'■ LIVE'}</span>`;
  el.onclick=e=>{if(e.target.closest('.del')){removeStream(id);return;}if(e.target.closest('.zoom-b')){zoomedId=(zoomed&&id===zoomedId)?null:id;renderWall();return;}if(!zoomed){activeStream=id;renderWall();renderRail();}};
  const sb=el.querySelector('.size-b');if(sb)sb.onclick=e=>{e.stopPropagation();tileSpans[id]=!tileSpans[id];saveSpans();renderWall();};
  t.appendChild(el);});
@@ -1224,6 +1260,7 @@ function initMonPanels(){
  const aDef=alerts==null?false:alerts==='1';
  const tDef=tl==null?true:tl==='1';
  setRailOpen(rDef,false);setAlertsOpen(aDef,false);setTimelineOpen(tDef,false);syncAlertBadges();syncRegionUI();
+ renderLayoutPicker();
  const cv=$('#colsValue');if(cv)cv.textContent=layoutId==='auto'?'Auto · '+layout().name:'Layout '+layout().name;document.querySelectorAll('#colsPop .combo-opt').forEach(o=>o.setAttribute('aria-selected',String(o.dataset.layout===layoutId)));
 }
 function wireRegions(){
@@ -1684,6 +1721,26 @@ function applyPlaybackGuards(){
 }
 /* ================= COLUMN COMBOBOX (accessible listbox) ================= */
 function setComboOpen(open){const c=$('#colsCombo');if(!c)return;c.classList.toggle('open',open);const tr=$('#colsTrigger');if(tr)tr.setAttribute('aria-expanded',String(open));if(!open)c.querySelectorAll('.combo-opt.is-active').forEach(o=>o.classList.remove('is-active'));}
+/* v1.44: layout picker = icon-thumbnail gallery (Synology-style), built from LAYOUTS. */
+function layoutThumb(L){
+ if(L.id==='auto')return '<span class="lo-thumb lo-auto"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg></span>';
+ if(L.elastic){let c='<i class="big" style="grid-column:1/3;grid-row:1/3"></i>';for(let k=0;k<12;k++)c+='<i></i>';return '<span class="lo-thumb" style="grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr);grid-auto-flow:dense">'+c+'</span>';}
+ if(isSymLayout(L)){const n=L.cols;let c='';for(let k=0;k<n*n;k++)c+='<i></i>';return '<span class="lo-thumb" style="grid-template-columns:repeat('+n+',1fr);grid-template-rows:repeat('+n+',1fr)">'+c+'</span>';}
+ const sp={'1+3':[2,3,1,3],'1+5':[3,3,2,2],'1+7':[4,3,2,2],'1+9':[5,3,2,3],'1+12':[6,3,2,3]}[L.id]||[L.cols,L.rows,2,2];
+ let c='<i class="big" style="grid-column:1/'+(sp[2]+1)+';grid-row:1/'+(sp[3]+1)+'"></i>';
+ for(let k=0;k<L.slots.length-1;k++)c+='<i></i>';
+ return '<span class="lo-thumb" style="grid-template-columns:repeat('+sp[0]+',1fr);grid-template-rows:repeat('+sp[1]+',1fr);grid-auto-flow:dense">'+c+'</span>';
+}
+function renderLayoutPicker(){
+ const pop=$('#colsPop');if(!pop)return;
+ const opt=(id,label,thumb)=>'<li class="combo-opt" role="option" data-layout="'+id+'" aria-selected="'+(layoutId===id)+'">'+thumb+'<span class="lo-label">'+label+'</span><svg class="ic opt-check" aria-hidden="true"><use href="#i-check"/></svg></li>';
+ let h=opt('auto','Auto',layoutThumb({id:'auto'}))+'<li class="combo-sep" role="separator"></li>';
+ ['1','4','9','16','25','36'].forEach(id=>{h+=opt(id,id,layoutThumb(LAYOUTS.find(x=>x.id===id)));});
+ h+='<li class="combo-sep" role="separator"></li>';
+ ['1+3','1+5','1+7','1+9','1+12'].forEach(id=>{h+=opt(id,id,layoutThumb(LAYOUTS.find(x=>x.id===id)));});
+ h+='<li class="combo-sep" role="separator"></li>'+opt('custom','Custom',layoutThumb(LAYOUTS.find(x=>x.id==='custom')));
+ pop.innerHTML=h;
+}
 function chooseLayout(id){if(id!=='auto'&&!LAYOUTS.some(l=>l.id===id))return;layoutId=id;const L=layout();cols=L.cols;page=0;zoomedId=null;try{localStorage.setItem('ms_mon_layout',id);}catch(_){}document.querySelectorAll('#colsPop .combo-opt').forEach(o=>o.setAttribute('aria-selected',String(o.dataset.layout===id)));$('#colsValue').textContent=id==='auto'?'Auto · '+L.name:'Layout '+L.name;setComboOpen(false);renderWall();toast(id==='auto'?'Auto layout · '+L.name+' for '+selected.length+' streams':'Layout '+L.name);}
 function wireColsCombo(){
  const tr=$('#colsTrigger'),pop=$('#colsPop');if(!tr||!pop)return;

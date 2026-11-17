@@ -1,5 +1,61 @@
 # Prototypes CHANGELOG
 
+## v1.44 — 2026-11-17 (portal-unified) — layout set expanded + icon-thumbnail gallery (Synology-aligned)
+User: layout options too few vs Synology and the dropdown used text not icons. Research: Synology
+offers 1/4/6/9/10/13/16/25/36/49/64/81/100 (browser cap 36, auto cap 16) via a thumbnail gallery.
+- **Expanded templates**: symmetric +25(5×5)/36(6×6); featured +1+9(10ch)/1+12(13ch); kept
+  1/4/9/16 + 1+3/1+5/1+7 + Auto + Custom. Auto stays capped at 16 (Synology auto max).
+- **Icon-thumbnail gallery**: the layout picker is now a 4-column grid of mini-grid previews
+  (featured shows the big cell in accent), grouped Auto | symmetric | featured | Custom with
+  separators; selected thumbnail highlighted + check; keyboard nav preserved (options remain
+  .combo-opt). Built dynamically from LAYOUTS (renderLayoutPicker/layoutThumb).
+- Verified: opts13/thumbs13; 25→5×5, 1+9→8 tiles, 36→6 cols with horizontal scroll; gallery render
+  shows grouped icon thumbnails; node --check + lint clean.
+
+## v1.43 — 2026-11-17 (portal-unified) — hide remove button while zoomed (adjudicated A)
+User: a zoomed (focused) player should not offer "remove from grid" — removal is a layout-edit action.
+- `.tile.zoomed .tile-actions .del{display:none}`; zoomed bar reserve narrowed to 40px (only the
+  exit-zoom button remains). Removal stays available in multi-grid (× on hover) and rail footer drag.
+- Matches Synology: focused/fullscreen channel offers view actions (exit zoom/PTZ/snapshot), not
+  "remove from layout".
+- Verified: zoomed del computed display:none, exit-zoom button visible; node --check + lint clean.
+
+## v1.42 — 2026-11-17 (portal-unified) — de-duplicate state: stats panel purely numeric (adjudicated A)
+User: the stats header state (LIVE/OFFLINE/DEGRADED) duplicated the bottom-left live badge.
+- Removed `.st-head` (state text) from the stats panel and its CSS (base + container + zoomed rules);
+  stats now shows only numeric telemetry (FPS/RES/BIT/JIT/LAT/RTT/DEC/LOSS).
+- State indication stays with the bottom-left LIVE/OFF badge (primary) + top-bar status dot (glance);
+  no triple redundancy.
+- Verified: no st-head in source; stats-on render shows numeric-only panel + live badge; node --check
+  + lint clean.
+
+## v1.41 — 2026-11-17 (portal-unified) — overlays anchor the whole player, not the inner video (adjudicated A)
+User: v1.40 put title/stats/live/actions inside the 16:9 video stage, wasting the letterbox bars and
+not putting the title at the player top. Synology anchors OSD/title/controls on the channel FRAME.
+- Moved `.tile-bar / .tile-actions / .tile-stats / .tile-live` OUT of `.tile-stage` back to the cell
+  (`.tile`): title at player top (over top bar), live at player bottom (over bottom bar), actions
+  top-right, stats top-left — letterbox space now used; video stage keeps only media+scan+idle+deadmsg.
+- `.tile` gains `container-name:cell`; overlay adaptation uses **per-cell** container queries
+  (≤320 hide drift/stats, ≤230 shrink bar/buttons); idle keeps its per-stage query. Aspect still
+  guaranteed by the stage (v1.40 core retained).
+- Verified: barAtCellTop / liveAtCellBottom / barParentCell / stageRatio 1.78; headless @1440 + featured
+  show title/live on the black bars, video letterboxed, no overlap; node --check + lint clean.
+
+## v1.40 — 2026-11-17 (portal-unified) — PlayerTile "little TV" component (adjudicated A; Synology-style)
+User: resizing the window made play controls overlap / aspect ratio break. Root cause: overlays were
+absolute children of the grid CELL (not a video stage), and cell aspect-ratio is ignored when the grid
+constrains both dimensions (featured big span); media filled the cell with no letterbox.
+- **Encapsulated PlayerTile** (Synology channel-player model): `.tile` = cell that fills its grid slot
+  (any shape, black letterbox, `container-type:size`, place-items:center); inner `.tile-stage` keeps
+  **16:9** via `width:min(100cqw, 100cqh*16/9)` and hosts media + ALL overlays (bar/actions/live/stats/
+  idle/deadmsg), so resize never distorts the picture or misplaces controls.
+- layout-grid / featured rows now `minmax(0,1fr)` (fill wall height); cell aspect:auto height:100%;
+  elastic/zoomed keep cell aspect. Removed the elastic/zoomed hover padding hacks (generic 96px reserve).
+- **Per-stage container queries** (`@container tile`): ≤320px hide drift+stats; ≤230px hide idle, shrink
+  bar/buttons — controls adapt to the video box, never overlap.
+- Verified: stageRatio 1.78 / contain:true / bigRatio 1.78 (featured); headless @1440/1100/900 show
+  letterboxed 16:9 stages with overlays anchored inside, no overlap; node --check + lint clean.
+
 ## v1.39 — 2026-11-16 (portal-unified) — layout dropdown popup polish
 User: the layout dropdown's opened popup looked bad. Analysis: right-anchored (hung left over neighbors),
 narrow (min-width=trigger), weak elevation (glow shadow invisible on dark wall), cramped 32px rows,
