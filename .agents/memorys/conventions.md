@@ -739,3 +739,8 @@ Checks:
 - 所有可选列表行（rail stream-item / picker pick-ch / pick-row / al-row / rec-row / board-row）统一**卡片行**：1px bd 边框 + r6 + sp8 padding + sp2 间距 + hover(bd2/hover) + 选中(accent-tint/accent 边框)；resting 必须有容器信号（禁透明边框+无底"白纸平铺"）。
 - 底色按容器对比：surface 面板上用 sunken，page(sunken) 上用 surface。picker 设备组头 pick-dev 用区别横带（非卡片行）。
 - Verify: 列表行 resting computed border/background 非透明；picker 左右未选中行同底色。
+
+## C56: 导航/全局图标一律 monochrome SVG sprite、语义唯一（2026-11-16, v1.45 出生病）
+- 禁 Unicode 几何 glyph/emoji 作图标（跨平台变形/⚙变emoji/⚿缺字/不吃 currentColor/光学不齐）；一律 SVG sprite（stroke、currentColor、统一盒尺寸 place-items center）。
+- 一项一图标、语义唯一（禁重复 glyph 表不同功能）；语义对照：overview=gauge/monitor=屏阵/recordings=库播放/intercom=mic/meeting=users/remote=desktop/tower=headset/devices=camera/rooms=door/sessions=plug/streams=waveform/config=sliders/keys=key/audit=list-check/settings=gear/signaling=exchange。
+- Verify: nav/工具栏图标断言（全 SVG、href 唯一、无文本 glyph）。

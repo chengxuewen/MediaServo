@@ -1,5 +1,19 @@
 # Prototypes CHANGELOG
 
+## v1.45 — 2026-11-17 (portal-unified) — nav icons: unique semantic monochrome SVG (no glyphs/dupes)
+User: sidebar nav icons ugly, style-inconsistent, wrong meaning. Audit: all 16 were Unicode geometric
+text glyphs (◈▣▤◉◍▦▲▢≋⚙⚿≣⇄) — mixed fill/outline/line/emoji, platform-variable (⚙ emoji, ⚿ tofu risk),
+optically misaligned, ignore currentColor; 3 duplicate pairs (▤ Recordings/Devices, ◍ Meeting/Sessions,
+⚙ Config/Settings) and 6+ wrong semantics (Monitor/Intercom/Tower/Remote/Rooms/Overview).
+- Replaced all with **unique semantic monochrome SVG sprite** (stroke, currentColor, 18px in 20px box):
+  overview=gauge, monitor=2×2 screens, recordings=library-play, intercom=mic, meeting=users,
+  remote=desktop, tower=headset, devices=camera, rooms=door, sessions=plug, streams=waveform,
+  config=sliders, keys=key, audit=list-check, settings=gear, signaling=exchange.
+- `.nav-ico` now a grid-centered SVG container (optical alignment, inherits active/hover color);
+  buildNav renders `<svg><use>`; collapsed rail scales cleanly.
+- Verified: navSvg/unique(16)/count16/noGlyph assertions green; sidebar render consistent monochrome;
+  node --check + lint clean.
+
 ## v1.44 — 2026-11-17 (portal-unified) — layout set expanded + icon-thumbnail gallery (Synology-aligned)
 User: layout options too few vs Synology and the dropdown used text not icons. Research: Synology
 offers 1/4/6/9/10/13/16/25/36/49/64/81/100 (browser cap 36, auto cap 16) via a thumbnail gallery.

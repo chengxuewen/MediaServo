@@ -247,3 +247,6 @@ click-through + regression green. Supersedes v1.25/v1.26.
 - v1.44: layout set expanded to Synology browser tier (+25/36 symmetric, +1+9/1+12 featured; Auto cap
   16) and picker became an icon-thumbnail gallery (mini-grid previews, grouped, keyboard-navigable),
   replacing the text-only dropdown.
+- v1.45: sidebar nav icons replaced Unicode glyphs with unique semantic monochrome SVG sprite
+  (16 icons, no duplicates, correct meanings; gauge/screens/library-play/mic/users/desktop/headset/
+  camera/door/plug/waveform/sliders/key/list-check/gear/exchange); .nav-ico grid-centered SVG container.

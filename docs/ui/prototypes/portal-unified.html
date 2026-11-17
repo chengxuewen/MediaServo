@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.44</title>
+<title>MediaServo Portal — Unified Prototype v1.45</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'dark';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -112,7 +112,8 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 .nav-item:hover{background:var(--hover);color:var(--tx1)}
 .nav-item.active{background:var(--accent-tint);color:var(--accent-ink);font-weight:600}
 .nav-item.active::before{content:'';position:absolute;left:calc(-1*var(--sp8));top:var(--sp8);bottom:var(--sp8);width:3px;border-radius:var(--r2);background:var(--accent)}
-.nav-ico{width:20px;flex:none;text-align:center;font-size:15px}
+.nav-ico{width:20px;height:20px;flex:none;display:grid;place-items:center}
+.nav-ico .ic{width:18px;height:18px}
 .nav-label{flex:1;min-width:0}
 .nav-badge{font-size:var(--fs11);font-family:var(--mono);padding:1px var(--sp6);border-radius:var(--rpill)}
 .b-live{background:var(--ok-tint);color:var(--ok-ink)}
@@ -165,7 +166,7 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 .caret{font-size:10px;color:var(--tx3);flex:none;transition:transform .15s}
 .combo-trigger[aria-expanded="true"] .caret{transform:rotate(180deg)}
 /* anchored to the trigger's right edge so it never overflows the canvas */
-/* v1.44: layout popup — left-anchored, wider, stronger elevation, grouped, scroll-safe. */
+/* v1.45: layout popup — left-anchored, wider, stronger elevation, grouped, scroll-safe. */
 .combo-pop{position:absolute;top:calc(100% + 6px);left:0;right:auto;min-width:220px;width:max-content;max-width:280px;max-height:min(60vh,420px);overflow-y:auto;background:var(--raised);border:1px solid var(--bd2);border-radius:var(--r8);box-shadow:0 8px 24px rgba(0,0,0,.5);padding:var(--sp6);z-index:80;display:none;list-style:none;margin:0}
 .combo.open .combo-pop{display:block}
 .combo-sep{height:1px;background:var(--bd);margin:var(--sp4) var(--sp6)}
@@ -234,11 +235,11 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .rail-headrow .rail-title{margin-bottom:0}
 .btn-block{width:100%}
 .rail-list{flex:1;overflow-y:auto;padding:var(--sp8)}
-/* v1.44 unified card-row language: bordered card + hover + selected; bg=sunken on surface panels. */
+/* v1.45 unified card-row language: bordered card + hover + selected; bg=sunken on surface panels. */
 .stream-item{display:flex;align-items:center;gap:var(--sp8);padding:var(--sp8);border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);margin-bottom:var(--sp2);cursor:pointer}
 .stream-item:hover{background:var(--hover);border-color:var(--bd2)}
 .stream-item.active{background:var(--accent-tint);border-color:var(--accent)}
-/* v1.44 (A): rail rows are text-first (no fake thumbnail); two lines name + res·state; del on hover. */
+/* v1.45 (A): rail rows are text-first (no fake thumbnail); two lines name + res·state; del on hover. */
 .stream-meta{flex:1;min-width:0}
 .stream-name{font-size:var(--fs12);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block}
 .stream-sub{font-size:var(--fs11);color:var(--tx3);font-family:var(--mono);display:block}
@@ -335,7 +336,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tiles{display:grid;gap:var(--sp12);grid-template-columns:repeat(var(--cols,3),1fr);flex:none}
 /* layout-grid: named-area template fills the wall height; tiles stretch to their slot (big spans 2×2) */
 .tiles.layout-grid{flex:1;min-height:0}
-/* v1.44: restore video-like 16:9 tiles (the fill-height stretch read as flat banners, not video). */
+/* v1.45: restore video-like 16:9 tiles (the fill-height stretch read as flat banners, not video). */
 .tiles.layout-grid .tile{aspect-ratio:auto;min-height:0;height:100%}
 .tiles.layout-grid .tile-empty{aspect-ratio:auto;height:100%}
 /* P3.1 elastic custom grid: dense-flow, tiles keep 16:9, per-tile 2×2 span */
@@ -358,7 +359,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tile-empty.drag-over{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink)}
 .rail-foot.drop-remove{margin:var(--sp8);padding:var(--sp12);border:1px dashed var(--danger);border-radius:var(--r6);background:var(--danger-tint);color:var(--danger-ink);text-align:center;font-weight:600}
 .rail-foot.drag-over{background:var(--danger);color:#fff}
-/* v1.44 PlayerTile ("little TV"): cell fills the grid slot (any shape, black letterbox); inner
+/* v1.45 PlayerTile ("little TV"): cell fills the grid slot (any shape, black letterbox); inner
    .tile-stage keeps 16:9 and hosts media + all overlays, so resize never distorts or overlaps. */
 .tile{position:relative;border-radius:0;overflow:hidden;border:1px solid var(--bd);background:var(--video);aspect-ratio:16/9;cursor:pointer;container-type:size;container-name:cell;display:grid;place-items:center}
 .tile-stage{position:relative;aspect-ratio:16/9;width:min(100cqw,calc(100cqh * 16 / 9));max-width:100%;max-height:100%;overflow:hidden;container-type:inline-size;container-name:tile}
@@ -376,7 +377,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tile-actions{position:absolute;right:4px;top:0;height:28px;display:none;align-items:center;gap:var(--sp6);z-index:5}
 .tile:hover .tile-actions,.tile.zoomed .tile-actions{display:flex}
 .tile:hover .tile-bar,.tile.zoomed .tile-bar{padding-right:96px}
-/* v1.44: zoom = focused inspection; removal is a layout-edit action, not offered here (Synology). */
+/* v1.45: zoom = focused inspection; removal is a layout-edit action, not offered here (Synology). */
 .tile.zoomed .tile-actions .del{display:none}
 .tile.zoomed .tile-bar{padding-right:40px}
 .tile-btn{width:22px;height:22px;border-radius:var(--r4);border:1px solid rgba(255,255,255,.22);background:rgba(0,0,0,.55);color:rgba(255,255,255,.85);display:grid;place-items:center;padding:0}
@@ -470,7 +471,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .play-ctl .iconbtn{width:34px;height:34px;font-size:15px}
 /* ---- Live: slim real-time bridge (recorded review lives in Playback) ---- */
 .live-bridge{display:flex;align-items:center;gap:var(--sp12);border-top:1px solid var(--bd);background:var(--surface);padding:var(--sp8) var(--sp16)}
-/* v1.44: status cluster aligns to the single --ctl-h token (C54); badge/clock no longer mismatched. */
+/* v1.45: status cluster aligns to the single --ctl-h token (C54); badge/clock no longer mismatched. */
 .live-badge{display:inline-flex;align-items:center;gap:var(--sp6);height:var(--ctl-h);padding:0 var(--sp8);font-size:var(--fs11);font-weight:600;letter-spacing:.5px;color:var(--ok-ink);background:var(--ok-tint);border:1px solid var(--ok);border-radius:var(--r6)}
 .live-clock{display:inline-flex;align-items:center;height:var(--ctl-h);font-size:var(--fs12);font-weight:600;color:var(--tx1)}
 .bridge-note{font-size:var(--fs11);color:var(--tx3)}
@@ -742,10 +743,10 @@ body[data-badge="on"] #proto-bar{display:flex}
   .board-row{grid-template-columns:1fr;gap:var(--sp6)}
   .tower-grid{grid-template-columns:1fr}
 }
-/* ---- Responsive audit fix (v1.44): below 1500px the side panels become overlay drawers so the
+/* ---- Responsive audit fix (v1.45): below 1500px the side panels become overlay drawers so the
    center wall keeps FULL width instead of being squeezed between two fixed columns. Above 1500px
    they remain grid columns. Open panels show as drawers; collapsed stay hidden (R7). ---- */
-/* v1.44: keep the integrated 3-column look at desktop widths; only narrow (<1200) uses drawers.
+/* v1.45: keep the integrated 3-column look at desktop widths; only narrow (<1200) uses drawers.
    Mid widths (1201–1500) slim the side panels so both-open never squeezes the wall. */
 @media (min-width:1201px) and (max-width:1500px){
   #live-layout{--rail-w:210px;--alerts-w:260px}
@@ -805,8 +806,8 @@ body[data-badge="on"] #proto-bar{display:flex}
 .region-collapse .ic,.pin-btn .ic{width:14px;height:14px}
 #guardTip.neutral{border-color:var(--bd2)}
 #guardTip.neutral .gt-ico{display:none}
-/* v1.44 per-tile (stage) container queries: overlays adapt to the video box, never overlap. */
-/* v1.44: overlays anchor the whole player (cell) so letterbox bars are used; per-cell CQ prevents
+/* v1.45 per-tile (stage) container queries: overlays adapt to the video box, never overlap. */
+/* v1.45: overlays anchor the whole player (cell) so letterbox bars are used; per-cell CQ prevents
    overlap; idle (in-stage) keeps its own stage CQ. */
 @container cell (max-width:320px){
   .tile-drift{display:none}
@@ -820,7 +821,7 @@ body[data-badge="on"] #proto-bar{display:flex}
 @container tile (max-width:230px){
   .tile-idle{display:none}
 }
-/* v1.44 layout picker gallery: icon thumbnails (Synology-style), grouped, keyboard-navigable. */
+/* v1.45 layout picker gallery: icon thumbnails (Synology-style), grouped, keyboard-navigable. */
 .combo.open .combo-pop{display:grid;grid-template-columns:repeat(4,1fr);gap:var(--sp4);width:300px;max-width:320px}
 .combo-pop .combo-opt{flex-direction:column;align-items:center;height:auto;padding:var(--sp6);gap:4px;margin-bottom:0;position:relative}
 .combo-pop .combo-sep{grid-column:1/-1;height:1px;margin:0}
@@ -871,6 +872,22 @@ body[data-badge="on"] #proto-bar{display:flex}
   <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 5v14M15 5v14"/></symbol>
   <symbol id="i-rew" viewBox="0 0 24 24"><path d="M12 12l8-6v12l-8-6z"/><path d="M4 12l8-6v12l-8-6z"/></symbol>
   <symbol id="i-fwd" viewBox="0 0 24 24"><path d="M12 12l-8-6v12l8-6z"/><path d="M20 12l-8-6v12l8-6z"/></symbol>
+  <symbol id="i-overview" viewBox="0 0 24 24"><path d="M4 15a8 8 0 0 1 16 0"/><path d="M12 15l3.5-3.5"/><path d="M2 19h20"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="8" height="7" rx="1"/><rect x="13" y="4" width="8" height="7" rx="1"/><rect x="3" y="13" width="8" height="7" rx="1"/><rect x="13" y="13" width="8" height="7" rx="1"/></symbol>
+  <symbol id="i-recordings" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M10 9l5 3-5 3V9z"/></symbol>
+  <symbol id="i-intercom" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="10" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-meeting" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M4 19a5 5 0 0 1 10 0"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 19a4.5 4.5 0 0 1 5.5-4"/></symbol>
+  <symbol id="i-remote" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M9 20h6M12 16v4"/></symbol>
+  <symbol id="i-tower" viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><rect x="3" y="13" width="4" height="6" rx="1"/><rect x="17" y="13" width="4" height="6" rx="1"/><path d="M19 19a3 3 0 0 1-3 3h-3"/></symbol>
+  <symbol id="i-devices" viewBox="0 0 24 24"><rect x="3" y="7" width="13" height="9" rx="2"/><path d="M16 10l5-3v8l-5-3"/></symbol>
+  <symbol id="i-rooms" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="1"/><circle cx="15" cy="12" r="1"/></symbol>
+  <symbol id="i-sessions" viewBox="0 0 24 24"><path d="M9 3v5M15 3v5"/><path d="M6 8h12v3a6 6 0 0 1-12 0z"/><path d="M12 17v4"/></symbol>
+  <symbol id="i-streams" viewBox="0 0 24 24"><path d="M3 12h4l3-7 4 14 3-7h4"/></symbol>
+  <symbol id="i-config" viewBox="0 0 24 24"><path d="M4 6h9M19 6h1M4 12h3M13 12h7M4 18h9M19 18h1"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></symbol>
+  <symbol id="i-keys" viewBox="0 0 24 24"><circle cx="7" cy="15" r="4"/><path d="M10 12L20 2M15 7l3 3"/></symbol>
+  <symbol id="i-audit" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><path d="M15 17l2 2 4-4"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.2 2.2M16.9 16.9l2.2 2.2M19.1 4.9l-2.2 2.2M7.1 16.9l-2.2 2.2"/></symbol>
+  <symbol id="i-signaling" viewBox="0 0 24 24"><path d="M4 7h13M14 4l3 3-3 3M20 17H7M10 14l-3 3 3 3"/></symbol>
 </svg>
 <div id="app">
   <header id="topbar">
@@ -887,7 +904,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <nav id="sidebar" aria-label="Portal navigation">
       <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation">⟨</button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.44 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.45 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -913,7 +930,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.44</span> · prototype watermark · drag to move</div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.45</span> · prototype watermark · drag to move</div>
 <div class="toast" id="toast"></div>
 <div id="guardTip" role="tooltip" aria-hidden="true"></div>
 <div id="devtools">
@@ -930,7 +947,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.44</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.45</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -1016,12 +1033,13 @@ const CONFIG=[
  {g:'Access',key:'auth.legacy_mode',val:'fail-closed',scope:'global',app:'admin'},
 ];
 /* ================= NAV ================= */
+/* v1.45: nav icons = unique semantic monochrome SVG sprite ids (no text glyphs / no duplicates). */
 const NAV=[
- {group:'Overview',items:[{id:'overview',ico:'◈',label:'Overview'}]},
- {group:'Surveillance',items:[{id:'monitor',ico:'▣',label:'Monitor',badge:'live',bc:'b-live'},{id:'recordings',ico:'▤',label:'Recordings'}]},
- {group:'Communication',items:[{id:'intercom',ico:'◉',label:'Intercom',badge:'2',bc:'b-warn'},{id:'meeting',ico:'◍',label:'Meeting'}]},
- {group:'Control',items:[{id:'remote',ico:'▦',label:'Remote'},{id:'tower',ico:'▲',label:'Tower',badge:'3',bc:'b-alert'}]},
- {group:'Administration',items:[{id:'devices',ico:'▤',label:'Devices',badge:'1',bc:'b-warn'},{id:'rooms',ico:'▢',label:'Rooms'},{id:'sessions',ico:'◍',label:'Sessions'},{id:'streams',ico:'≋',label:'Streams'},{id:'config',ico:'⚙',label:'Config push'},{id:'keys',ico:'⚿',label:'Client keys'},{id:'audit',ico:'≣',label:'Audit log'},{id:'settings',ico:'⚙',label:'Settings'},{id:'signaling',ico:'⇄',label:'Signaling'}]},
+ {group:'Overview',items:[{id:'overview',ico:'i-overview',label:'Overview'}]},
+ {group:'Surveillance',items:[{id:'monitor',ico:'i-monitor',label:'Monitor',badge:'live',bc:'b-live'},{id:'recordings',ico:'i-recordings',label:'Recordings'}]},
+ {group:'Communication',items:[{id:'intercom',ico:'i-intercom',label:'Intercom',badge:'2',bc:'b-warn'},{id:'meeting',ico:'i-meeting',label:'Meeting'}]},
+ {group:'Control',items:[{id:'remote',ico:'i-remote',label:'Remote'},{id:'tower',ico:'i-tower',label:'Tower',badge:'3',bc:'b-alert'}]},
+ {group:'Administration',items:[{id:'devices',ico:'i-devices',label:'Devices',badge:'1',bc:'b-warn'},{id:'rooms',ico:'i-rooms',label:'Rooms'},{id:'sessions',ico:'i-sessions',label:'Sessions'},{id:'streams',ico:'i-streams',label:'Streams'},{id:'config',ico:'i-config',label:'Config push'},{id:'keys',ico:'i-keys',label:'Client keys'},{id:'audit',ico:'i-audit',label:'Audit log'},{id:'settings',ico:'i-settings',label:'Settings'},{id:'signaling',ico:'i-signaling',label:'Signaling'}]},
 ];
 const TITLES={overview:['Overview','Fleet health at a glance'],monitor:['Monitor Center','Surveillance wall + timeline review'],recordings:['Recordings library','Search, bookmarks & export'],intercom:['Intercom board','Floor control across groups'],meeting:['Meeting','Multi-party conferences'],remote:['Remote','Desktop / teleop control (lease-gated)'],tower:['Tower','Dispatcher workbench · multi-panel'],devices:['Devices','Enrollment, approval & audit'],rooms:['Rooms','Rooms by kind'],sessions:['Sessions & clients','Live principals and shapes'],streams:['Streams','All producers and health'],config:['Config push','Presets & per-room overrides'],keys:['Client keys','Machine credentials'],audit:['Audit log','Security-relevant events'],settings:['Settings','Appearance & access'],signaling:['Signaling','Endpoint & connectivity']};
 const $=s=>document.querySelector(s);
@@ -1048,7 +1066,7 @@ const LAYOUTS=[
  {id:'custom',name:'Custom',cols:4,rows:0,slots:null,areas:null,elastic:true}
 ];
 let layoutId=(()=>{try{const v=localStorage.getItem('ms_mon_layout');return (v==='auto'||LAYOUTS.some(l=>l.id===v))?v:'9';}catch(_){return '9';}})();
-/* E (v1.44): single layout control. 'auto' = template picked by stream count, live-re-evaluated;
+/* E (v1.45): single layout control. 'auto' = template picked by stream count, live-re-evaluated;
    manual ids = fixed template. Width responsiveness is built-in (minmax 230px), not a user mode. */
 const autoTemplateId=n=>n<=1?'1':n<=4?'4':n<=6?'1+5':n<=9?'9':'16';
 const layout=()=>layoutId==='auto'?(LAYOUTS.find(l=>l.id===autoTemplateId(selected.length))||LAYOUTS[2]):(LAYOUTS.find(l=>l.id===layoutId)||LAYOUTS[2]);
@@ -1505,7 +1523,7 @@ function renderAudit(){$('#auditBody').innerHTML=AUDIT.map(a=>`<tr><td class="mo
 /* ================= NAV / ROUTER ================= */
 function buildNav(){const sc=$('#navScroll');sc.innerHTML='';NAV.forEach(g=>{const gd=document.createElement('div');gd.className='nav-group';gd.innerHTML=`<div class="nav-group-label">${g.group}</div>`;g.items.forEach(it=>{const el=document.createElement('div');el.className='nav-item';el.dataset.nav=it.id;el.setAttribute('role','button');el.tabIndex=0;
  const badge=it.badge==='live'?`<span class="nav-badge ${it.bc}" data-livebadge>${selected.length}</span>`:(it.badge?`<span class="nav-badge ${it.bc}" data-badge="${it.id}">${it.badge}</span>`:'');
- el.innerHTML=`<span class="nav-ico">${it.ico}</span><span class="nav-label">${it.label}</span>${badge}`;
+ el.innerHTML=`<span class="nav-ico"><svg class="ic" aria-hidden="true"><use href="#${it.ico}"/></svg></span><span class="nav-label">${it.label}</span>${badge}`;
  const act=()=>goto(it.id);el.onclick=act;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();act();}};gd.appendChild(el);});sc.appendChild(gd);});}
 function updateNavBadges(){const lb=document.querySelector('[data-livebadge]');if(lb)lb.textContent=selected.length;const db=document.querySelector('[data-badge="devices"]');if(db)db.textContent=DEVICES.filter(d=>d.status==='pending').length;const ib=document.querySelector('[data-badge="intercom"]');if(ib)ib.textContent=GROUPS.filter(g=>g.state==='held').length;}
 function goto(id){current=id;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));const p=$('#page-'+id);if(p)p.classList.add('active');document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.nav===id));
@@ -1721,7 +1739,7 @@ function applyPlaybackGuards(){
 }
 /* ================= COLUMN COMBOBOX (accessible listbox) ================= */
 function setComboOpen(open){const c=$('#colsCombo');if(!c)return;c.classList.toggle('open',open);const tr=$('#colsTrigger');if(tr)tr.setAttribute('aria-expanded',String(open));if(!open)c.querySelectorAll('.combo-opt.is-active').forEach(o=>o.classList.remove('is-active'));}
-/* v1.44: layout picker = icon-thumbnail gallery (Synology-style), built from LAYOUTS. */
+/* v1.45: layout picker = icon-thumbnail gallery (Synology-style), built from LAYOUTS. */
 function layoutThumb(L){
  if(L.id==='auto')return '<span class="lo-thumb lo-auto"><svg class="ic" aria-hidden="true"><use href="#i-grid"/></svg></span>';
  if(L.elastic){let c='<i class="big" style="grid-column:1/3;grid-row:1/3"></i>';for(let k=0;k<12;k++)c+='<i></i>';return '<span class="lo-thumb" style="grid-template-columns:repeat(4,1fr);grid-template-rows:repeat(4,1fr);grid-auto-flow:dense">'+c+'</span>';}
