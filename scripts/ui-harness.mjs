@@ -99,7 +99,8 @@ const CASES = [
     var restored=document.activeElement.classList.contains('dev-primary')||document.activeElement.id==='devSearch';
     var list=document.querySelectorAll('#devBody tr').length>0;
     var closedInert=getComputedStyle(document.getElementById('devDrawer')).visibility==='hidden';
-    return {open,hiddenClosed,initialFocus,tabs,roving,trap,modalFirst,esc,restored,list,closedInert};`],
+    var ddIcon=!!document.querySelector('#ddClose use[href="#i-chevron"]')&&document.getElementById('ddClose').classList.contains('region-collapse');
+    return {open,hiddenClosed,initialFocus,tabs,roving,trap,modalFirst,esc,restored,list,closedInert,ddIcon};`],
   ['device-drawer-narrow', `goto('devices');document.querySelector('#devBody .dev-primary').click();
     var w=Math.round(document.getElementById('devDrawer').getBoundingClientRect().width);
     return {fullWidth:w>=innerWidth-2};`, 600],

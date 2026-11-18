@@ -1,5 +1,22 @@
 # Prototypes CHANGELOG
 
+## v1.76 — 2026-11-18 (portal-unified) — fix: device drawer collapse button icon family/direction
+User report: drawer top-right collapse button icon wrong.
+- Root cause: ddClose used #i-arrow-left (a back-NAVIGATION arrow, pointing left) on a RIGHT-anchored
+  overlay side-sheet whose button COLLAPSES the panel toward the right edge. Wrong icon family
+  (back-arrow vs region-collapse chevron) and wrong direction; aria-label also diverged
+  ("Back to Devices"/"Close details") from the static icon.
+- Precedent check: region-collapse family = chevron pointing toward the collapse edge
+  (railCollapse i-chevron-left / alCollapse i-chevron / tlCollapse i-chevron-down); modal dismiss = X.
+  ch-side is an in-page panel (no dismiss precedent). Sprite audit: i-arrow-left exists and draws
+  correctly — the defect was semantic, not a missing symbol.
+- Fix: ddClose → class region-collapse + #i-chevron (right) + aria-hidden svg; aria-label/title synced
+  in renderDrawer ("Back to Devices (collapse panel)" on devices / "Collapse device details" else).
+  Other i-arrow-left usages (spoke back buttons) are legitimate back-navigation and untouched.
+- Verified: harness 27 cases ALL GREEN (device-drawer += ddIcon: use href #i-chevron + region-collapse
+  class) + NEG all red; node --check + lint clean; stamps x4 (C68); drawer-head screenshot shows
+  right chevron (transition disabled for final-frame capture).
+
 ## v1.75 — 2026-11-18 (portal-unified) — fix: nav collapse button lost its icon when collapsed
 User report: after collapsing the sidebar, the collapse/expand button showed no icon.
 - Root cause: `svg.ic` base rule carries NO intrinsic size (sizes come only from scoped rules like

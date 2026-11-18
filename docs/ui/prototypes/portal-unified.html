@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.75</title>
+<title>MediaServo Portal — Unified Prototype v1.76</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'light';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -1015,7 +1015,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <nav id="sidebar" aria-label="Portal navigation">
       <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation" aria-label="Collapse navigation"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.75 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.76 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -1041,7 +1041,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.75</span> · prototype watermark · drag to move</div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.76</span> · prototype watermark · drag to move</div>
 <div class="modal-scrim" id="grpScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Manage groups"><div class="modal-head"><span class="modal-title">Manage groups</span><div class="spacer"></div><button class="iconbtn" id="grpClose" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body" id="grpBody"></div></div></div>
 <div class="modal-scrim" id="accScrim" role="dialog" aria-modal="true" aria-label="Account editor"><div class="modal" style="max-width:460px"><div class="card-title" id="accTitle">New account</div><div class="dd-row"><span class="k">username</span><input class="msg-in" style="flex:0 0 180px" id="accUser" aria-label="Username"></div><div class="dd-row"><span class="k">password</span><input class="msg-in" style="flex:0 0 180px" id="accPass" type="password" aria-label="Password"></div><div class="dd-row"><span class="k">role</span><span style="position:relative"><button class="combo-trigger" id="accRoleBtn" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="accRolePop">viewer</button><ul class="combo-pop" id="accRolePop" role="listbox" aria-label="Role"></ul></span></div><div id="accScopeWrap"><div class="dd-row"><span class="k">device scope</span><span style="display:flex;gap:6px;flex-wrap:wrap" id="accScope"></span></div><div class="replay-empty" style="margin:6px 0" id="accScopeHint">Empty scope = no devices (viewer/operator). Non-vehicle kinds gated: enforcement pending backend extension.</div></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="accCancel">Cancel</button><button class="btn btn-sm btn-primary" id="accSave">Save</button></div></div></div>
 <div class="modal-scrim" id="pskScrim" role="dialog" aria-modal="true" aria-label="Rotate PSK"><div class="modal" style="max-width:420px"><div class="card-title">Rotate pre-shared key</div><div class="dd-row"><span class="k">new value</span><input class="msg-in" style="flex:0 0 200px" id="pskNew" placeholder="optional · 8-128 chars" aria-label="New PSK value (optional)"></div><div class="replay-empty" style="margin:6px 0">Leave empty to generate. All devices/agents must adopt the new PSK; the old one is invalidated. Shown once after rotate.</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="pskCancel">Cancel</button><button class="btn btn-sm btn-primary" id="pskOk">Rotate</button></div></div></div>
@@ -1050,7 +1050,7 @@ body[data-badge="on"] #proto-bar{display:flex}
 <div class="modal-scrim" id="cfmScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Confirm"><div class="modal-head"><span class="modal-title" id="cfmTitle">Confirm</span><div class="spacer"></div><button class="iconbtn" id="cfmCancelX" aria-label="Cancel"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body"><div class="cfm-msg" id="cfmMsg"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" id="cfmCancel">Cancel</button><button class="btn btn-sm btn-danger" id="cfmOk">Confirm</button></div></div>
 
 </div></div></div>
-<div class="dev-drawer" id="devDrawer" role="dialog" aria-label="Device details" aria-hidden="true"><div class="dd-head"><span class="dd-title" id="ddTitle"></span><span class="chip" id="ddRole"></span><span id="ddLive" class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)"></span><button class="iconbtn" id="ddClose" aria-label="Close device details" data-tip="Back to Devices"><svg class="ic"><use href="#i-arrow-left"/></svg></button></div><div class="dd-tabs" id="ddTabs" role="tablist"></div><div class="dd-body" id="ddBody" role="tabpanel"></div></div>
+<div class="dev-drawer" id="devDrawer" role="dialog" aria-label="Device details" aria-hidden="true"><div class="dd-head"><span class="dd-title" id="ddTitle"></span><span class="chip" id="ddRole"></span><span id="ddLive" class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)"></span><button class="iconbtn region-collapse" id="ddClose" aria-label="Collapse device details" title="Collapse device details" data-tip="Back to Devices"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="dd-tabs" id="ddTabs" role="tablist"></div><div class="dd-body" id="ddBody" role="tabpanel"></div></div>
 <div class="modal-scrim" id="secretScrim" role="dialog" aria-modal="true" aria-label="One-time secret"><div class="modal" style="max-width:440px"><div class="card-title" id="secTitle">Secret</div><div class="bg-card" style="border-color:var(--warn);background:var(--warn-tint)"><span class="bg-tag" style="color:var(--warn-ink);border-color:var(--warn)">shown once</span> This secret is shown only once — save it now. Closing without copying discards it.</div><div class="dd-row"><span class="k">secret</span><span class="mono" id="secVal" style="user-select:all;word-break:break-all"></span></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="secCopy">Copy</button><button class="btn btn-sm btn-primary" id="secDone">Done</button></div><div class="replay-empty" id="secCopyHint" style="margin-top:6px"></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div id="guardTip" role="tooltip" aria-hidden="true"></div>
@@ -1080,7 +1080,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.75</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.76</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -1871,7 +1871,7 @@ function ddKey(e){const dr=$('#devDrawer');if(!dr.classList.contains('open'))ret
  if(document.activeElement.classList.contains('dd-tab')){const tabs=[...dr.querySelectorAll('.dd-tab')];const i=tabs.indexOf(document.activeElement);let n=null;if(e.key==='ArrowRight')n=tabs[(i+1)%tabs.length];else if(e.key==='ArrowLeft')n=tabs[(i+tabs.length-1)%tabs.length];else if(e.key==='Home')n=tabs[0];else if(e.key==='End')n=tabs[tabs.length-1];if(n){n.focus();n.click();e.preventDefault();}}}
 function renderDrawer(){const d=DEVICES.find(x=>x.id===devOpen);const dr=$('#devDrawer');if(!d||!dr)return;
  const ae=document.activeElement;const fsel=ae&&ae.id?'#'+ae.id:(ae&&ae.dataset&&ae.dataset.dk?'[data-dk="'+ae.dataset.dk+'"]':(ae&&ae.dataset&&ae.dataset.dt?'.dd-tab[data-dt="'+ae.dataset.dt+'"]':null));
- $('#ddTitle').textContent=d.id+' · '+d.name;$('#ddRole').textContent=effRole();$('#ddClose').setAttribute('aria-label',current==='devices'?'Back to Devices':'Close details');$('#ddBody').setAttribute('aria-label',ddTab+' panel');
+ $('#ddTitle').textContent=d.id+' · '+d.name;$('#ddRole').textContent=effRole();$('#ddClose').setAttribute('aria-label',current==='devices'?'Back to Devices (collapse panel)':'Collapse device details');$('#ddClose').title=$('#ddClose').getAttribute('aria-label');$('#ddBody').setAttribute('aria-label',ddTab+' panel');
  const tabs=[['overview','Overview'],['config','Config'],['identity','Identity'],['creds','Credentials'],['telemetry','Telemetry'],['events','Events']];
  $('#ddTabs').innerHTML=tabs.map(([id,l])=>`<button class="dd-tab" role="tab" data-dt="${id}" aria-selected="${ddTab===id}" tabindex="${ddTab===id?0:-1}">${l}</button>`).join('');
  dr.querySelectorAll('.dd-tab').forEach(t=>t.onclick=()=>{ddTab=t.dataset.dt;renderDrawer();dr.querySelector('.dd-tab[aria-selected="true"]').focus();});

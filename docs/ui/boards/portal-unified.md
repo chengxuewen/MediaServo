@@ -16,7 +16,7 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.75
+version: v1.76
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
@@ -415,6 +415,10 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   rendered 300x150 and was clipped → invisible. Added #navCollapse .ic size + flex centering; unified
   all state paths through top-level syncNavCollapse() (SVG sprite + title + aria-label); removed ⟨/⟩
   text glyphs (C56). harness 27 cases ALL GREEN + NEG red (nav-collapse case).
+- v1.76: drawer collapse icon fix — ddClose was i-arrow-left (back-navigation family, wrong direction
+  for right-edge collapse); now region-collapse + i-chevron (right), aria-label/title synced in
+  renderDrawer. Precedent: region-collapse chevrons point toward collapse edge; modal dismiss = X.
+  harness device-drawer += ddIcon assertion; 27 cases + NEG green.
   placeholder copy, Force consequence copy. harness 21 ALL GREEN + NEG red; narrow docSW==600.
   server-side provider enforcement, durable break-glass audit, revocation sync, contract-first ceiling.
 - Architecture diagram set: web-portal-ui PLAN §3j (capability ownership / dual-mode deployment /
