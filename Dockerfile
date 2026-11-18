@@ -1,3 +1,12 @@
+# ---- Plan-Y wrap layer sentinel (docker face; native-leg parity) ----
+# Empty scratch stage by default. `docker build --build-context wrapcache=<dir>`
+# (wired in mediaservo.sh when the parent's 3rdparty/mediasoup-worker/ layer
+# exists) overrides it with the pinned wrap archive set -> meson resolves
+# libuv/openssl/libsrtp3/abseil/flatbuffers/unordered-dense OFFLINE. Without
+# the flag the stage stays empty and upstream download behavior stays in charge
+# (CI/GitHub posture, same as a standalone checkout — MediaServoMesonCache.cmake).
+FROM scratch AS wrapcache
+
 # ---- Base: Ubuntu 22.04 LTS + Rust + system deps ----
 # Ubuntu 22.04 is mediasoup's recommended prebuild base (widest glibc compatibility)
 FROM ubuntu:22.04 AS base
@@ -159,7 +168,15 @@ RUN mkdir -p crates/mediaservo-common/src && touch crates/mediaservo-common/src/
     echo 'fn main() {}' > tools/mediaservo-gates/src/main.rs
 
 # 3. Fetch and build dependencies (cached — only re-runs on Cargo.toml changes)
-RUN cargo fetch && \
+# The wrapcache mount feeds mediasoup-sys's meson wraps from the pinned layer
+# when one was provided; the pairing MEDIASOUP_LOCAL_DEV=1 is mandatory —
+# without it the post-build `invoke clean-all` purge DELETES the layer
+# archives (MediaServoMesonCache.cmake purge hazard, measured).
+RUN --mount=from=wrapcache,target=/wrapcache,ro \
+    if [ -n "$(ls -A /wrapcache 2>/dev/null)" ]; then \
+        export MESON_PACKAGE_CACHE_DIR=/wrapcache MEDIASOUP_LOCAL_DEV=1; \
+    fi; \
+    cargo fetch && \
     cargo build --release --bin mediaservo-server --features sfu-mediasoup,admin-dashboard
 # 4. Remove dummy sources
 RUN rm -rf crates/*/src
@@ -183,12 +200,20 @@ COPY . .
 #     wrongly concludes sources are unchanged and links the empty common rlib → cascading 'cannot find protocol' errors. touch fixes mtime.
 RUN find crates -name '*.rs' -exec touch {} +
 
-# 5c. admin build (deps already installed — re-runs build:admin only on source changes)
-RUN cd www && CI=true pnpm build:admin && \
+# 5c. admin + voice builds (deps already installed — re-runs only on source changes).
+#     build.rs embeds BOTH dists (P3-3); voice was missing here, so the final
+#     cargo build died on the never-generated embedded_voice_dist.rs include!.
+RUN cd www && CI=true pnpm build:admin && CI=true pnpm build:voice && \
     cd / && rm -rf /workspace/www/node_modules
 
 # 6. Final build — only recompiles changed source (with a correct ADMIN_DIST_DIR)
-RUN cargo build --release --bin mediaservo-server --features sfu-mediasoup,admin-dashboard
+# Same wrapcache mount as the dependency leg: on a cache miss (--no-cache) this
+# RUN would re-run mediasoup-sys's build.rs, which needs the same offline wraps.
+RUN --mount=from=wrapcache,target=/wrapcache,ro \
+    if [ -n "$(ls -A /wrapcache 2>/dev/null)" ]; then \
+        export MESON_PACKAGE_CACHE_DIR=/wrapcache MEDIASOUP_LOCAL_DEV=1; \
+    fi; \
+    cargo build --release --bin mediaservo-server --features sfu-mediasoup,admin-dashboard
 
 # ---- Runtime: minimal Ubuntu 22.04 ----
 FROM ubuntu:22.04 AS runtime

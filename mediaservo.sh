@@ -484,8 +484,25 @@ _ms_build_server() {
     fi
     _ms_check docker "install docker and start the daemon"
     if [ "$1" = runtime ]; then
-        echo "\$ docker build --target runtime -t mediaservo-server:latest ."
-        docker build --target runtime -t mediaservo-server:latest . || exit $?
+        # Plan-Y wrap layer, docker face (native-leg parity above): feed the
+        # parent's pinned mediasoup wrap archives via a named build context so
+        # meson resolves wraps offline. Mainland failure mode it fixes: proxy
+        # set under lowercase env names -> Docker's auto proxy injection never
+        # reaches the Dockerfile's uppercase ARG HTTP_PROXY -> foreign wrap
+        # hosts (dist.libuv.org / wrapdb) unreachable inside the container.
+        local bctx=() wrap_layer="$ROOT/../../3rdparty/mediasoup-worker"
+        if [ -d "$wrap_layer" ]; then
+            bctx+=(--build-context "wrapcache=$(cd "$wrap_layer" && pwd -P)")
+        fi
+        # Size-canonicalize the proxy: explicit build args cover hosts whose
+        # env only carries lowercase http_proxy (Docker auto-injection is
+        # name-exact). NO_PROXY stays proxy-free via the Dockerfile default.
+        echo "\$ docker build --target runtime -t mediaservo-server:latest ${bctx[*]:-} ."
+        docker build --target runtime -t mediaservo-server:latest \
+            --build-arg "HTTP_PROXY=${HTTP_PROXY:-${http_proxy:-}}" \
+            --build-arg "HTTPS_PROXY=${HTTPS_PROXY:-${https_proxy:-}}" \
+            --build-arg "NO_PROXY=${NO_PROXY:-${no_proxy:-}}" \
+            "${bctx[@]}" . || exit $?
     else
         echo "\$ docker compose -f docker-compose.dev.yml build server"
         docker compose -f docker-compose.dev.yml build server || exit $?
