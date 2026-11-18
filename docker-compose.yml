@@ -41,10 +41,11 @@ services:
       # first-boot admin bootstrap (init step 3); persisted in the etc volume.
       MEDIASERVO_ADMIN_PASSWORD: ${MEDIASERVO_ADMIN_PASSWORD:?set MEDIASERVO_ADMIN_PASSWORD in .env — first-boot admin account}
     # R13=C: mem_limit ONLY (host protection); CPU unset (RTP bursts free).
-    # 2g PROVISIONAL — R18 Small-tier load test deferred (user-ruled follow-up);
-    # idle baseline 28MiB peak (29-operations.md). Final value = measured peak
-    # x1.3 round-up 512MB, written back here + 29-operations.md once R18 lands.
-    mem_limit: ${MEM_LIMIT:-2g}
+    # 512m = R18 Small-tier MEASURED (2026-11-18): 10 rooms/20 peers 720p H.264,
+    # steady 10min + burst 2min (30 peers), cgroup memory.peak 56.81MiB ->
+    # peak x1.3 round-up 512MB = 512MiB (29-operations.md). Larger tiers override
+    # MEM_LIMIT per Capacity Planning.
+    mem_limit: ${MEM_LIMIT:-512m}
     restart: unless-stopped
     # Named volumes at the brand-derived tree paths (R15). copy-up preserves the
     # image ownership (mediaservo); the entrypoint init is the first-boot writer.

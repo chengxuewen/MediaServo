@@ -1,0 +1,13 @@
+{
+  "name": "msrtc-r18-load-harness",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "R18 Small-tier SFU load harness (container-build-rework): N browser peers producing fake 720p H.264 ~2Mbps via mediasoup-client + server WS signaling.",
+  "dependencies": {
+    "mediasoup-client": "3.23.2",
+    "playwright": "1.56.1",
+    "esbuild": "0.25.0",
+    "ws": "8.18.0"
+  }
+}

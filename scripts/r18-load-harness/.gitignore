@@ -1,0 +1,10 @@
+node_modules/
+fake.y4m
+load.bundle.js
+r18-psk.txt
+r18-result.json
+quick-result.json
+quick.log
+r18-full.log
+npm-install.log
+package-lock.jsonverify-result.json

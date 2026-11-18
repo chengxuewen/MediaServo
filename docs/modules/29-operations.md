@@ -121,34 +121,49 @@ longer a separate proxy service (R12 retired). Resource policy per R13=C:
 
 | Item | value | rationale |
 |------|-------|-----------|
-| `mem_limit` | `${MEM_LIMIT:-2g}` (provisional) | host protection; value pending the R18 load test |
+| `mem_limit` | `${MEM_LIMIT:-512m}` (R18 measured) | host protection; Small-tier peak ×1.3 round-up 512MB |
 | CPU | **unset** | RTP bursts free (R13); no cpus/NanoCpus quota |
 
 `mem_limit` is the container-level field (works under plain `docker compose up`,
 unlike `deploy.resources` which only applies in Swarm). The R8 smoke asserts
 `HostConfig.Memory > 0` AND `HostConfig.NanoCpus == 0` (R9).
 
-**R18 load-test method (user-ruled A, deferred follow-up)**: Small tier
+**R18 load-test method (user-ruled A) — EXECUTED 2026-11-18**: Small tier
 (10 rooms/20 peers, 720p H.264 ~2Mbps), steady 10min + burst 2min, cgroup
 `memory.peak` / `docker stats` 5s sampling; `mem_limit` = measured peak ×1.3
-round-up to 512MB. Pass = no OOM + /health green. The full multi-peer load
-harness is a tracked follow-up (the existing `e2e-sfu-consume.cjs` /
-`e2e-bitrate-probe.cjs` are single-stream functional E2E, not a load generator).
+round-up to 512MB. Pass = no OOM + /health green. Harness:
+`scripts/r18-load-harness/` (mediasoup-client + playwright headless chromium,
+fake 720p y4m video; each room = 1 host producer + N remote consumers; the
+server runs host-networking for reliable WebRTC ICE). The pre-existing
+`e2e-sfu-consume.cjs` / `e2e-bitrate-probe.cjs` are single-stream functional
+E2E, not load generators — the harness fills that gap.
 
-**Measured baseline (2026-11-18, idle — NOT the R18 loaded peak)**:
-`msrtc-server:0.1.3` idle (server + caddy + oxmgr, no media): steady
-**24.67 MiB**, cgroup boot `memory.peak` **28.35 MiB** (29732864 bytes).
-The 2g provisional ceiling carries wide headroom over idle; the loaded
-Small-tier peak must be measured before final production right-sizing.
+**R18 measured result (`msrtc-server:0.1.3`, 8-core host)**:
+
+| Phase | Peers | Out (aggregate) | In (aggregate) | Notes |
+|-------|-------|-----------------|----------------|-------|
+| idle | 0 | — | — | steady 24.67 MiB, boot cgroup peak 28.35 MiB |
+| steady 10min | 10 prod + 10 cons | 16.42 Mbps | 16.27 Mbps | 720p, all transports connected |
+| burst 2min | 10 prod + 20 cons | 14.75 Mbps | 28.69 Mbps | forwarding doubled (30 peers) |
+
+- `docker stats` peak **52.74 MiB**; cgroup `memory.peak` **56.81 MiB** (authoritative).
+- `mem_limit` = ⌈56.81 × 1.3 / 512⌉ × 512 = **512 MiB** (the 512MB round-up floor;
+  ~9× headroom over the measured peak). No OOM; /health green throughout.
+- **Achieved bitrate caveat**: per-peer ~1.5–1.6 Mbps avg (target 2 Mbps) — the
+  8-core host CPU-contends 10 software H.264 encoders + 10–20 decoders, so
+  libwebrtc adapts bitrate down. The memory footprint is dominated by the
+  per-peer transport/producer/consumer object graph (bitrate-independent), so
+  the 512 MiB ceiling holds at full 2 Mbps; re-measure on the production host
+  for larger tiers (medium 50 rooms/100 peers, large) per §Capacity Planning.
 
 **dev environment intentionally unlimited**: `docker-compose.dev.yml` sets no
 limits — the dev container bears `cargo build` (mediasoup-sys meson/ninja C++
 compilation, PIT-11/33); limits would OOM-kill the build.
 
-**How to adjust**: set `MEM_LIMIT` in `.env` (or the compose default once R18
-lands), `docker compose --env-file .env up -d` to recreate, `docker compose
-config` to validate. Scale per §Capacity Planning tiers once R18 establishes
-the per-tier measured baseline.
+**How to adjust**: set `MEM_LIMIT` in `.env` (default 512m = Small-tier measured),
+`docker compose --env-file .env up -d` to recreate, `docker compose config` to
+validate. Scale per §Capacity Planning tiers; re-run `scripts/r18-load-harness/`
+with larger ROOMS/PER_ROOM to measure medium/large peaks.
 
 ## Log Aggregation
 
