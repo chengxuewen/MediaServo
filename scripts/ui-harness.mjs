@@ -358,6 +358,20 @@ const CASES = [
     document.getElementById('auditRetry').click();var loadingState=auditLoading;
     auditError=false;auditLoading=false;renderAudit();
     return {ringRows,retentionLabel,historyLink,loginQuerySimulated,logoutSimulated,kindFilter,bgRing,sourceProvider,emptyState,errState,loadingState};`],
+  ['nav-collapse', `var b=document.getElementById('navCollapse');
+    var initSvg=!!b.querySelector('svg use[href="#i-chevron-left"]');
+    b.click();
+    var sv=b.querySelector('svg');var r=sv.getBoundingClientRect();
+    var collapsedIcon=!!b.querySelector('svg use[href="#i-chevron"]')&&r.width<=28&&r.height<=28;
+    var collapsedState=document.getElementById('body').classList.contains('nav-min');
+    b.click();
+    var expandedIcon=!!b.querySelector('svg use[href="#i-chevron-left"]')&&!document.getElementById('body').classList.contains('nav-min');
+    applyProto('view','rail');
+    var railIcon=!!b.querySelector('svg use[href="#i-chevron"]');
+    applyProto('view','desktop');
+    var resetIcon=!!b.querySelector('svg use[href="#i-chevron-left"]');
+    var aria=b.getAttribute('aria-label')==='Collapse navigation';
+    return {initSvg,collapsedIcon,collapsedState,expandedIcon,railIcon,resetIcon,aria};`],
   ['accounts-narrow', `myRole='admin';goto('accounts');
     var noOv=document.documentElement.scrollWidth<=innerWidth;
     var card=getComputedStyle(document.querySelector('#accBody td:nth-child(2)')).display==='flex';
@@ -399,6 +413,7 @@ const NEG = {
   fleet: `renderFleetStrip=function(){};`,
   'monitor-link': `renderAvail=function(){};`,
   'audit-ring': `renderAudit=function(){};`,
+  'nav-collapse': `syncNavCollapse=function(){};`,
   'accounts-narrow': `var st=document.createElement('style');st.textContent='@media (max-width:760px){#topbar{gap:var(--sp12);padding:0 var(--sp16)}}';document.head.appendChild(st);`,
   notif: `renderNotif=function(){};`,
 };

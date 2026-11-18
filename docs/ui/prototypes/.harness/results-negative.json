@@ -1,5 +1,5 @@
 {
-  "when": "2026-11-18T08:54:16.059Z",
+  "when": "2026-11-18T09:09:09.925Z",
   "mode": "negative",
   "fail": 0,
   "results": {
@@ -159,6 +159,20 @@
         "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:22:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:24:154\n@http://127.0.0.1:8201/portal-unified.html:2:2455\n@http:/"
       },
       "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:22:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:24:154\n@http://127.0.0.1:8201/portal-unified.html:2:2455\n@http:/"
+    },
+    "nav-collapse": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "initSvg": true,
+        "collapsedIcon": false,
+        "collapsedState": true,
+        "expandedIcon": true,
+        "railIcon": false,
+        "resetIcon": true,
+        "aria": true
+      },
+      "error": null
     },
     "accounts-narrow": {
       "negative": true,

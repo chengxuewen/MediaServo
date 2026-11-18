@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.74</title>
+<title>MediaServo Portal — Unified Prototype v1.75</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'light';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -105,7 +105,8 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 #sidebar{background:var(--surface);border-right:1px solid var(--bd);display:flex;flex-direction:column;overflow:hidden}
 .sb-head{display:flex;align-items:center;justify-content:space-between;padding:var(--sp12);border-bottom:1px solid var(--bd)}
 .sb-title{font-size:var(--fs11);text-transform:uppercase;letter-spacing:1.2px;color:var(--tx3);font-weight:600;white-space:nowrap}
-#navCollapse{width:28px;height:28px;border-radius:var(--r4);border:1px solid var(--bd);background:var(--sunken);color:var(--tx2);font-size:13px}
+#navCollapse{width:28px;height:28px;border-radius:var(--r4);border:1px solid var(--bd);background:var(--sunken);color:var(--tx2);font-size:13px;display:flex;align-items:center;justify-content:center}
+#navCollapse .ic{width:14px;height:14px}
 #navCollapse:hover{color:var(--tx1);border-color:var(--bd2)}
 .sb-scroll{flex:1;overflow-y:auto;padding:var(--sp8)}
 .nav-group{margin-bottom:var(--sp12)}
@@ -1012,9 +1013,9 @@ body[data-badge="on"] #proto-bar{display:flex}
   <div id="wsBanner"><span class="g g-warn"></span>Live updates paused — reconnecting…<span class="spacer"></span><span class="mono">cached data shown · stale</span></div>
   <div id="body">
     <nav id="sidebar" aria-label="Portal navigation">
-      <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation">⟨</button></div>
+      <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation" aria-label="Collapse navigation"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.74 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.75 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -1040,7 +1041,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.74</span> · prototype watermark · drag to move</div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.75</span> · prototype watermark · drag to move</div>
 <div class="modal-scrim" id="grpScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Manage groups"><div class="modal-head"><span class="modal-title">Manage groups</span><div class="spacer"></div><button class="iconbtn" id="grpClose" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body" id="grpBody"></div></div></div>
 <div class="modal-scrim" id="accScrim" role="dialog" aria-modal="true" aria-label="Account editor"><div class="modal" style="max-width:460px"><div class="card-title" id="accTitle">New account</div><div class="dd-row"><span class="k">username</span><input class="msg-in" style="flex:0 0 180px" id="accUser" aria-label="Username"></div><div class="dd-row"><span class="k">password</span><input class="msg-in" style="flex:0 0 180px" id="accPass" type="password" aria-label="Password"></div><div class="dd-row"><span class="k">role</span><span style="position:relative"><button class="combo-trigger" id="accRoleBtn" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="accRolePop">viewer</button><ul class="combo-pop" id="accRolePop" role="listbox" aria-label="Role"></ul></span></div><div id="accScopeWrap"><div class="dd-row"><span class="k">device scope</span><span style="display:flex;gap:6px;flex-wrap:wrap" id="accScope"></span></div><div class="replay-empty" style="margin:6px 0" id="accScopeHint">Empty scope = no devices (viewer/operator). Non-vehicle kinds gated: enforcement pending backend extension.</div></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="accCancel">Cancel</button><button class="btn btn-sm btn-primary" id="accSave">Save</button></div></div></div>
 <div class="modal-scrim" id="pskScrim" role="dialog" aria-modal="true" aria-label="Rotate PSK"><div class="modal" style="max-width:420px"><div class="card-title">Rotate pre-shared key</div><div class="dd-row"><span class="k">new value</span><input class="msg-in" style="flex:0 0 200px" id="pskNew" placeholder="optional · 8-128 chars" aria-label="New PSK value (optional)"></div><div class="replay-empty" style="margin:6px 0">Leave empty to generate. All devices/agents must adopt the new PSK; the old one is invalidated. Shown once after rotate.</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="pskCancel">Cancel</button><button class="btn btn-sm btn-primary" id="pskOk">Rotate</button></div></div></div>
@@ -1079,7 +1080,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.74</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.75</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -2015,7 +2016,7 @@ function goto(id,lens){if(lens)devLens=lens;if(current==='intercom'&&chanOpen&&i
  const[t,s]=TITLES[id]||[id,''];$('#crumb').innerHTML=`${ADMIN_SPOKES.includes(id)?'<button class="crumb-link" data-crumb-admin="1">Admin</button> / ':''}${t} <span style="color:var(--tx3)">· ${s}</span>`;
  const R={admin:renderAdmin,accounts:renderAccounts,overview:renderOverview,monitor:renderMonitor,recordings:renderRecordings,intercom:renderBoard,meeting:renderMeeting,tower:renderTower,devices:renderDevices,rooms:renderRooms,sessions:renderSessions,streams:renderStreams,config:renderConfig,keys:renderKeys,audit:renderAudit};
  if(R[id])R[id]();
- if(id==='tower'){$('#body').classList.add('nav-min');$('#navCollapse').textContent='⟩';}
+ if(id==='tower'){$('#body').classList.add('nav-min');syncNavCollapse();}
 }
 /* ================= PICKER (two-column shuttle) ================= */
 let pickSel=[],openDev={},pickQ='',pickQ2='';
@@ -2304,10 +2305,11 @@ function protoCur(k){
  return '';
 }
 function syncDevtools(){const dt=$('#devtools');if(!dt)return;dt.querySelectorAll('[data-set]').forEach(b=>{const p=b.dataset.set.split(':');const on=protoCur(p[0])===p[1];b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on));});}
+function syncNavCollapse(){const c=$('#body').classList.contains('nav-min');const b=$('#navCollapse');if(!b)return;b.innerHTML='<svg class="ic" aria-hidden="true"><use href="#'+(c?'i-chevron':'i-chevron-left')+'"/></svg>';b.title=c?'Expand navigation':'Collapse navigation';b.setAttribute('aria-label',b.title);}
 function applyProto(k,v){
  if(k==='theme')setTheme(v);
  else if(k==='density'){document.documentElement.dataset.density=v;document.querySelectorAll('#densSeg button').forEach(b=>b.classList.toggle('on',b.dataset.d===v));}
- else if(k==='view'){document.body.dataset.view=v;$('#body').classList.toggle('nav-min',v==='rail');$('#navCollapse').textContent=v==='rail'?'⟩':'⟨';}
+ else if(k==='view'){document.body.dataset.view=v;$('#body').classList.toggle('nav-min',v==='rail');syncNavCollapse();}
  else if(k==='ws')setWsState(v==='dropped');
  else if(k==='content')applyContent(v);
  else if(k==='labels')document.body.dataset.labels=v;
@@ -2332,7 +2334,7 @@ function applyProto(k,v){
 }
 function resetProto(){
  setTheme('light');document.documentElement.dataset.density='comfortable';document.querySelectorAll('#densSeg button').forEach(b=>b.classList.toggle('on',b.dataset.d==='comfortable'));
- document.body.dataset.view='desktop';$('#body').classList.remove('nav-min');$('#navCollapse').textContent='⟨';
+ document.body.dataset.view='desktop';$('#body').classList.remove('nav-min');syncNavCollapse();
  setWsState(false);document.body.dataset.labels='off';document.body.dataset.badge='off';
  statsOn=false;$('#statsToggle').classList.toggle('active',false);
  syncOn=true;const sb=$('#syncBtn');sb.classList.toggle('on',true);sb.setAttribute('aria-pressed','true');
@@ -2494,7 +2496,7 @@ function wire(){
  $('#grpClose').onclick=()=>dlgClose($('#grpScrim'));
  $('#cfmCancel').onclick=()=>dlgClose($('#cfmScrim'));$('#cfmCancelX').onclick=()=>dlgClose($('#cfmScrim'));$('#cfmOk').onclick=()=>{const cb=cfmCb;cfmCb=null;dlgClose($('#cfmScrim'));if(cb)cb();};
  const gm=$('#grpManage');if(gm)gm.onclick=()=>{grpEditId=null;renderGroups();dlgOpen($('#grpScrim'));};
- $('#navCollapse').onclick=function(){const c=$('#body').classList.toggle('nav-min');this.innerHTML='<svg class="ic" aria-hidden="true"><use href="#'+(c?'i-chevron':'i-chevron-left')+'"/></svg>';};
+  $('#navCollapse').onclick=function(){$('#body').classList.toggle('nav-min');syncNavCollapse();};
  $('#themeBtn').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
  $('#muteBtn').onclick=function(){cuesMuted=!cuesMuted;cueUnlock();syncCueUI();toast(cuesMuted?'All cues muted':'Cues on');};
  /* first user gesture unlocks WebAudio (browser autoplay policy); idempotent afterwards */

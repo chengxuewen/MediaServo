@@ -16,7 +16,7 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.74
+version: v1.75
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
@@ -411,6 +411,10 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   three states. Region annotations: Q8=A, Q6 notes, C62, C54/C69. Open micro-decisions: retention value
   90d, ring page size/export, provider feed contract.
 - Design round B1–B6 complete: 26 harness cases ALL GREEN + NEG all red; versions v1.69–v1.74.
+- v1.75: nav collapse icon fix — svg.ic has no intrinsic size (scoped rules only); collapse button SVG
+  rendered 300x150 and was clipped → invisible. Added #navCollapse .ic size + flex centering; unified
+  all state paths through top-level syncNavCollapse() (SVG sprite + title + aria-label); removed ⟨/⟩
+  text glyphs (C56). harness 27 cases ALL GREEN + NEG red (nav-collapse case).
   placeholder copy, Force consequence copy. harness 21 ALL GREEN + NEG red; narrow docSW==600.
   server-side provider enforcement, durable break-glass audit, revocation sync, contract-first ceiling.
 - Architecture diagram set: web-portal-ui PLAN §3j (capability ownership / dual-mode deployment /

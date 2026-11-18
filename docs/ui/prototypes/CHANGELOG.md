@@ -1,5 +1,22 @@
 # Prototypes CHANGELOG
 
+## v1.75 — 2026-11-18 (portal-unified) — fix: nav collapse button lost its icon when collapsed
+User report: after collapsing the sidebar, the collapse/expand button showed no icon.
+- Root cause: `svg.ic` base rule carries NO intrinsic size (sizes come only from scoped rules like
+  `.nav-ico .ic` / `.search .ic`); the SVG inserted by the collapse handler had no scoped size rule →
+  rendered at the inline-SVG default 300x150, overflowed the 28px button and was clipped by the
+  sidebar → invisible icon (measured rect 300x150 pre-fix).
+- Secondary debt: initial markup and three state paths (goto tower / view leg / resetProto) used text
+  glyphs ⟨/⟩ (C56 violation) and diverged from the click path's SVG.
+- Fix: `#navCollapse .ic{width:14px;height:14px}` + flex centering; initial markup → SVG sprite
+  (i-chevron-left) + aria-label; single top-level `syncNavCollapse()` helper drives icon
+  (i-chevron collapsed / i-chevron-left expanded) + title + aria-label from ALL paths (click, tower,
+  view leg, reset). Helper hoisted to top level (first attempt landed inside wire() → applyProto
+  ReferenceError, caught by harness).
+- Verified: harness 27 cases ALL GREEN incl new nav-collapse (initSvg/collapsedIcon rect<=28/
+  collapsedState/expandedIcon/railIcon/resetIcon/aria) + NEG all red (syncNavCollapse noop);
+  node --check + lint clean; stamps x4 (C68); collapsed-rail screenshot shows chevron.
+
 ## v1.74 — 2026-11-18 (portal-unified) — B6 delivered (pending user review): Audit = core security minimal ring
 Implements web-portal-ui §3i B6 (Q8=A / Q6 forward notes / C62). Completes the B1–B6 design round.
 - **Ring filter**: Audit page shows ONLY security-ring events (auth./account./psk./key./device./access.);
