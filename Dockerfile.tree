@@ -111,6 +111,10 @@ RUN if [ "$MIRROR" = "cn" ]; then \
 # /opt/${MEDIASERVO_BRAND} from it; compose may override for a standalone build.
 ENV MEDIASERVO_BRAND=msrtc
 COPY --from=treebuild /opt/msrtc /opt/msrtc
+# Role-facing manuals baked into the image (the image alone is self-documenting;
+# the package artifact set also ships them as DEPLOY-MANUAL.md / OPS-MANUAL.md).
+COPY --from=treebuild /workspace/docs/modules/34-site-deployment.md /usr/local/share/doc/msrtc/DEPLOY-MANUAL.md
+COPY --from=treebuild /workspace/docs/modules/35-container-ops-manual.md /usr/local/share/doc/msrtc/OPS-MANUAL.md
 COPY docker/tree-entrypoint.sh /usr/local/bin/tree-entrypoint.sh
 # Named-volume copy-up preserves image ownership: pre-create + chown the tree
 # so the mediaservo daemon can write etc/run after the entrypoint drops privs.

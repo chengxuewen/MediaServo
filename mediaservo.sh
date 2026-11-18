@@ -1042,7 +1042,8 @@ Offline site artifact set (container-build-rework B3.6):
   SHA256SUMS                 sha256 manifest of the tarball
   docker-compose.yml         prod compose (tree image, R12/R15/R16)
   .env.example               four-var contract template (fill -> .env)
-  34-site-deployment.md      site runbook (offline load -> up -> rollback)
+  DEPLOY-MANUAL.md           deployment engineer manual (install/tuning/drill)
+  OPS-MANUAL.md              ops manual (load/up/verify/day-2/troubleshoot/rollback)
   --dist DIR   output directory (default dist/)
   --tag TAG    image tag (default: running container tag, else crate version)
   --brand NAME image brand (default MEDIASERVO_BRAND or msrtc)
@@ -1068,14 +1069,21 @@ PIEOF
     (cd "$abs" && sha256sum "$tar" > SHA256SUMS) || return $?
     cp "$ROOT/docker-compose.yml" "$abs/docker-compose.yml"
     cp "$ROOT/.env.example" "$abs/.env.example"
+    # Two role-facing manuals ship with the set (R22 runbook face ZH):
+    # DEPLOY-MANUAL = deployment engineer (install/tuning/firewall/offline drill);
+    # OPS-MANUAL = day-2 operations (load/up/verify/logs/backup/troubleshoot/rollback).
+    local _miss=""
     if [ -f "$ROOT/docs/modules/34-site-deployment.md" ]; then
-        cp "$ROOT/docs/modules/34-site-deployment.md" "$abs/34-site-deployment.md"
-    else
-        echo "WARN: site runbook docs/modules/34-site-deployment.md absent — artifact set incomplete (B3.7)" >&2
-    fi
+        cp "$ROOT/docs/modules/34-site-deployment.md" "$abs/DEPLOY-MANUAL.md"
+    else _miss="34-site-deployment.md"; fi
+    if [ -f "$ROOT/docs/modules/35-container-ops-manual.md" ]; then
+        cp "$ROOT/docs/modules/35-container-ops-manual.md" "$abs/OPS-MANUAL.md"
+    else _miss="$_miss 35-container-ops-manual.md"; fi
+    [ -z "$_miss" ] || echo "WARN: manual(s) absent — artifact set incomplete:$_miss" >&2
     echo "✓ packaged image artifact set: $abs"
     echo "  image:    $image (+ latest), $(( $(stat -c%s "$abs/$tar") / 1024 / 1024 )) MiB tar"
     echo "  manifest: SHA256SUMS"
+    echo "  manuals:  DEPLOY-MANUAL.md (deploy) + OPS-MANUAL.md (ops)"
     echo "  site:     docker load -i $tar && cp .env.example .env (fill) && docker compose --env-file .env up -d"
 }
 

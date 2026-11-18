@@ -1,8 +1,11 @@
-# 34 — 现场部署手册（离线生产镜像）
+# 34 — 现场部署手册（离线生产镜像）· 部署工程师
 
-> container-build-rework B3.7 / P2-H5。**本手册取代 `31-upgrade-migration.md`
-> 的容器章节用于现场部署**（31 保留为升级/迁移参考）。适用产物 = `package image`
-> 离线产物集；目标环境 = 受限内网 CentOS 8 现场（无外网、无 registry）。
+> container-build-rework B3.7 / P2-H5。**本手册 = 部署工程师手册**（装机/内核调优/
+> 防火墙/SELinux/离线 load→up→验证/凭据交付/回滚演练），取代
+> `31-upgrade-migration.md` 的容器章节用于现场部署（31 保留为升级/迁移参考）。
+> 随包发布名：`DEPLOY-MANUAL.md`。**日常运维（起/验/日志/备份/排障/升级回滚/速查卡）
+> 见同包《运维手册》`OPS-MANUAL.md`**（`35-container-ops-manual.md`）。
+> 适用产物 = `package image` 离线产物集；目标环境 = 受限内网 CentOS 8 现场（无外网、无 registry）。
 > 语言规范 R22：现场手册中文。
 
 ## 0. 产物集与边界
