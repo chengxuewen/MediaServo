@@ -74,8 +74,8 @@ const CASES = [
     var purge=before===2&&after===1;
     document.getElementById('chEv').click();document.getElementById('cfmOk').click();var revoke=evBuf[D.id]===undefined;
     return {purge,revoke};`],
-  ['admin-hub', `goto('admin');var cards=[...document.querySelectorAll('#adminHub .card')];var rows=[...document.querySelectorAll('#adminHub [data-go]')];
-    var domains=cards.length===4&&rows.length===9;
+  ['admin-hub', `goto('admin');var cards=[...document.querySelectorAll('#adminHub .card')];var rows=[...document.querySelectorAll('#adminHub .board-row[data-go]')];
+    var domains=cards.length===4&&rows.length===10;
     document.querySelector('#adminHub [data-go=devices]').click();
     var spoke=current==='devices';var parentActive=document.querySelector('.nav-item[data-nav=admin]').classList.contains('active');
     var crumb=document.getElementById('crumb').textContent.indexOf('Admin /')===0;
@@ -84,7 +84,7 @@ const CASES = [
     var open=document.getElementById('devDrawer').classList.contains('open');
     var hiddenClosed=document.getElementById('devDrawer').getAttribute('aria-hidden')==='false';
     var initialFocus=document.activeElement.id==='ddClose';
-    var tabs=document.querySelectorAll('.dd-tab').length===4;
+    var tabs=document.querySelectorAll('.dd-tab').length===6;
     var t0=document.querySelector('.dd-tab[aria-selected="true"]');t0.focus();
     t0.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
     var roving=document.querySelector('.dd-tab[aria-selected="true"]').dataset.dt==='config';
@@ -103,7 +103,7 @@ const CASES = [
   ['device-drawer-narrow', `goto('devices');document.querySelector('#devBody .dev-primary').click();
     var w=Math.round(document.getElementById('devDrawer').getBoundingClientRect().width);
     return {fullWidth:w>=innerWidth-2};`, 600],
-  ['device-config', `goto('devices');var row=document.querySelector('#devBody .dev-primary');row.click();
+  ['device-config', `applyProto('sim','vision');goto('devices');var row=document.querySelector('#devBody .dev-primary');row.click();
     document.querySelector('.dd-tab[data-dt=config]').click();var D=DEVICES.find(x=>x.id===row.dataset.id);
     var inp=document.querySelector('[data-dk="video.fps"]');inp.value='30';inp.dispatchEvent(new Event('input',{bubbles:true}));
     var diff=document.querySelectorAll('#ddDiff .diff-row').length===1;
@@ -122,7 +122,7 @@ const CASES = [
     document.querySelector('[data-retry]').click();
     var retry=(DEG.overrides['video.fps']||{}).state==='failed';
     return {diff,applied,rb,staged,flush,failed,retry};`],
-  ['device-role', `goto('devices');var M={};
+  ['device-role', `applyProto('sim','vision');goto('devices');var M={};
     ['viewer','dispatcher','admin','field'].forEach(r=>{myRole=r;renderDevices();openDevDrawer('CAM-05');
       var g=s=>{var e=document.querySelector(s);return e?(e.getAttribute('aria-disabled')==='true'):null;};
       document.querySelector('.dd-tab[data-dt=config]').click();var cfg=g('[data-dk]');
@@ -136,8 +136,235 @@ const CASES = [
     myRole='viewer';applyProto('role','admin');openDevDrawer('CAM-01');var repaint=document.getElementById('ddRole').textContent==='admin';closeDevDrawer();
     myRole='dispatcher';renderDevices();
     return {viewerOk,fieldOk,dispOk,adminOk,repaint};`],
+  ['accounts', `myRole='admin';syncUserchip();goto('admin');
+    var mrows=document.querySelectorAll('#adminHub .tbl tbody tr').length;
+    var matrixRows9=mrows===9;
+    var states=[...document.querySelectorAll('#adminHub .cap-state')].map(x=>x.textContent);
+    var statesDerive=states.filter(t=>t==='active').length===7&&states.filter(t=>t==='absent').length===2;
+    goto('accounts');document.getElementById('accNew').click();
+    var focusInitial=document.activeElement.id==='accUser';
+    document.getElementById('accUser').value='test1';document.getElementById('accPass').value='pw';
+    document.getElementById('accRoleBtn').click();document.querySelector('#accRolePop [data-ro=operator]').click();
+    document.querySelector('#accScope [data-sc=VH-07]').click();
+    var nonVehGated=document.querySelector('#accScope [data-sc=CAM-01]').getAttribute('aria-disabled')==='true';
+    document.getElementById('accSave').click();
+    var created=ACCOUNTS.some(a=>a.u==='test1'&&a.role==='operator'&&a.vehicles.includes('VH-07'));
+    document.querySelector('.acc-edit[data-u=ops1]').click();document.getElementById('accRoleBtn').click();document.querySelector('#accRolePop [data-ro=dispatcher]').click();document.getElementById('accSave').click();
+    var edited=ACCOUNTS.find(a=>a.u==='ops1').role==='dispatcher';
+    var focusRestore=document.activeElement.classList.contains('acc-edit');
+    document.querySelector('.acc-del[data-u=view1]').click();document.getElementById('cfmOk').click();
+    var deleted=!ACCOUNTS.some(a=>a.u==='view1');
+    var selfGuard=document.querySelector('.acc-del[data-u="dispatch.x"]').getAttribute('aria-disabled')==='true';
+    var guardKeyboard=!document.querySelector('.acc-del[data-u="dispatch.x"]').disabled;
+    myRole='dispatcher';renderAccounts();var dispatcherRead=document.querySelectorAll('#accBody tr').length>0&&document.getElementById('accNew').getAttribute('aria-disabled')==='true';
+    myRole='viewer';renderAccounts();var viewerNoAccess=document.getElementById('accBody').textContent.includes('No access');
+    myRole='operator';renderAccounts();var operatorNoAccess=document.getElementById('accBody').textContent.includes('No access');
+    myRole='admin';applyProto('cap','provider:accessbase');renderAccounts();
+    var delegatedGuard=document.getElementById('accNew').getAttribute('aria-disabled')==='true';
+    goto('admin');var delRow=[...document.querySelectorAll('#adminHub .tbl tbody tr')].find(r=>r.textContent.includes('Accounts'));
+    var delAff=!!delRow.querySelector('a[data-ext]')&&!!delRow.querySelector('[data-force]');
+    delRow.querySelector('[data-force]').click();document.getElementById('cfmOk').click();
+    var forced=capState('accounts')==='degraded';
+    goto('accounts');var breakGlass=!!document.getElementById('accBgNew');
+    document.getElementById('accBgNew').click();document.getElementById('cfmOk').click();
+    var bgAudited=AUDIT[0].action==='account.breakglass';
+    document.getElementById('accBgReset').click();document.getElementById('cfmOk').click();
+    var bgReset=AUDIT[0].action==='account.breakglass.reset';
+    applyProto('cap','health:unreachable');goto('admin');
+    var degradedRow=[...document.querySelectorAll('#adminHub .cap-state')].some(x=>x.textContent==='degraded');
+    var banner=!document.getElementById('degBanner').hidden;
+    applyProto('cap','provider:builtin');applyProto('cap','health:reachable');
+    applyProto('sim','accerror');var errState=document.getElementById('accErr').textContent.includes('unreachable');
+    document.getElementById('accRetry').click();var loadingState=document.getElementById('accBody').textContent.includes('Loading');
+    accError=false;accLoading=false;accQ='zzz';renderAccounts();var emptyState=document.getElementById('accBody').textContent.includes('No accounts match');accQ='';renderAccounts();
+    var lightDefault=document.documentElement.dataset.theme==='light';
+    return {matrixRows9,statesDerive,focusInitial,created,nonVehGated,edited,focusRestore,deleted,selfGuard,guardKeyboard,dispatcherRead,viewerNoAccess,operatorNoAccess,delegatedGuard,delAff,forced,breakGlass,bgAudited,bgReset,degradedRow,banner,errState,loadingState,emptyState,lightDefault};`],
+  ['psk', [
+    `myRole='admin';goto('keys');
+     document.getElementById('pskView').click();
+     var viewAudited=pskRevealed&&AUDIT[0].action==='psk.view'&&document.getElementById('pskVal').textContent===PSK.value;
+     document.getElementById('pskView').click();
+     document.getElementById('pskRotate').click();
+     var rotateFocus=document.activeElement.id==='pskNew'&&document.getElementById('pskScrim').classList.contains('show');
+     document.getElementById('pskNew').value='abc';document.getElementById('pskOk').click();
+     var rotateValidate=PSK.value.indexOf('custom')<0&&!document.getElementById('secretScrim').classList.contains('show');
+     document.getElementById('pskRotate').click();document.getElementById('pskNew').value='ms-psk-custom-123';document.getElementById('pskOk').click();
+     var loadingState=document.getElementById('keyBody').textContent.includes('Loading');
+     return {viewAudited,rotateFocus,rotateValidate,loadingState};`,
+    `var onceDisplay=document.getElementById('secretScrim').classList.contains('show')&&document.getElementById('secVal').textContent==='ms-psk-custom-123';
+     document.getElementById('secDone').click();
+     var closeGuard=document.getElementById('cfmScrim').classList.contains('show')&&document.getElementById('secretScrim').classList.contains('show');
+     document.getElementById('cfmCancel').click();
+     var closeGuardKeeps=document.getElementById('secretScrim').classList.contains('show');
+     document.getElementById('secCopy').click();
+     var copyHandled=secretCopied||document.getElementById('secCopyHint').textContent.length>0;
+     secretCopied=true;document.getElementById('secDone').click();
+     var safeClose=!document.getElementById('secretScrim').classList.contains('show');
+     var rotated=PSK.value==='ms-psk-custom-123'&&AUDIT.some(a=>a.action==='psk.rotate');
+     return {onceDisplay,closeGuard,closeGuardKeeps,copyHandled,safeClose,rotated};`,
+    `document.getElementById('newKey').click();
+     var createFocus=document.activeElement.id==='keyId';
+     document.getElementById('keyId').value='key-t1';document.getElementById('keyLabel').value='test key';
+     document.getElementById('keyRoleBtn').click();document.querySelector('#keyRolePop [data-kro=operator]').click();
+     document.querySelector('#keyScope [data-ksc=VH-07]').click();
+     var nonVehGated=document.querySelector('#keyScope [data-ksc=CAM-01]').getAttribute('aria-disabled')==='true';
+     document.getElementById('keyOk').click();
+     var createLoading=document.getElementById('keyBody').textContent.includes('Loading');
+     return {createFocus,nonVehGated,createLoading};`,
+    `var keySecret=document.getElementById('secretScrim').classList.contains('show')&&document.getElementById('secVal').textContent.indexOf('msk_')===0;
+     secretCopied=true;document.getElementById('secDone').click();
+     var created=KEYS.some(k=>k.id==='key-t1'&&k.role==='operator'&&k.vehicles.includes('VH-07'))&&AUDIT.some(a=>a.action==='key.create');
+     document.querySelector('.key-revoke[data-id=key-t1]').click();
+     var revokeConfirm=document.getElementById('cfmScrim').classList.contains('show');
+     document.getElementById('cfmOk').click();
+     var revoked=!KEYS.some(k=>k.id==='key-t1')&&AUDIT[0].action==='key.revoke';
+     applyProto('cap','provider:accessbase');renderKeys();
+     var delegatedGuard=document.getElementById('newKey').getAttribute('aria-disabled')==='true'&&document.getElementById('pskRotate').getAttribute('aria-disabled')==='true';
+     applyProto('cap','health:unreachable');renderKeys();
+     var bgPsk=!!document.getElementById('pskBg');
+     document.getElementById('pskBg').click();document.getElementById('cfmOk').click();
+     return {keySecret,created,revokeConfirm,revoked,delegatedGuard,bgPsk};`,
+    `var bgAudited=AUDIT.some(a=>a.action==='psk.breakglass');
+     applyProto('cap','provider:builtin');applyProto('cap','health:reachable');
+     applyProto('sim','keyerror');var errState=document.getElementById('keyErr').textContent.includes('unreachable');
+     document.getElementById('keyRetry').click();var retryLoading=document.getElementById('keyBody').textContent.includes('Loading');
+     keyError=false;keyLoading=false;keyQ='zzz';renderKeys();var emptyState=document.getElementById('keyBody').textContent.includes('No keys match');keyQ='';renderKeys();
+     return {bgAudited,errState,retryLoading,emptyState};`
+  ]],
+  ['creds', [
+    `myRole='admin';goto('devices');var P=DEVICES.find(x=>x.status==='pending');openDevDrawer(P.id);
+     document.querySelector('.dd-tab[data-dt=creds]').click();
+     var visionGated=document.getElementById('credReg').getAttribute('aria-disabled')==='true';
+     var emptyState=document.getElementById('ddBody').textContent.includes('no credential yet');
+     applyProto('sim','vision');
+     var simulateLeg=document.getElementById('credReg').getAttribute('aria-disabled')!=='true';
+     document.getElementById('credReg').click();
+     var focusInitial=document.activeElement.id==='credName';
+     document.getElementById('credName').value='renamed-cam';document.getElementById('credSecret').value='ms-dev-provided-1';
+     document.getElementById('credOk').click();
+     var loadingState=document.getElementById('ddBody').textContent.includes('Resetting')||credLoading;
+     return {visionGated,emptyState,simulateLeg,focusInitial,loadingState};`,
+    `var registerOnce=document.getElementById('secretScrim').classList.contains('show')&&document.getElementById('secVal').textContent==='ms-dev-provided-1';
+     document.getElementById('secDone').click();
+     var closeGuard=document.getElementById('cfmScrim').classList.contains('show');
+     document.getElementById('cfmCancel').click();secretCopied=true;document.getElementById('secDone').click();
+     var P=DEVICES.find(x=>x.id===devOpen);
+     var registered=P.status==='online'&&P.name==='renamed-cam'&&AUDIT.some(a=>a.action==='device.register')&&AUDIT.some(a=>a.action==='device.approve');
+     return {registerOnce,closeGuard,registered};`,
+    `document.getElementById('credReset').click();
+     var resetConfirm=document.getElementById('cfmScrim').classList.contains('show');
+     document.getElementById('cfmOk').click();
+     var resetLoading=credLoading;
+     return {resetConfirm,resetLoading};`,
+    `var resetOnce=document.getElementById('secretScrim').classList.contains('show')&&AUDIT.some(a=>a.action==='device.secret.reset');
+     secretCopied=true;document.getElementById('secDone').click();
+     var revokeSemantics=document.getElementById('ddBody').textContent.includes('DELETE');
+     var rg=document.getElementById('credReg');rg.focus();rg.click();
+     document.getElementById('credCancel').click();
+     var focusRestore=document.activeElement.id==='credReg';
+     var rg2=document.getElementById('credReg');rg2.focus();rg2.click();
+     document.getElementById('credName').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+     var escOrder=!document.getElementById('credScrim').classList.contains('show');
+     myRole='viewer';renderDrawer();
+     var guardKeyboard=!document.getElementById('credReset').disabled&&document.getElementById('credReset').getAttribute('aria-disabled')==='true';
+     myRole='admin';applyProto('sim','crederror');
+     var errState=document.getElementById('ddBody').textContent.includes('unreachable');
+     document.getElementById('credRetry').click();
+     var retryLoading=credLoading;
+     credError=false;credLoading=false;renderDrawer();
+     return {resetOnce,revokeSemantics,focusRestore,escOrder,guardKeyboard,errState,retryLoading};`
+  ]],
+  ['fleet', `myRole='admin';goto('devices');
+    document.querySelector('#fleetLens [data-lens=fleet]').click();
+    var rows=[...document.querySelectorAll('#devBody tr')];
+    var lensFilter=rows.length===3&&rows.every(r=>r.textContent.includes('VH-'));
+    var lensAria=document.getElementById('fleetLens').getAttribute('role')==='radiogroup'&&document.querySelector('#fleetLens [data-lens=fleet]').getAttribute('aria-checked')==='true'&&document.querySelector('#fleetLens [data-lens=all]').tabIndex===-1;
+    var strip=document.getElementById('fleetStrip').textContent;
+    var healthStrip=strip.includes('3')&&strip.includes('Signal lost')&&strip.includes('Agent unreachable')&&strip.includes('Stalled topics')&&strip.includes('Down processes');
+    var rowSummary=document.getElementById('devBody').textContent.includes('up 12h');
+    goto('overview');document.getElementById('ovFleetOpen').click();
+    var deepLink=current==='devices'&&devLens==='fleet';
+    openDevDrawer('VH-07');document.querySelector('.dd-tab[data-dt=telemetry]').click();
+    var t7=document.getElementById('ddBody').textContent;
+    var telemetrySignalUptime=t7.includes('ok')&&t7.includes('12h')&&t7.includes('1920x1080');
+    openDevDrawer('VH-02');document.querySelector('.dd-tab[data-dt=telemetry]').click();
+    var t2=document.getElementById('ddBody').textContent;
+    var procThreeState=t2.includes('down')&&t2.includes('lost');
+    var topicStalled=t2.includes('stalled');
+    openDevDrawer('VH-11');document.querySelector('.dd-tab[data-dt=telemetry]').click();
+    var unreachable=document.getElementById('ddBody').textContent.includes('Agent unreachable');
+    closeDevDrawer();goto('accounts');document.getElementById('accNew').click();
+    var scopeIds=[...document.querySelectorAll('#accScope [data-sc]')].map(x=>x.dataset.sc).filter(id=>id.startsWith('VH-'));
+    var scopeCrossLink=scopeIds.length===3;
+    document.getElementById('accCancel').click();
+    applyProto('sim','fleeterror');
+    var errState=document.getElementById('fleetStrip').textContent.includes('unreachable');
+    document.getElementById('fleetRetry').click();
+    var loadingState=fleetLoading;
+    fleetError=false;fleetLoading=false;
+    document.querySelector('#devSeg [data-f=pending]').click();
+    var emptyState=document.getElementById('devBody').textContent.includes('No devices match');
+    document.querySelector('#devSeg [data-f=all]').click();
+    return {lensFilter,lensAria,healthStrip,rowSummary,deepLink,telemetrySignalUptime,procThreeState,topicStalled,unreachable,scopeCrossLink,errState,loadingState,emptyState};`],
+  ['monitor-link', `goto('monitor');openPicker();
+    var treeRole=document.getElementById('pickAvail').getAttribute('role')==='tree';
+    var tw=document.querySelector('#pickAvail button.tw');tw.focus();
+    var twistyFocusable=tw.tabIndex===0;
+    tw.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
+    var treeKeyboard=document.activeElement!==tw;
+    var tw2=document.querySelector('#pickAvail button.tw');tw2.focus();
+    tw2.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+    var treeExpand=document.querySelector('#pickAvail .pick-dev').getAttribute('aria-expanded')==='true';
+    document.getElementById('playAll').click();
+    var playAllGuard=pickSel.length>0&&pickSel.length<=16&&!pickSel.some(id=>id.startsWith('vh-02'));
+    pickSel=Array.from({length:16},(_,i)=>'pad-'+i).concat(['extra-17']);renderPick();
+    var cap16Guard17th=pickSel.length===17&&document.getElementById('pickApply').classList.contains('is-disabled');
+    pickSel=Array.from({length:16},(_,i)=>'pad-'+i);renderPick();
+    var bulk=[...document.querySelectorAll('#pickAvail .pick-dev input')].find(c=>!c.checked);
+    if(bulk){bulk.checked=true;bulk.onchange();}
+    var bulkGuard=bulk?pickSel.length===16&&bulk.classList.contains('is-disabled'):false;
+    pickSel=connectedStreamIds().slice(0,4);renderPick();
+    document.getElementById('pickApply').click();
+    document.getElementById('statsToggle').click();
+    var perStreamMetrics=document.querySelector('#tiles .tile-stats').textContent.includes('FPS');
+    var honestBanner=document.getElementById('monSimNote').textContent.includes('Simulated video');
+    applyContent('empty');var emptyState=document.body.dataset.content==='empty';
+    applyContent('loading');var loadingState=getComputedStyle(document.getElementById('wallLoading')).display!=='none';
+    applyContent('error');var errState=document.body.dataset.content==='error';
+    document.getElementById('liveRetry').click();var retryWorks=document.body.dataset.content==='data';
+    applyContent('data');
+    return {treeRole,twistyFocusable,treeKeyboard,treeExpand,playAllGuard,cap16Guard17th,bulkGuard,perStreamMetrics,honestBanner,emptyState,loadingState,errState,retryWorks};`],
+  ['audit-ring', `myRole='admin';goto('audit');
+    var acts=[...document.querySelectorAll('#auditBody tr td:nth-child(3)')].map(x=>x.textContent);
+    var ringRows=acts.length>0&&acts.every(a=>/^(auth|account|psk|key|device|access)\./.test(a));
+    var meta=document.getElementById('auditMeta').textContent;
+    var retentionLabel=meta.includes('Retention 90 d')&&meta.includes('simulated');
+    var hl=document.getElementById('auditHistory');
+    var historyLink=hl.getAttribute('aria-disabled')==='true'&&(hl.dataset.reason||'').includes('/talk/history');
+    var srcs=[...document.querySelectorAll('#auditBody tr')].map(r=>[r.children[2].textContent,r.children[4].textContent]);
+    var loginQuerySimulated=srcs.some(x=>x[0]==='auth.login'&&x[1]==='simulated');
+    var logoutSimulated=srcs.some(x=>x[0]==='auth.logout'&&x[1]==='simulated');
+    document.querySelector('#auditSeg [data-ak=identity]').click();
+    var kindFilter=[...document.querySelectorAll('#auditBody tr td:nth-child(3)')].every(x=>/^(auth|account)\./.test(x.textContent));
+    AUDIT.unshift({t:'12:11:00',actor:'admin.x',action:'account.breakglass',target:'emg-1',ok:true,source:'core'});
+    document.querySelector('#auditSeg [data-ak=bg]').click();
+    var bgRing=[...document.querySelectorAll('#auditBody tr td:nth-child(3)')].some(x=>x.textContent==='account.breakglass');
+    document.querySelector('#auditSeg [data-ak=all]').click();
+    applyProto('cap','provider:accessbase');renderAudit();
+    var sourceProvider=[...document.querySelectorAll('#auditBody tr')].some(r=>r.children[4].textContent==='provider');
+    applyProto('cap','provider:builtin');renderAudit();
+    auditQ='zzz';renderAudit();var emptyState=document.getElementById('auditBody').textContent.includes('No security events match');auditQ='';renderAudit();
+    applyProto('sim','auditerror');var errState=document.getElementById('auditErr').textContent.includes('unreachable');
+    document.getElementById('auditRetry').click();var loadingState=auditLoading;
+    auditError=false;auditLoading=false;renderAudit();
+    return {ringRows,retentionLabel,historyLink,loginQuerySimulated,logoutSimulated,kindFilter,bgRing,sourceProvider,emptyState,errState,loadingState};`],
+  ['accounts-narrow', `myRole='admin';goto('accounts');
+    var noOv=document.documentElement.scrollWidth<=innerWidth;
+    var card=getComputedStyle(document.querySelector('#accBody td:nth-child(2)')).display==='flex';
+    var tailHidden=getComputedStyle(document.querySelector('#modeInd .mi-tail')).display==='none';
+    return {noOv,card,tailHidden};`, 600],
   ['admin-controls', `var ids=['devices','rooms','sessions','streams','config','keys','audit','settings','signaling'];var bad=[];
-    ids.forEach(id=>{goto(id);document.querySelectorAll('#page-'+id+' .btn,#page-'+id+' .chip-btn,#page-'+id+' .seg,#page-'+id+' .search,#page-'+id+' .iconbtn,#page-'+id+' .msg-in').forEach(e=>{var h=Math.round(e.getBoundingClientRect().height);if(h!==30)bad.push(id+':'+h);});});
+    ids.forEach(id=>{goto(id);document.querySelectorAll('#page-'+id+' .btn,#page-'+id+' .chip-btn,#page-'+id+' .seg,#page-'+id+' .search,#page-'+id+' .iconbtn,#page-'+id+' .msg-in').forEach(e=>{if(!e.getClientRects().length)return;var h=Math.round(e.getBoundingClientRect().height);if(h!==30)bad.push(id+':'+h);});});
     var h30=bad.length===0;
     goto('devices');var s0=Math.round(document.querySelector('#devSeg').getBoundingClientRect().height);
     document.querySelector('#devSeg [data-f=pending]').click();var s1=Math.round(document.querySelector('#devSeg').getBoundingClientRect().height);
@@ -166,6 +393,13 @@ const NEG = {
   'device-drawer': `openDevDrawer=function(){};`,
   'device-config': `flushStaged=function(){};`,
   'device-role': `setGuard=function(){};`,
+  accounts: `renderAccounts=function(){};`,
+  psk: `doRotate=function(){};`,
+  creds: `resetSecret=function(){};`,
+  fleet: `renderFleetStrip=function(){};`,
+  'monitor-link': `renderAvail=function(){};`,
+  'audit-ring': `renderAudit=function(){};`,
+  'accounts-narrow': `var st=document.createElement('style');st.textContent='@media (max-width:760px){#topbar{gap:var(--sp12);padding:0 var(--sp16)}}';document.head.appendChild(st);`,
   notif: `renderNotif=function(){};`,
 };
 
@@ -204,7 +438,7 @@ async function main() {
   const results = {}; let fail = 0;
   const NEG_MODE = process.argv.includes('--negative');
   const run = async (src) => {
-    const inner = 'try{window.__result=(function(){' + src + '})();}catch(e){window.__result={__err:String(e && e.message || e)};}';
+    const inner = 'try{window.__result=(function(){' + src + '})();}catch(e){window.__result={__err:String(e && e.message || e)+" @"+String(e && e.stack || "").slice(0,220)};}';
     const wrapped = "var s=document.createElement('script');s.textContent=" + JSON.stringify(inner) + ";document.documentElement.appendChild(s);var r=window.__result;window.__result=undefined;return r;";
     try { const r = await m.cmd('WebDriver:ExecuteScript', { script: wrapped, args: [] }); return { val: (r && typeof r === 'object' && 'value' in r) ? r.value : r, err: null }; }
     catch (e) { return { val: {}, err: String(e.message) }; }

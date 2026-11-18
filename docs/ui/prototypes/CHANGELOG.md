@@ -1,5 +1,164 @@
 # Prototypes CHANGELOG
 
+## v1.74 — 2026-11-18 (portal-unified) — B6 delivered (pending user review): Audit = core security minimal ring
+Implements web-portal-ui §3i B6 (Q8=A / Q6 forward notes / C62). Completes the B1–B6 design round.
+- **Ring filter**: Audit page shows ONLY security-ring events (auth./account./psk./key./device./access.);
+  operational floor.grant/room.join etc. excluded (T2: not rebuilt here).
+- **Ring kind seg** (radiogroup+roving): All/Identity/Credentials/Devices/Break-glass; break-glass kind
+  matched BEFORE identity (account.breakglass belongs to bg, not identity).
+- **Source column**: core (local ring) / provider (delegated feed, simulated) / simulated (login/logout:
+  backend audits auth events but Web query face unproven → honest simulated tag + tooltip).
+- **Retention label**: "Retention 90 d · simulated in-memory ring (256 entries) · core security store
+  unproven → simulated" (honest, no fake compliance claim).
+- **Operational history link**: guarded button + keyboard-discoverable reason "talk app /talk/history
+  (T2): separate surface, not rebuilt in this portal" (no fake navigation).
+- **Three states**: empty (No security events match) / loading (300ms simulated) / error (audit store
+  unreachable banner + Retry; devtools "Audit store · Simulate error" leg).
+- Verified: harness 26 cases ALL GREEN (audit-ring 11 assertions: ringRows/retentionLabel/historyLink/
+  loginQuerySimulated/logoutSimulated/kindFilter/bgRing/sourceProvider/emptyState/errState/loadingState)
+  + NEG all red (audit-ring: renderAudit noop); node --check + lint clean; stamps x4 (C68).
+- Screenshots: b6-ring/bg/error/narrow.
+- Round status: B1 v1.69 / B2 v1.70 / B3 v1.71 / B4 v1.72 / B5 v1.73 / B6 v1.74 all delivered,
+  pending user review per P9 loop; 26 harness cases + NEG self-check green.
+
+## v1.73 — 2026-11-18 (portal-unified) — B5 delivered (pending user review): Monitor real-wall linkage design
+Implements web-portal-ui §3i B5 (reuse Monitor, no redesign; §2i layouts/cap honoured, not re-adjudicated).
+- **Device-tree picker upgraded in place** (grouping NOT rebuilt): #pickAvail role=tree; device rows
+  role=treeitem aria-level=1 aria-expanded; twisty span→button tabindex=0 aria-label/expanded; stream
+  rows role=treeitem aria-level=2; delegated tree keyboard (ArrowUp/Down move, ArrowRight/Left
+  expand/collapse, Enter/Space toggle, Home/End).
+- **Play All**: selects connected streams only (offline/pending/revoked skipped, honest toast counts),
+  capped at WALL_CAP=16; guarded when no connected streams.
+- **16-wall cap (§2i Auto)**: 17th selection guarded at stream checkbox, device bulk checkbox and Apply
+  (setGuard + reason + revert); cap constant WALL_CAP=16 separate from intercom MON_CAP=4.
+- **Per-stream metrics**: existing tile-stats overlay (FPS/RES/BIT/…) asserted on-wall with stats ON.
+- **Honest banner**: #monSimNote "Simulated video — prototype feeds, not real streams" + real-backend
+  contract pointer (/sfu/rooms + /sfu/stats); mapping table recorded in boards B5 note.
+- **Three states**: empty (content=empty) / loading (#wallLoading) / error (#liveStale via
+  body[data-content=error]) + Retry now restores content=data (was toast-only dead end).
+- Verified: harness 25 cases ALL GREEN (monitor-link 13 assertions: treeRole/twistyFocusable/
+  treeKeyboard/treeExpand/playAllGuard/cap16Guard17th/bulkGuard/perStreamMetrics/honestBanner/
+  emptyState/loadingState/errState/retryWorks) + NEG all red (monitor-link: renderAvail noop);
+  node --check + lint clean; stamps x4 (C68). Screenshots: b5-picker/cap/wall/error/narrow.
+- Process notes: duplicate case blocks from re-run scripts deduped (keep-newest rule corrected);
+  harness DOM-attribute reads replaced with equivalent class/state reads where Marionette injection
+  diverged from plain headless (assertions semantics unchanged).
+
+## v1.72 — 2026-11-18 (portal-unified) — B4 delivered (pending user review): fleet split-fused into Devices
+Implements web-portal-ui §3i B4 (Q3=D' fleet = vehicle-kind devices + agent telemetry; no new spoke/domain).
+- **Fleet lens**: Devices page segmented All devices / Fleet = role=radiogroup + role=radio +
+  aria-checked + roving tabindex + arrow keys; Fleet filters kind=vehicle; lens state survives goto
+  deep link (goto(id,lens)).
+- **Fleet health strip (5 counts)**: Vehicles N / Signal lost x / Agent unreachable y / Stalled topics z /
+  Down processes w. Unreachable = no /status report OR report ts stale > 30s (simulated); unreachable
+  vehicles supersede topic/process counts (their feed is not trustworthy) — semantics documented.
+- **Row telemetry summary** in Fleet lens: signal ok/lost + uptime, or "agent unreachable".
+- **Telemetry tab (6th drawer tab)**: signal badge + uptime + processes running/down/unexpected +
+  topics fps/bps/stalled + streams connected/resolution/fps (full Vehicles.tsx field set);
+  unreachable empty state with stale-threshold reason; loading + error(+Retry) states.
+- **Overview fleet card**: counts summary + "Open fleet lens" deep link → devices?lens=fleet.
+- **Scope cross-link**: Accounts/Keys Device-scope chips source = same vehicle set (Q12); identity
+  source note: real AdminDevice has no kind field → /status reports room_id (simulated seed; backend
+  field = open item).
+- **Three states**: empty (no vehicles match filter) / loading (300ms simulated) / error (telemetry feed
+  unreachable banner + Retry; devtools "Fleet feed · Simulate error" leg).
+- Regression registrations honoured: device-drawer tabs 5→6.
+- Verified: harness 24 cases ALL GREEN (fleet 13 assertions: lensFilter/lensAria/healthStrip/rowSummary/
+  deepLink/telemetrySignalUptime/procThreeState/topicStalled/unreachable/scopeCrossLink/errState/
+  loadingState/emptyState) + NEG all red (fleet: renderFleetStrip noop); node --check + lint clean;
+  stamps x4 (C68). Screenshots: b4-fleet/telemetry/unreachable/overview/narrow.
+
+## v1.71 — 2026-11-18 (portal-unified) — B3 delivered (pending user review): device credential lifecycle + vision gating
+Implements web-portal-ui §3i B3 (Q4=B vision gate / Q12 / real devices endpoints / PIT-269).
+- **Credentials tab (5th drawer tab)**: state line (registered·secret issued / pending·no credential yet);
+  Register+approve modal (optional rename-on-approve + optional provided secret, else generated) →
+  pending→online + audit device.register + device.approve + one-time close-protected secret;
+  Reset secret = confirmDlg consequence (old invalidated) → 300ms simulated → one-time secret +
+  audit device.secret.reset; revoke semantics card surfaces real backend revoke=DELETE vs prototype
+  revoked-flag+Restore vision (marked simulated); Reject/Restore/Re-approve labelled no-real-endpoint.
+- **Vision gating (Q4=B)**: can() split canBase + VISION_SET(config/caps/rename/zone/reject/restore/
+  reapprove) gated unless VISION_ON; vGuard() gives keyboard-discoverable reason "Backend unproven —
+  vision gated. Enable Prototype controls > Device vision (simulated)"; devtools "Device vision · Toggle
+  simulate" leg flips VISION_ON and repaints devices+drawer; real-endpoint actions (approve/revoke/
+  devops register/reset) stay ungated.
+- **Three states**: empty (pending no credential) / loading (Resetting credential… 300ms) / error
+  (credential store unreachable banner + Retry; devtools "Cred store · Simulate error" leg).
+- **Guards**: register/reset require operator|admin (canBase devops) + not delegated(creds) + state
+  (pending no reset / revoked no reset); viewer/operator/dispatcher read-only with reasons.
+- Regression registrations honoured: device-drawer tabs 4→5; device-config/device-role cases enable
+  vision leg first; duplicate psk case/NEG (from a re-run script) deduped.
+- Verified: harness 23 cases ALL GREEN (creds 4-part 18 assertions: visionGated/emptyState/simulateLeg/
+  focusInitial/loading/registerOnce/closeGuard/registered/resetConfirm/resetLoading/resetOnce/
+  revokeSemantics/focusRestore/escOrder/guardKeyboard/errState/retryLoading) + NEG all red
+  (creds: resetSecret noop); node --check + lint clean; stamps x4 (C68).
+- Screenshots: b3-gated/vision/register/config-gated/narrow (5 tabs, semantics card, register modal).
+
+## v1.70 — 2026-11-18 (portal-unified) — B2 delivered (pending user review): Keys = PSK + API keys dual partition
+Implements web-portal-ui §3i B2 (Q2=B / Q13=E′ / C62 one-time secrets / PIT-269 dialog contract).
+- **PSK card**: View reveals full PSK and audits psk.view EACH reveal (real get_psk semantics preserved,
+  not narrowed to hint); Rotate = confirm modal with OPTIONAL custom new value (8-128 validation, real
+  RotatePskRequest.password semantics) else generated; old value invalidated; new value shown ONCE.
+- **One-time secret modal** (PSK rotate + API key create): "shown once" seal + consequence copy;
+  close protection — Esc/overlay/Done without copy routes to confirmDlg ("cannot be shown again");
+  copied → direct close; Copy = synchronous execCommand fallback + parallel clipboard attempt;
+  clipboard unavailable → fully-selectable secret + manual-copy hint (no dead end).
+- **API keys table real fields**: id/prefix/role/device scope/label/expires (was label/prefix/created/
+  used/expires); create modal (id+label required, role combobox ARIA, Device scope chips with non-vehicle
+  gated + empty=zero-devices hint, admin/dispatcher scope ignored); revoke = confirmDlg consequence +
+  audit key.revoke (was no-confirm no-audit debt); create audits key.create.
+- **Gates**: admin manages (can('keys')); dispatcher read; viewer/operator gated "No access" (server 401);
+  delegated(creds/psk) → management guarded + reason; degraded → break-glass emergency PSK rotation
+  (confirm + audit psk.breakglass + seal).
+- **Three states**: empty (No keys match / No access) / loading (300ms simulated on rotate/create/retry) /
+  error (key store unreachable banner + Retry; devtools "Key store · Simulate error" leg).
+- Removed legacy fake delegates: #newKey toast-only "Key issued" (no secret) and #idAccess toast fake
+  external link (B1 real anchor already in place).
+- Impl bugs found & fixed by assertions: secretScrim spliced INSIDE cfmScrim modal (first </div></div>
+  anchor) → moved to body level before toast (Esc DOM order: cfm wins over secret guard); legacy #newKey
+  delegate pushed old-shape keys (k.vehicles undefined crash); clipboard promise hang → synchronous
+  fallback + parallel attempt.
+- Verified: harness 22 cases ALL GREEN (psk 5-part: viewAudited/rotateFocus/rotateValidate/loading/
+  onceDisplay/closeGuard/closeGuardKeeps/copyHandled/safeClose/rotated/createFocus/nonVehGated/
+  createLoading/keySecret/created/revokeConfirm/revoked/delegatedGuard/bgPsk/bgAudited/errState/
+  retryLoading/emptyState) + NEG all red (psk: doRotate noop); node --check + lint clean; stamps x4.
+- Screenshots: b2-keys/secret/create/delegated/bg/narrow (narrow cards fit, no horizontal overflow).
+
+## v1.69 — 2026-11-18 (portal-unified) — B1 delivered (pending user review): Accounts + Access domain + capability matrix
+Implements web-portal-ui §3i B1 (plan v4, post 4-role review; Q1/Q5/Q9/Q10/Q11/Q12/Q13/Q19).
+- **Access domain**: Security renamed Access (menu single word, Q10); hub card title "Identity & Access";
+  spokes Accounts/Keys(PSK & API keys)/Audit(core minimal ring) → 10 spokes (admin-hub regression updated).
+- **Capability matrix (9 rows incl Q15 ldap)**: provider from config seed × health from simulated endpoint
+  (Q9 full derivation: built-in×any=active; delegated×reachable=delegated; delegated×degraded/unreachable=
+  degraded(break-glass); none=absent; vision override hook gated for B3). authz row dual-label
+  delegated(PDP)+active(PEP) (Q14). Affordances: Open(A) / Open in AccessBase ↗ (real anchor new-tab
+  rel=noopener + initiated audit, delegated listener) / Force break-glass (delegated+reachable, confirm+
+  audit+seal) / Break-glass (degraded) / focusable placeholder button + reason (absent/gated).
+- **Accounts page**: real 4-role model (viewer/operator/dispatcher/admin; operator leg added, field→viewer);
+  Device scope (Q12): vehicle chips selectable, non-vehicle kinds gated "enforcement pending backend
+  extension"; empty scope = zero devices hint (viewer/operator); admin/dispatcher scope ignored = all devices;
+  create/edit modal (password required create / optional edit; generalized combobox with role=combobox/
+  listbox/option + aria-activedescendant + arrow/Enter/Esc); focus contract (initial focus first input,
+  restore trigger after repaint, accScrim registered dlgKey(sc,e) + inserted before cfmScrim for Esc order);
+  delete confirmDlg + self-delete guard; role gates (admin manage / dispatcher read / viewer+operator
+  gated "No access" aligned to server 401); delegated gate + Force entry; break-glass card (emergency
+  account create + credential reset, confirm + audit account.breakglass[.reset] + seal tag).
+- **Three states**: empty (No accounts match) / loading (300ms simulated skeleton on Retry) / error
+  (store unreachable banner + Retry); audit feedback persistent via AUDIT rows (not toast-only).
+- **Global**: topbar mode/health indicator (two-part, narrow hides tail, tooltip full); degraded flow
+  banner (wsBanner precedent) + break-glass shortcut; Settings access row conditional (standalone hidden);
+  userchip role syncs with devtools role; audit actor = effective role; guard single-track sweep
+  (native disabled+data-reason → setGuard focusable); content-state devtools leg labelled Monitor-only;
+  **default light** (Q19: init/localStorage fallback/Reset/seg markup).
+- **Narrow @600**: card reflow fits; header min-content overflow fixed (modeInd tail hidden + #topbar
+  gap/padding narrow + #crumb 24vw); docSW==600 verified.
+- Impl bugs found & fixed by assertions: cfmScrim closing quote eaten by insertion (confirmDlg dead →
+  groups/evidence/device-drawer regressions); dlgKey registered with wrong signature; matrix force/bg
+  wiring spliced into wrong function; accRetry wired after error early-return; focus restore lost on
+  repaint; banner fixed-overlay covering topbar + unbounded icon.
+- Verified: harness 21 cases ALL GREEN (accounts 25 assertions + accounts-narrow) + NEG all red
+  (accounts: renderAccounts noop; accounts-narrow: wide-gap style injection); node --check + lint clean;
+  stamps x4 (C68). Screenshots: matrix/accounts/delegated/break-glass/narrow.
+
 ## v1.68 — 2026-11-17 (portal-unified) — Phase 9 delivered: device detail drawer (K17=A/K18=A/K19=B/K20=B)
 Implements PLAN Phase 9 v2 (post 4-role team review; dead-ends closed before implementation).
 - **9.1 drawer**: NEW overlay side-sheet #devDrawer (480px, full-width ≤900, visible back/close) — ch-side was

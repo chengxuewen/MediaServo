@@ -1,0 +1,187 @@
+{
+  "when": "2026-11-18T08:54:16.059Z",
+  "mode": "negative",
+  "fail": 0,
+  "results": {
+    "floor": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "idleGrant": true,
+        "noJump": false
+      },
+      "error": null
+    },
+    "queue": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "cap": false,
+        "rew": true
+      },
+      "error": null
+    },
+    "notif": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "xpage": false,
+        "clickLand": true,
+        "inpageHide": true
+      },
+      "error": null
+    },
+    "evidence": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "purge": false,
+        "revoke": true
+      },
+      "error": null
+    },
+    "device-drawer": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "t0 is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:6:68\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:20:105\n@http://127.0.0.1:8201/portal-unified.html:2:2066\n@http://"
+      },
+      "error": "t0 is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:6:68\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:20:105\n@http://127.0.0.1:8201/portal-unified.html:2:2066\n@http://"
+    },
+    "device-config": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "diff": true,
+        "applied": true,
+        "rb": true,
+        "staged": true,
+        "flush": false,
+        "failed": true,
+        "retry": true
+      },
+      "error": null
+    },
+    "device-role": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "viewerOk": false,
+        "fieldOk": false,
+        "dispOk": false,
+        "adminOk": true,
+        "repaint": true
+      },
+      "error": null
+    },
+    "accounts": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:14:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:43:296\n@http://127.0.0.1:8201/portal-unified.html:2:4482\n@http:/"
+      },
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:14:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:43:296\n@http://127.0.0.1:8201/portal-unified.html:2:4482\n@http:/"
+    },
+    "psk": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "viewAudited": true,
+        "rotateFocus": true,
+        "rotateValidate": true,
+        "loadingState": false,
+        "onceDisplay": false,
+        "closeGuard": false,
+        "closeGuardKeeps": false,
+        "copyHandled": true,
+        "safeClose": true,
+        "rotated": false,
+        "createFocus": true,
+        "nonVehGated": true,
+        "createLoading": true,
+        "keySecret": true,
+        "created": true,
+        "revokeConfirm": true,
+        "revoked": true,
+        "delegatedGuard": true,
+        "bgPsk": true,
+        "bgAudited": false,
+        "errState": true,
+        "retryLoading": true,
+        "emptyState": true
+      },
+      "error": null
+    },
+    "creds": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "visionGated": true,
+        "emptyState": true,
+        "simulateLeg": true,
+        "focusInitial": true,
+        "loadingState": true,
+        "registerOnce": true,
+        "closeGuard": true,
+        "registered": true,
+        "resetConfirm": true,
+        "resetLoading": false,
+        "resetOnce": false,
+        "revokeSemantics": true,
+        "focusRestore": true,
+        "escOrder": true,
+        "guardKeyboard": true,
+        "errState": true,
+        "retryLoading": true
+      },
+      "error": null
+    },
+    "fleet": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:26:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:32:178\n@http://127.0.0.1:8201/portal-unified.html:2:2853\n@http:/"
+      },
+      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:26:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:32:178\n@http://127.0.0.1:8201/portal-unified.html:2:2853\n@http:/"
+    },
+    "monitor-link": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "tw is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:59\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:28:177\n@http://127.0.0.1:8201/portal-unified.html:2:2516\n@http://"
+      },
+      "error": "tw is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:59\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:28:177\n@http://127.0.0.1:8201/portal-unified.html:2:2516\n@http://"
+    },
+    "audit-ring": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:22:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:24:154\n@http://127.0.0.1:8201/portal-unified.html:2:2455\n@http:/"
+      },
+      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:22:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:24:154\n@http://127.0.0.1:8201/portal-unified.html:2:2455\n@http:/"
+    },
+    "accounts-narrow": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "noOv": false,
+        "card": true,
+        "tailHidden": true
+      },
+      "error": null
+    },
+    "board-1100": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "uniformH": true,
+        "singleLine": false,
+        "rightEdge1": true,
+        "inside": true,
+        "holder": true,
+        "noOv": true
+      },
+      "error": null
+    }
+  }
+}

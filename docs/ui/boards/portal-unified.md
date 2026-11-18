@@ -16,8 +16,8 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.68
-pages: [admin, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
+version: v1.74
+pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
 
@@ -373,6 +373,45 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   B1 scope: Access domain + capability matrix + Accounts (4 roles/Device scope/break-glass/focus contract/
   three-state/guard single-track sweep/default light per Q19); B2 PSK+Keys; B3 creds lifecycle; B4 Fleet
   lens+Telemetry; B5 Monitor real-backend link; B6 audit ring. Safety invariants: fail-closed all channels,
+- v1.69 (B1 delivered, PENDING USER REVIEW): Access domain + 9-row capability matrix + Accounts page
+  (4 roles/Device scope/break-glass/focus contract/three-state/guard sweep/default light/mode-health
+  indicator/degraded banner). Region annotations: U2/W4 naming (Q10), P8 index+spoke, C54/C69 control
+  family, C62 honesty (simulated provider/health, gated vision), Q9 derivation, Q11 server-authoritative
+  roles, Q12 Device scope, Q13=E′ affordances, Q19 light, PIT-269 dialog contract. Three states: empty/
+  loading/error+Retry. Open micro-decisions: scope multi-select form, loading duration, error-leg name,
+- v1.70 (B2 delivered, PENDING USER REVIEW): Keys dual partition — PSK card (view audited each reveal /
+  rotate confirm + optional custom 8-128 / one-time display) + API keys real fields (id/role/scope/label/
+  expires) + create modal + revoke confirm+audit; one-time secret modal with close protection + copy
+  fallback; delegated gates + break-glass emergency rotate; three states; legacy fake delegates removed.
+  Region annotations: Q2=B, Q13=E′, C62 one-time secrets, C54/C69, PIT-269 (secretScrim body-level after
+  cfm for Esc order), Q12 scope. Open micro-decisions: one-time display modal vs inline reveal (chose
+  modal), copy-fallback copy, old-secret invalidation copy.
+- v1.71 (B3 delivered, PENDING USER REVIEW): Credentials tab (register+approve w/ optional name+provided
+  secret / reset-secret confirm / one-time close-protected secrets / revoke=DELETE semantics card /
+  Reject-Restore-Reapprove no-endpoint labelled); vision gating Q4=B (VISION_SET + vGuard reason +
+  devtools simulate leg); three states; drawer tabs 4→5 regression updated. Region annotations: Q4=B,
+  Q12, C62, C54/C69, PIT-269. Open micro-decisions: provided-secret validation rules, reset cooldown,
+  semantics-card wording.
+- v1.72 (B4 delivered, PENDING USER REVIEW): Fleet lens (radiogroup+roving) + health strip 5 counts
+  (unreachable supersede topic/process counts) + row telemetry summary + Telemetry tab (6th, full
+  Vehicles.tsx fields) + Overview fleet card deep link + scope cross-link; three states; tabs 5→6
+  regression updated. Region annotations: Q3=D', Q12, U2 lens label, C66 breakpoints, C54/C69.
+  Open micro-decisions: stale threshold 30s, health-strip narrow wrap, lens default memory.
+- v1.73 (B5 delivered, PENDING USER REVIEW): Monitor linkage — picker tree ARIA+keyboard in place,
+  Play All (connected-only, skipped counts), WALL_CAP=16 guards (checkbox/bulk/Apply), per-stream
+  metrics asserted, #monSimNote honest banner, three states + Retry restores data.
+  **Real-backend contract mapping (design)**: stream id `${dev}-${ch}` ↔ SFU producer id
+  (GET /sfu/rooms); res/fps/bps ↔ GET /sfu/stats?producerId= (score/bitrate); latency ↔ consumer
+  stats roundTripTime; connected ↔ device status + producer paused; wall select ↔ consumer subscribe;
+  Play All ↔ batch subscribe capped 16. Simulated until backend wired (C62).
+  Open micro-decisions: tree default-expand depth, Play All confirm when >8 streams, metrics refresh rate.
+- v1.74 (B6 delivered, PENDING USER REVIEW; ROUND COMPLETE): Audit = security minimal ring (ring filter
+  excludes operational events per T2), kind seg radiogroup, source column core/provider/simulated
+  (login/logout query face simulated), honest retention label, guarded operational-history link,
+  three states. Region annotations: Q8=A, Q6 notes, C62, C54/C69. Open micro-decisions: retention value
+  90d, ring page size/export, provider feed contract.
+- Design round B1–B6 complete: 26 harness cases ALL GREEN + NEG all red; versions v1.69–v1.74.
+  placeholder copy, Force consequence copy. harness 21 ALL GREEN + NEG red; narrow docSW==600.
   server-side provider enforcement, durable break-glass audit, revocation sync, contract-first ceiling.
 - Architecture diagram set: web-portal-ui PLAN §3j (capability ownership / dual-mode deployment /
   authn-authz-breakglass sequence / prototype IA matrix affordance map), mermaid+ASCII, per Q1–Q19.
