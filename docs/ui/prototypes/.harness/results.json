@@ -1,10 +1,11 @@
 {
-  "when": "2026-11-17T09:42:02.464Z",
+  "when": "2026-11-18T03:13:27.336Z",
+  "mode": "positive",
   "fail": 0,
   "results": {
     "floor": {
       "pass": true,
-      "size": 182902,
+      "size": 173494,
       "assertions": {
         "idleGrant": true,
         "noJump": true
@@ -13,7 +14,7 @@
     },
     "queue": {
       "pass": true,
-      "size": 185901,
+      "size": 172165,
       "assertions": {
         "cap": true,
         "rew": true
@@ -22,7 +23,7 @@
     },
     "replay": {
       "pass": true,
-      "size": 248986,
+      "size": 242913,
       "assertions": {
         "scanKeeps": true,
         "manualClears": true,
@@ -32,7 +33,7 @@
     },
     "emergency": {
       "pass": true,
-      "size": 193149,
+      "size": 183828,
       "assertions": {
         "armPersist": true,
         "emergNoPress": true
@@ -41,7 +42,7 @@
     },
     "tabs-size": {
       "pass": true,
-      "size": 181681,
+      "size": 166525,
       "assertions": {
         "diag": true,
         "tabSwitch": true
@@ -50,7 +51,7 @@
     },
     "nav": {
       "pass": true,
-      "size": 166611,
+      "size": 151322,
       "assertions": {
         "navSvg": true,
         "unique": true,
@@ -60,7 +61,7 @@
     },
     "notif": {
       "pass": true,
-      "size": 189333,
+      "size": 185411,
       "assertions": {
         "xpage": true,
         "clickLand": true,
@@ -70,7 +71,7 @@
     },
     "groups": {
       "pass": true,
-      "size": 256214,
+      "size": 174466,
       "assertions": {
         "created": true,
         "cascade": true,
@@ -82,10 +83,134 @@
     },
     "evidence": {
       "pass": true,
-      "size": 188825,
+      "size": 157255,
       "assertions": {
         "purge": true,
         "revoke": true
+      },
+      "error": null
+    },
+    "admin-hub": {
+      "pass": true,
+      "size": 176179,
+      "assertions": {
+        "domains": true,
+        "spoke": true,
+        "parentActive": true,
+        "crumb": true
+      },
+      "error": null
+    },
+    "device-drawer": {
+      "pass": true,
+      "size": 176384,
+      "assertions": {
+        "open": true,
+        "hiddenClosed": true,
+        "initialFocus": true,
+        "tabs": true,
+        "roving": true,
+        "trap": true,
+        "modalFirst": true,
+        "esc": true,
+        "restored": true,
+        "list": true,
+        "closedInert": true
+      },
+      "error": null
+    },
+    "device-drawer-narrow": {
+      "pass": true,
+      "size": 91644,
+      "assertions": {
+        "fullWidth": true
+      },
+      "error": null
+    },
+    "device-config": {
+      "pass": true,
+      "size": 190142,
+      "assertions": {
+        "diff": true,
+        "applied": true,
+        "rb": true,
+        "staged": true,
+        "flush": true,
+        "failed": true,
+        "retry": true
+      },
+      "error": null
+    },
+    "device-role": {
+      "pass": true,
+      "size": 181804,
+      "assertions": {
+        "viewerOk": true,
+        "fieldOk": true,
+        "dispOk": true,
+        "adminOk": true,
+        "repaint": true
+      },
+      "error": null
+    },
+    "admin-controls": {
+      "pass": true,
+      "size": 108108,
+      "assertions": {
+        "h30": true,
+        "stateStable": true,
+        "actionsUniform": true
+      },
+      "error": null
+    },
+    "admin-spoke": {
+      "pass": true,
+      "size": 81591,
+      "assertions": {
+        "back": true,
+        "noHScroll": true,
+        "card": true,
+        "crumbVisible": true,
+        "backWorks": true
+      },
+      "error": null
+    },
+    "board-1100": {
+      "pass": true,
+      "size": 162068,
+      "assertions": {
+        "uniformH": true,
+        "singleLine": true,
+        "rightEdge1": true,
+        "inside": true,
+        "holder": true,
+        "noOv": true
+      },
+      "error": null
+    },
+    "board-1000": {
+      "pass": true,
+      "size": 145026,
+      "assertions": {
+        "uniformH": true,
+        "singleLine": true,
+        "rightEdge1": true,
+        "inside": true,
+        "holder": true,
+        "noOv": true
+      },
+      "error": null
+    },
+    "board-1200": {
+      "pass": true,
+      "size": 164810,
+      "assertions": {
+        "uniformH": true,
+        "singleLine": true,
+        "rightEdge1": true,
+        "inside": true,
+        "holder": true,
+        "noOv": true
       },
       "error": null
     }

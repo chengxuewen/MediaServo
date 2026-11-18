@@ -1,6 +1,6 @@
 # Unified baseline — MediaServo Portal (single page)
 
-> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.61 见 sidecar)**
+> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.68 见 sidecar)**
 > Carrier: `../prototypes/portal-unified.html` · Supersedes the fragmented boards for iteration.
 
 ## Why this exists (user directive 11-13)
@@ -16,8 +16,8 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.63
-pages: [overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
+version: v1.68
+pages: [admin, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
 
@@ -28,7 +28,7 @@ e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPr
 | Surveillance | **Monitor** (integrated wall+timeline), **Recording** (library, honest-gated) — supersedes Live/Playback (see redesign section) |
 | Communication | **Intercom** (floor board), Meeting |
 | Control | Remote (lease-gated, view-only), **Tower** (multi-panel workbench) |
-| Administration | Devices, Rooms, Sessions, Streams, Config push, Client keys, Audit log, Settings, Signaling |
+| Administration | ~~Devices, Rooms, Sessions, Streams, Config push, Client keys, Audit log, Settings, Signaling~~ **v1.64 取代：单 Admin 入口 + hub 四域(Assets/Observability/Security/System)；命名 Config delivery/Keys/Audit** |
 
 Naming follows web-portal-ui W4/P5 (Intercom / Meeting / Remote / **Tower**, not "Cockpit"/"View"); **Live/Playback superseded by Monitor/Recording** (redesign section below).
 Workbudy's rich admin pages (sessions/streams/config/keys/audit/signaling) are folded into Administration.
@@ -337,3 +337,42 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   Mid-band follow-up (Mon icon outside card at ~901–1100px): desktop tracks → minmax(120,210)/minmax(64,92)/
   minmax(120,1fr)+ellipsis, card breakpoint 900→1000 (coarse ≤1100; coarse 284 col only ≥1101); verified
   inside:true + holder readable + rowSW==CW at 1000/1100/1200.
+- harness tooling (no UI bump): board-1100/1000/1200 cases + `--negative` sabotage self-check (5 NEG-OK);
+  normal mode 12 cases ALL GREEN; .harness products refreshed (C65/C66 landed).
+- v1.64: admin nav IA (B+D, research-backed Synology/Milestone/UniFi) — sidebar Administration collapses to
+  ONE Admin entry; #admin hub = 4 domain cards (Assets/Observability/Security/System) with 9 spoke rows;
+  spokes keep routes, highlight Admin parent + breadcrumb "Admin / "; naming converged (Config delivery/Keys/
+  Audit). C (role disclosure/⌘K/pin) deferred to PLAN Phase 8.4. harness 13 cases ALL GREEN incl admin-hub.
+- v1.65: admin spoke back affordance (head back iconbtn + clickable crumb "Admin"; ≤760 crumb single-line
+  ellipsis instead of hidden) + narrow tables reflow to label-value cards (data-th via MutationObserver) +
+  compact page-head; no horizontal scroll @600. harness 14 cases ALL GREEN incl admin-spoke.
+- v1.66: admin control-family normalization (C69) — all spoke interactive controls 30/r6/sp12 (iconbtn 34→30
+  incl play-ctl, search 36→30, seg fixed 30, msg-in r4→r6); state=color-only; table action slots min-64;
+  set-v min-height 30; duplicate btn-danger removed; ＋/ glyphs → i-plus/i-search SVG. harness 15 cases ALL
+  GREEN incl admin-controls (h30/stateStable/actionsUniform).
+- v1.67: table action buttons fixed 72px slots (min-width floor left label-driven widths); grpScrim/cfmScrim
+  class corrected scrim→modal-scrim (v1.62 dialogs lacked hiding/centering CSS). harness 15 ALL GREEN.
+- Device detail adjudicated (design only, NOT implemented): K17=A side-sheet drawer (reuse channel side-sheet;
+  upgrade-to-page trigger registered), K18=A staged delivery on offline + reconnect flush + 3-state labels,
+  K19=B three-tier role matrix (viewer read / dispatcher identity+config / admin +caps+lifecycle),
+  K20=B no fake preview (stats + status timeline + Open in Monitor). PLAN §2m / Phase 9 pending.
+- Phase 9 plan v2 (4-role team re-review): dead-ends closed — devtools "device reconnect" leg + flushStaged
+  hook (revoked excluded); Reject→rejected / Revoke→offline+revoked+clear-staged / Restore+Re-approve paths;
+  failed→Retry/Discard; rollback snapshot at delivered + Undo UI + audit name; Esc priority chain
+  modal→drawer→cascade; drawer infra registered NEW (ch-side not reusable); focus trap/restore + a11y into
+  Verify; draft kept per-device with row badge; staged row badge + flush toast; Details label; scope resolver
+  new (user scope excluded). Cross-doc drifts fixed (§7 order note, §8 ledger, boards head/pages/Admin row).
+- v1.68: **Phase 9 delivered** — device drawer (480px / full-width ≤900, 4 tabs, Esc chain modal→drawer→cascade,
+  focus trap/restore, tabs roving); config draft→diff→Apply with staged-on-offline + reconnect flush + failed
+  Retry/Discard + rollback depth1 + Undo; row staged/draft/failed/revoked badges; role matrix viewer/dispatcher/
+  admin (+field→viewer) with devtools legs; state machine rejected/revoked/Restore/Re-approve + confirm+audit;
+  history timeline; harness 19 cases ALL GREEN incl device-drawer/narrow/config/role + NEG.
+- Design round 2026-11-18 (plan-only, NO UI change; sidecar stays v1.68): web-portal-ui §3h Q1–Q19
+  adjudicated (Q18 empty-number logged); §3i B1–B6 board plan v4 approved-pending; gate = plan approval
+  before drawing; B1 drawn-without-approval was reverted clean (no accounts/matrix residue).
+  B1 scope: Access domain + capability matrix + Accounts (4 roles/Device scope/break-glass/focus contract/
+  three-state/guard single-track sweep/default light per Q19); B2 PSK+Keys; B3 creds lifecycle; B4 Fleet
+  lens+Telemetry; B5 Monitor real-backend link; B6 audit ring. Safety invariants: fail-closed all channels,
+  server-side provider enforcement, durable break-glass audit, revocation sync, contract-first ceiling.
+- Architecture diagram set: web-portal-ui PLAN §3j (capability ownership / dual-mode deployment /
+  authn-authz-breakglass sequence / prototype IA matrix affordance map), mermaid+ASCII, per Q1–Q19.

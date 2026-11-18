@@ -1,5 +1,100 @@
 # Prototypes CHANGELOG
 
+## v1.68 — 2026-11-17 (portal-unified) — Phase 9 delivered: device detail drawer (K17=A/K18=A/K19=B/K20=B)
+Implements PLAN Phase 9 v2 (post 4-role team review; dead-ends closed before implementation).
+- **9.1 drawer**: NEW overlay side-sheet #devDrawer (480px, full-width ≤900, visible back/close) — ch-side was
+  an in-page panel, not reusable (honest registration). 4 tabs Overview/Config/Identity/Events with roving
+  tabindex + arrow keys; Esc priority chain modal-scrim → drawer → legacy cascade; drawer input Esc cancels
+  that draft edit; focus trap + initial focus close + restore trigger; row primary-cell click / Details opens
+  (action buttons stopPropagation); Overview = health (fps/bitrate/latency from DEV_STREAMS) + lease/fw/zone +
+  history timeline + Open in Monitor (offline/revoked guarded, not-on-wall honest toast); NO fake preview (K20).
+- **9.2 config**: resolveConfig (global default → device override; room layer talk-only, user scope excluded);
+  draft → live diff (rows == edits) → Apply → audit device.config.apply + visible Undo (rollback depth 1,
+  snapshot taken at delivery); offline Apply = **staged · offline** + row badge; devtools "Reconnect offline"
+  leg flushes staged (revoked excluded) → applied + audit delivered + toast + aria-live; degraded Apply =
+  failed with Retry/Discard; staged revoke; draft kept per-device on close + row draft badge; cancel button.
+- **9.3 roles**: viewer (field maps to viewer) read-only / dispatcher rename+zone+config / admin + caps +
+  Approve/Reject/Revoke/Restore/Re-approve; setGuard + reasons; devtools role legs admin/viewer added; role
+  switch repaints devices + open drawer; drawer head shows effective role.
+- **9.4 state machine + honesty**: Details replaces toast-only View; Reject → rejected (admin Re-approve →
+  pending); Revoke → offline + revoked + clears staged (admin Restore → pending); all destructive ops modal
+  confirm with consequence copy + AUDIT device.*; history appended on every transition; pending/offline/
+  degraded guards.
+- **9.5 harness**: device-drawer / device-drawer-narrow / device-config / device-role cases + NEG sabotage
+  (openDevDrawer/flushStaged/setGuard noop); harness null-result guard added (sabotaged mid-throw = red).
+  19 cases ALL GREEN; negative self-check ALL RED AS EXPECTED; node --check + lint clean; stamps x4 (C68).
+- Impl bugs found & fixed by assertions: Apply onclick captured stale empty drafts (now live); duplicate
+  renderRooms declaration from splice anchor; missing template backtick after diff-container refactor.
+
+## v1.67 — 2026-11-17 (portal-unified) — table action slots fixed-width + dialog scrim class fix
+User screenshot: Devices action buttons still unequal (View 64 / Revoke ~72 / Approve ~76) because v1.66 used
+min-width:64 (a floor, not a slot). Also found while verifying: v1.62's new dialogs used class="scrim" but the
+stylesheet defines `.modal-scrim` → grpScrim/cfmScrim had NO hiding/centering CSS (visible in-flow on short
+pages, e.g. filtered tables).
+- `.tbl .actions .btn` → **fixed slot** width/min/max:72px, padding:0 → View/Revoke/Approve/Reject all equal
+  across every admin table and state; harness admin-controls now asserts all action widths identical ==72.
+- grpScrim/cfmScrim class corrected to `modal-scrim` → proper fixed overlay + backdrop + centering + hidden
+  when closed (dialog infra from v1.62 now visually correct).
+- Verified: harness 15 cases ALL GREEN (admin-controls actionsUniform=fixed72; groups end-state shows no
+  stray scrims); node --check + lint clean; version stamps exactly 4 (C68).
+
+## v1.66 — 2026-11-17 (portal-unified) — admin control-family normalization (sizes / state geometry / slots)
+User: admin spoke pages' buttons/controls had inconsistent sizes and state-dependent layout. Audit found:
+`.iconbtn` 34 (base + play-ctl override) vs --ctl-h 30; `.search` 36; `.seg` container height font-driven
+(~32 outer) vs btn 30; `.msg-in` r4/pad8 vs family r6/sp12; `.btn-danger` defined twice (transparent vs tint);
+table action buttons width varied by label; `.set-v` rows mixed seg/toggle heights; text glyphs ＋/⌕ as icons.
+- **One control family (C69)**: all interactive controls in admin spokes = outer height --ctl-h(30), r6,
+  horizontal padding sp12, fs12; `.seg` fixed 30 with buttons height:100%; `.search` 30; `.iconbtn` 30
+  (both definitions); `.msg-in` r6/sp12; duplicate `.btn-danger` removed (single transparent+hover-tint).
+- **State geometry stable**: on/hover/disabled change color/weight only; table action buttons min-width:64
+  (uniform slots); `.set-v{min-height:30}` keeps settings rows aligned (switch stays its own family).
+- **Glyphs → SVG**: ＋ New key → i-plus sprite; ⌕ search → i-search sprite.
+- Verified: harness 15 cases ALL GREEN incl new admin-controls (every spoke control h==30; seg toggle keeps
+  30; action slots >=64); node --check + lint clean; version stamps exactly 4 (C68).
+
+## v1.65 — 2026-11-17 (portal-unified) — admin spoke: explicit back + clickable crumb + narrow card reflow (A+B+C)
+User: admin hub spokes had no back control and poor narrow adaptation. Measured @600: backBtns=0, crumb is a
+non-clickable SPAN hidden ≤760 (v1.63 side-effect) so hub context vanished; tables scrolled horizontally
+(655/498) with hidden columns and no sticky/hint; page-head cramped.
+- **A back affordance**: every Admin spoke page-head gets a back iconbtn (aria-label/data-tip → goto admin);
+  breadcrumb "Admin" segment becomes a clickable crumb-link; ≤760 crumb no longer hidden — single-line
+  ellipsis "Admin / X" (sub hidden, conn text hidden to keep topbar fitting).
+- **B narrow tables**: ≤760 `.tbl` reflows to label-value cards (thead hidden, tr=card, td::before=column
+  label via data-th injected by a MutationObserver enhancer so re-renders keep labels); no horizontal
+  scroll, all columns visible; primary cell = name+sub block.
+- **C compact head**: ≤760 page-head wraps, title single-line ellipsis, sub hidden, toolbar full-width,
+  search flex/min0.
+- Verified @600: back/backWorks/crumbBack true, tblSW==CW(490), card display flex, crumb visible, docSW==600;
+  harness 14 cases ALL GREEN incl new admin-spoke; node --check + lint clean.
+
+## v1.64 — 2026-11-17 (portal-unified) — admin nav IA: single Admin hub + domain grouping + naming convergence (B+D)
+User: Administration menu too cluttered (9 flat items mixing assets / observability / security / system).
+Research: Synology SS separates management domains (Device/Recording/Notification/User+privilege profiles/
+System) from operations; Milestone Management Client uses a hierarchy tree (Servers→Devices→Rules→Users&Roles→
+Security→Settings) separate from Smart Client; UniFi Protect collapses config into a Settings hub; IA guidance
+= group by user mental model, 5–7 per group, hub-spoke for settings, role-based disclosure. Flat 9-item
+heterogeneous admin list in the operations sidebar is an anti-pattern.
+- **B hub-spoke**: sidebar Administration collapses to ONE entry `Admin`; new #admin hub groups the 9 spokes
+  into 4 domain cards — Assets(Devices, Rooms) / Observability(Sessions, Streams, Signaling) /
+  Security(Keys, Audit) / System(Settings, Config delivery); spoke rows = card-row language with name+id+desc;
+  clicking opens the existing page (routes unchanged); spoke pages highlight the Admin parent in sidebar and
+  breadcrumb prefixes "Admin / ".
+- **D naming/semantics**: Config push → **Config delivery** (Settings domain); Client keys → **Keys**;
+  Audit log → **Audit**; Rooms described as logical grouping of Devices; Streams/Sessions/Signaling unified
+  under Observability.
+- **C progressive (deferred, recorded)**: role-based disclosure (dispatcher sees operations + read-only
+  Devices), ⌘K command palette, pin favorites — next increment, not in v1.64.
+- Verified: harness 13 cases ALL GREEN incl new admin-hub (4 domains / 9 spokes / spoke navigation /
+  parent-active / breadcrumb) and nav count 8 unique SVG; hub + spoke renders clean; node --check + lint clean.
+
+## harness tooling — 2026-11-17 (scripts/ui-harness.mjs, no UI version bump) — board-align cases + negative self-check
+- Added `board-1100 / board-1000 / board-1200` cases (C66): uniform row height, single-line action cluster,
+  unique right edge, Mon icon inside card, holder readable, row scrollWidth==clientWidth per width band;
+  harness sets window rect per case (SetWindowRect).
+- Added `--negative` self-check mode (C65/PIT-265): per-case sabotage (NEG map: clear queue / raise queueMax /
+  force action wrap / noop evPurge / noop renderNotif) MUST turn the case red; 5 sabotaged cases NEG-OK,
+  others NEG-SKIP; exit non-zero on any NEG-BAD. Normal mode now 12 cases ALL GREEN; .harness products refreshed.
+
 ## v1.63 — 2026-11-17 (portal-unified) — intercom board rows: fixed icon action slots + narrow reflow (A+D+E)
 User: board (channel list) right-side buttons misalign vertically when checked/other states, and narrow
 screens adapt poorly. Root causes: variable button count (temp rows 6 vs 5) + checked labels growing

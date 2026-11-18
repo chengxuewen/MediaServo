@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.63</title>
+<title>MediaServo Portal — Unified Prototype v1.68</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'dark';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -86,10 +86,12 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 .brand{display:flex;align-items:center;gap:var(--sp8);font-weight:600;font-size:var(--fs14)}
 .brand .logo{width:26px;height:26px;border-radius:var(--r6);background:conic-gradient(from 210deg,var(--blue),var(--cyan),var(--green),var(--blue));display:grid;place-items:center;color:#fff;font-size:13px;box-shadow:0 0 14px rgba(67,97,238,.5)}
 .brand small{color:var(--tx3);font-weight:400;font-size:var(--fs11);letter-spacing:.5px}
+.crumb-link{background:none;border:none;padding:0;color:var(--accent-ink);cursor:pointer;font:inherit}
+.crumb-link:hover{text-decoration:underline}
 .crumb{font-size:var(--fs12);color:var(--tx3);display:flex;align-items:center;gap:var(--sp6)}
 .crumb b{color:var(--tx1);font-weight:600}
 .conn{display:flex;align-items:center;gap:var(--sp6);font-size:var(--fs12);color:var(--tx2);padding:var(--sp4) var(--sp12);border:1px solid var(--bd);border-radius:var(--rpill);background:var(--sunken);cursor:pointer}
-.iconbtn{width:34px;height:34px;border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);color:var(--tx2);display:grid;place-items:center;font-size:15px;position:relative}
+.iconbtn{width:var(--ctl-h);height:var(--ctl-h);border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);color:var(--tx2);display:grid;place-items:center;font-size:15px;position:relative}
 .iconbtn:hover{border-color:var(--bd2);color:var(--tx1)}
 .iconbtn.active{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink)}
 .avatar{width:30px;height:30px;border-radius:var(--r6);background:linear-gradient(135deg,var(--blue),var(--violet));color:#fff;display:grid;place-items:center;font-weight:600;font-size:var(--fs12)}
@@ -146,11 +148,12 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 .card{background:var(--surface);border:1px solid var(--bd);border-radius:var(--r10);padding:var(--sp16);box-shadow:var(--glow)}
 .card-title{font-size:var(--fs13);font-weight:600;color:var(--tx2);text-transform:uppercase;letter-spacing:.6px;margin-bottom:var(--sp12);display:flex;align-items:center;gap:var(--sp8)}
 .grid{display:grid;gap:var(--sp16)}
-.search{display:flex;align-items:center;gap:var(--sp8);background:var(--sunken);border:1px solid var(--bdc);border-radius:var(--r6);padding:0 var(--sp12);height:36px;min-width:220px}
+.search{display:flex;align-items:center;gap:var(--sp8);background:var(--sunken);border:1px solid var(--bdc);border-radius:var(--r6);padding:0 var(--sp12);height:var(--ctl-h);min-width:220px}
+.search .ic{width:14px;height:14px;color:var(--tx3);flex:none}
 .search input{flex:1;background:none;border:none;outline:none;color:var(--tx1);font-size:var(--fs13)}
 .search .ic{color:var(--tx3)}
-.seg{display:flex;border:1px solid var(--bd);border-radius:var(--r6);overflow:hidden;background:var(--sunken)}
-.seg button{padding:var(--sp6) var(--sp12);background:none;border:none;color:var(--tx2);font-size:var(--fs12);min-width:52px}
+.seg{display:flex;height:var(--ctl-h);border:1px solid var(--bd);border-radius:var(--r6);overflow:hidden;background:var(--sunken)}
+.seg button{padding:0 var(--sp12);height:100%;display:inline-flex;align-items:center;justify-content:center;background:none;border:none;color:var(--tx2);font-size:var(--fs12);min-width:52px}
 .seg button.on{background:var(--accent-tint);color:var(--accent-ink)}
 .toggle{display:flex;align-items:center;gap:var(--sp6);font-size:var(--fs12);color:var(--tx2);cursor:pointer;user-select:none}
 .toggle .sw{width:34px;height:19px;border-radius:var(--rpill);background:var(--bd2);position:relative;flex:none;transition:background .15s}
@@ -204,6 +207,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tbl tbody tr:hover td{background:var(--hover)}
 .tbl .num{text-align:right;font-family:var(--mono)}
 .tbl .actions{display:flex;gap:var(--sp6);justify-content:flex-end}
+.tbl .actions .btn{width:72px;min-width:72px;max-width:72px;padding:0}
 .empty{padding:var(--sp24);text-align:center;color:var(--tx3);font-size:var(--fs13)}
 /* stat cards */
 .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:var(--sp12)}
@@ -468,7 +472,7 @@ table.tbl{width:100%;border-collapse:collapse;font-size:var(--fs13)}
 .tl-head-mark::after{content:'';position:absolute;top:-3px;left:-4px;width:10px;height:10px;border-radius:50%;background:var(--accent)}
 .tl-scale{grid-column:1;grid-row:2;display:flex;justify-content:space-between;font-size:var(--fs11);font-family:var(--mono);color:var(--tx3)}
 .play-ctl{grid-column:2;grid-row:1;display:flex;gap:var(--sp6)}
-.play-ctl .iconbtn{width:34px;height:34px;font-size:15px}
+.play-ctl .iconbtn{width:var(--ctl-h);height:var(--ctl-h);font-size:15px}
 /* ---- Live: slim real-time bridge (recorded review lives in Playback) ---- */
 .live-bridge{display:flex;align-items:center;gap:var(--sp12);border-top:1px solid var(--bd);background:var(--surface);padding:var(--sp8) var(--sp16)}
 /* v1.36: status cluster aligns to the single --ctl-h token (C54); badge/clock no longer mismatched. */
@@ -647,7 +651,19 @@ body[data-content="error"] .tile{opacity:.7}
    geometry in every state; narrow screens reflow to card rows; min-height 44 touch. */
 @media (max-width:1000px){.board-row{grid-template-columns:1fr auto;grid-template-areas:"name mode" "state timer" "q actions";row-gap:var(--sp6)}
 .board-row>div:first-child{grid-area:name}.board-row .mode-chip{grid-area:mode}.board-row .floor-state{grid-area:state}.board-row .timer{grid-area:timer}.board-row .qdepth{grid-area:q}.board-row .row-actions{grid-area:actions;justify-content:end}}
-@media (max-width:760px){.crumb{display:none}.userchip .role-tag{display:none}.topbar{gap:var(--sp6)}}
+@media (max-width:760px){.crumb{display:block;min-width:0;max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.crumb span{display:none}.userchip .role-tag{display:none}.topbar{gap:var(--sp6)}.conn #connTxt{display:none}
+.page-head{flex-wrap:wrap;row-gap:var(--sp6)}.page-head .page-title{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.page-head .page-sub{display:none}.page-head .toolbar{width:100%;flex-wrap:wrap}.page-head .search{min-width:0;flex:1}
+/* B: tables reflow to label-value cards on narrow (no hidden columns / no horizontal scroll) */
+.tbl-wrap{overflow:visible;border:none;background:none}
+.tbl,.tbl tbody,.tbl tr,.tbl td{display:block;width:100%}
+.tbl thead{display:none}
+.tbl tbody tr{border:1px solid var(--bd);border-radius:var(--r6);background:var(--surface);margin-bottom:8px;padding:8px 12px}
+.tbl td{border:none;padding:4px 0;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tbl td::before{content:attr(data-th);color:var(--tx3);font-size:11px;text-transform:uppercase;letter-spacing:.6px;flex:none}
+.tbl td:first-child{display:block;font-weight:600}
+.tbl td:first-child::before{display:none}
+.tbl .num{text-align:right}
+.tbl .actions{justify-content:flex-start}}
 @media (max-width:600px){.board-row{grid-template-columns:1fr auto;grid-template-areas:"name name" "mode timer" "state state" "q q" "actions actions"}
 .board-row .row-actions{justify-content:start}}
 @media (pointer:coarse){.row-actions{grid-template-columns:repeat(6,44px)}.row-actions .act{min-width:44px;min-height:44px}.act-ph{width:44px;height:44px}}
@@ -753,7 +769,7 @@ body[data-content="error"] .tile{opacity:.7}
 .set-row:last-child{border-bottom:none}
 .set-k{font-size:var(--fs13);font-weight:600}
 .set-d{font-size:var(--fs11);color:var(--tx3);margin-top:var(--sp2)}
-.set-v{justify-self:start;display:flex;align-items:center;gap:var(--sp8)}
+.set-v{justify-self:start;display:flex;align-items:center;gap:var(--sp8);min-height:var(--ctl-h)}
 /* toast */
 .toast{position:fixed;top:66px;left:50%;transform:translateX(-50%) translateY(-8px);background:var(--raised);border:1px solid var(--bd2);color:var(--tx1);padding:var(--sp8) var(--sp16);border-radius:var(--r6);font-size:var(--fs13);opacity:0;pointer-events:none;transition:opacity .18s,transform .18s;z-index:100;box-shadow:var(--glow)}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
@@ -838,19 +854,38 @@ body[data-badge="on"] #proto-bar{display:flex}
 .proc-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .proc-tag{font-size:10px;border:1px solid var(--bd);border-radius:var(--r4);padding:1px 5px;color:var(--tx3)}
 .link-ms{font-size:11px;color:var(--tx2)}
-.msg-in{flex:1;min-width:0;height:var(--ctl-h);border:1px solid var(--bd);border-radius:var(--r4);background:var(--sunken);color:var(--tx1);padding:0 8px;font-size:12px}
+.msg-in{flex:1;min-width:0;height:var(--ctl-h);border:1px solid var(--bd);border-radius:var(--r6);background:var(--sunken);color:var(--tx1);padding:0 var(--sp12);font-size:12px}
 .msg-list{max-height:120px;overflow-y:auto}
 .mon-tag{display:inline-flex;margin-right:6px;color:var(--accent-ink)}
 .mon-tag .ic{width:13px;height:13px}
 .replay-row{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 0;border-bottom:1px solid var(--bd)}
 .replay-row b{flex:1}
 .replay-empty{font-size:12px;color:var(--tx3);line-height:1.5}
-.btn-danger{background:var(--danger-tint);border-color:var(--danger);color:var(--danger-ink)}
 .grp-row{display:flex;gap:8px;align-items:center;padding:8px;border:1px solid var(--bd);border-radius:6px;margin-bottom:6px;background:var(--sunken)}
 .grp-row .g-name{flex:1;min-width:0;font-weight:600;font-size:12px}
 .grp-members{margin:6px 0 10px;padding-left:8px;border-left:2px solid var(--bd)}
 .cfm-msg{font-size:13px;color:var(--tx2);line-height:1.6;margin-bottom:12px}
 #grpScrim .modal,#cfmScrim .modal{max-width:560px}
+.dev-drawer{position:fixed;top:0;right:0;bottom:0;width:480px;max-width:100%;background:var(--surface);border-left:1px solid var(--bd2);box-shadow:-8px 0 24px rgba(0,0,0,.25);z-index:70;transform:translateX(102%);visibility:hidden;transition:transform .18s ease;display:flex;flex-direction:column}
+.dev-drawer.open{transform:translateX(0);visibility:visible}
+.dd-head{display:flex;align-items:center;gap:var(--sp8);padding:var(--sp12);border-bottom:1px solid var(--bd)}
+.dd-title{font-weight:600;font-size:var(--fs13);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dd-tabs{display:flex;gap:var(--sp4);padding:var(--sp8) var(--sp12);border-bottom:1px solid var(--bd)}
+.dd-tab{flex:1;height:var(--ctl-h);border-radius:var(--r6);border:1px solid var(--bd);background:var(--sunken);color:var(--tx2);font-size:var(--fs12)}
+.btn.is-busy{opacity:.6;pointer-events:none}
+.dd-tab[aria-selected="true"]{background:var(--accent-tint);border-color:var(--accent);color:var(--accent-ink)}
+.dd-body{flex:1;overflow:auto;padding:var(--sp12)}
+.dd-row{display:flex;justify-content:space-between;gap:var(--sp8);padding:var(--sp6) 0;border-bottom:1px solid var(--bd);font-size:var(--fs12)}
+.dd-row .k{color:var(--tx3)}
+.dd-sec{font-size:var(--fs11);text-transform:uppercase;letter-spacing:.6px;color:var(--tx3);margin:var(--sp12) 0 var(--sp6)}
+.diff-row{display:flex;gap:var(--sp6);align-items:center;font-size:var(--fs12);padding:var(--sp4) 0}
+.diff-old{color:var(--tx3);text-decoration:line-through}
+.hist-row{display:flex;gap:var(--sp8);font-size:var(--fs12);padding:var(--sp4) 0;border-left:2px solid var(--bd2);padding-left:var(--sp8);margin-left:var(--sp4)}
+.state-chip{font-size:var(--fs11);border-radius:var(--r4);padding:0 var(--sp6);border:1px solid var(--bd2)}
+.state-chip.staged{color:var(--warn-ink);border-color:var(--warn)}
+.state-chip.failed{color:var(--danger-ink);border-color:var(--danger)}
+.state-chip.draft{color:var(--accent-ink);border-color:var(--accent)}
+@media (max-width:900px){.dev-drawer{width:100%}}
 .rec-consent.on{background:var(--danger-tint);border-color:var(--danger);color:var(--danger-ink)}
 .rec-count{font-size:11px;color:var(--tx3)}
 .q-order{font-size:11px;color:var(--tx3);margin-top:4px;font-family:var(--mono)}
@@ -898,6 +933,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h10M18 18h2"/><circle cx="16" cy="6" r="2"/><circle cx="8" cy="12" r="2"/><circle cx="16" cy="18" r="2"/></symbol>
   <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
   <symbol id="i-bell-off" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0M3 3l18 18"/></symbol>
+  <symbol id="i-admin" viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V4h6v3M3 12h18M10 12v2h4v-2"/></symbol>
   <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></symbol>
   <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 19a2 2 0 0 0 4 0"/></symbol>
@@ -964,7 +1000,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <nav id="sidebar" aria-label="Portal navigation">
       <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation">⟨</button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.63 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.68 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -990,9 +1026,10 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.63</span> · prototype watermark · drag to move</div>
-<div class="scrim" id="grpScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Manage groups"><div class="modal-head"><span class="modal-title">Manage groups</span><div class="spacer"></div><button class="iconbtn" id="grpClose" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body" id="grpBody"></div></div></div>
-<div class="scrim" id="cfmScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Confirm"><div class="modal-head"><span class="modal-title" id="cfmTitle">Confirm</span><div class="spacer"></div><button class="iconbtn" id="cfmCancelX" aria-label="Cancel"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body"><div class="cfm-msg" id="cfmMsg"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" id="cfmCancel">Cancel</button><button class="btn btn-sm btn-danger" id="cfmOk">Confirm</button></div></div></div></div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.68</span> · prototype watermark · drag to move</div>
+<div class="modal-scrim" id="grpScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Manage groups"><div class="modal-head"><span class="modal-title">Manage groups</span><div class="spacer"></div><button class="iconbtn" id="grpClose" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body" id="grpBody"></div></div></div>
+<div class="modal-scrim" id="cfmScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Confirm"><div class="modal-head"><span class="modal-title" id="cfmTitle">Confirm</span><div class="spacer"></div><button class="iconbtn" id="cfmCancelX" aria-label="Cancel"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body"><div class="cfm-msg" id="cfmMsg"></div><div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" id="cfmCancel">Cancel</button><button class="btn btn-sm btn-danger" id="cfmOk">Confirm</button></div></div></div></div>
+<div class="dev-drawer" id="devDrawer" role="dialog" aria-label="Device details" aria-hidden="true"><div class="dd-head"><span class="dd-title" id="ddTitle"></span><span class="chip" id="ddRole"></span><span id="ddLive" class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)"></span><button class="iconbtn" id="ddClose" aria-label="Close device details" data-tip="Back to Devices"><svg class="ic"><use href="#i-arrow-left"/></svg></button></div><div class="dd-tabs" id="ddTabs" role="tablist"></div><div class="dd-body" id="ddBody" role="tabpanel"></div></div>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <div id="guardTip" role="tooltip" aria-hidden="true"></div>
 <div id="devtools">
@@ -1006,13 +1043,14 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Content state</div><div class="dt-seg"><button type="button" data-set="content:data">Data</button><button type="button" data-set="content:empty">Empty</button><button type="button" data-set="content:loading">Loading</button><button type="button" data-set="content:error">Error</button></div></div>
     <div class="dt-row"><div class="dt-label">Region labels</div><div class="dt-seg"><button type="button" data-set="labels:off">Off</button><button type="button" data-set="labels:on">A1–A7</button></div></div>
     <div class="dt-row"><div class="dt-label">Stats overlay</div><div class="dt-seg"><button type="button" data-set="stats:off">Off</button><button type="button" data-set="stats:on">On</button></div></div>
-    <div class="dt-row"><div class="dt-label">My role</div><div class="dt-seg"><button type="button" data-set="role:dispatcher">Dispatcher</button><button type="button" data-set="role:field">Field</button></div></div>
+    <div class="dt-row"><div class="dt-label">My role</div><div class="dt-seg"><button type="button" data-set="role:dispatcher">Dispatcher</button><button type="button" data-set="role:admin">Admin</button><button type="button" data-set="role:viewer">Viewer</button><button type="button" data-set="role:field">Field</button></div></div>
+    <div class="dt-row"><div class="dt-label">Device link</div><div class="dt-seg"><button type="button" data-set="sim:reconnect">Reconnect offline</button></div></div>
     <div class="dt-row"><div class="dt-label">External floor</div><div class="dt-seg"><button type="button" data-set="sim:extemerg">Emergency</button><button type="button" data-set="sim:extqueue">Queue-to-you</button></div></div>
     <div class="dt-row"><div class="dt-label">Evidence TTL</div><div class="dt-seg"><button type="button" data-set="sim:injectexp">Inject expired</button></div></div>
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.63</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.68</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -1105,15 +1143,15 @@ const NAV=[
  {group:'Surveillance',items:[{id:'monitor',ico:'i-monitor',label:'Monitor',badge:'live',bc:'b-live'},{id:'recordings',ico:'i-recordings',label:'Recording'}]},
  {group:'Communication',items:[{id:'intercom',ico:'i-intercom',label:'Intercom',badge:'2',bc:'b-warn'},{id:'meeting',ico:'i-meeting',label:'Meeting'}]},
  {group:'Control',items:[{id:'remote',ico:'i-remote',label:'Remote'},{id:'tower',ico:'i-tower',label:'Tower',badge:'3',bc:'b-alert'}]},
- {group:'Administration',items:[{id:'devices',ico:'i-devices',label:'Devices',badge:'1',bc:'b-warn'},{id:'rooms',ico:'i-rooms',label:'Rooms'},{id:'sessions',ico:'i-sessions',label:'Sessions'},{id:'streams',ico:'i-streams',label:'Streams'},{id:'config',ico:'i-config',label:'Config push'},{id:'keys',ico:'i-keys',label:'Client keys'},{id:'audit',ico:'i-audit',label:'Audit log'},{id:'settings',ico:'i-settings',label:'Settings'},{id:'signaling',ico:'i-signaling',label:'Signaling'}]},
+ {group:'Administration',items:[{id:'admin',ico:'i-admin',label:'Admin'}]},
 ];
-const TITLES={overview:['Overview','Fleet health at a glance'],monitor:['Monitor Center','Surveillance wall + timeline review'],recordings:['Recording library','Search, bookmarks & export'],intercom:['Intercom board','Floor control across groups'],meeting:['Meeting','Multi-party conferences'],remote:['Remote','Desktop / teleop control (lease-gated)'],tower:['Tower','Dispatcher workbench · multi-panel'],devices:['Devices','Enrollment, approval & audit'],rooms:['Rooms','Rooms by kind'],sessions:['Sessions & clients','Live principals and shapes'],streams:['Streams','All producers and health'],config:['Config push','Presets & per-room overrides'],keys:['Client keys','Machine credentials'],audit:['Audit log','Security-relevant events'],settings:['Settings','Appearance & access'],signaling:['Signaling','Endpoint & connectivity']};
+const TITLES={overview:['Overview','Fleet health at a glance'],monitor:['Monitor Center','Surveillance wall + timeline review'],recordings:['Recording library','Search, bookmarks & export'],intercom:['Intercom board','Floor control across groups'],meeting:['Meeting','Multi-party conferences'],remote:['Remote','Desktop / teleop control (lease-gated)'],tower:['Tower','Dispatcher workbench · multi-panel'],admin:['Admin','Assets, observability, security & system'],devices:['Devices','Enrollment, approval & audit'],rooms:['Rooms','Rooms by kind'],sessions:['Sessions & clients','Live principals and shapes'],streams:['Streams','All producers and health'],config:['Config delivery','Presets & per-room overrides (Settings domain)'],keys:['Keys','Machine credentials'],audit:['Audit','Security-relevant events'],settings:['Settings','Appearance & access'],signaling:['Signaling','Endpoint & connectivity']};
 const $=s=>document.querySelector(s);
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),1900);}
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function feedBg(s,i){const h=(s.id.length*47+i*31)%360;return `linear-gradient(135deg,hsl(${h},42%,17%),hsl(${(h+45)%360},46%,9%)),radial-gradient(circle at ${30+(i%5)*9}% ${22+(i%3)*12}%,hsla(${h},66%,46%,.28),transparent 56%)`;}
 function glyph(st){if(st==='live'||st==='online')return '<span class="g g-online"></span>';if(st==='degraded')return '<span class="segbar"><i class="f"></i><i class="f"></i><i></i></span>';if(st==='pending')return '<span class="g g-warn"></span>';return '<span class="g g-offline"></span>';}
-function badge(st){const m={live:'online',online:'online',degraded:'degraded',offline:'offline',pending:'degraded',idle:'offline'};return `<span class="badge ${m[st]||'offline'}">${glyph(st)} ${st}</span>`;}
+function badge(st){const m={live:'online',online:'online',degraded:'degraded',offline:'offline',pending:'degraded',idle:'offline',rejected:'offline'};return `<span class="badge ${m[st]||'offline'}">${glyph(st)} ${st}</span>`;}
 function fmtT(s){return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');}
 /* ================= STATE ================= */
 let cols=3,page=0,statsOn=false,syncOn=true,activeStream=null,zoomedId=null,current='overview';
@@ -1161,13 +1199,14 @@ function buildPages(){
  mk('meeting',head('Meeting','Multi-party conferences','<button class="btn btn-primary btn-sm" id="newMeet">＋ New meeting</button>')+`<div class="page-body"><div class="grid" id="meetGrid" style="grid-template-columns:repeat(auto-fill,minmax(260px,1fr))"></div></div>`);
  mk('remote',head('Remote','Desktop / teleop control (lease-gated)','')+`<div class="page-body"><div class="honesty"><span class="g g-warn"></span>Control requires a live lease (300 ms renew · 1 s expire · WS-drop = release). Until the lease gate is green this surface is view-only.</div><div class="grid" style="grid-template-columns:1fr 300px"><div class="card" style="padding:0;overflow:hidden"><div style="aspect-ratio:16/9;background:${'linear-gradient(135deg,#1c2740,#0e1526)'};position:relative"><div class="tile-scan"></div><span class="tile-live outline" style="position:absolute;top:10px;left:10px">□ VIEW-ONLY</span><div style="position:absolute;inset:0;display:grid;place-items:center;color:var(--tx3);font-family:var(--mono)">DESK-03 · Ops workstation</div></div></div><div class="card"><div class="card-title">Lease</div><div style="font-size:13px;color:var(--tx2);line-height:1.7">State: <b style="color:var(--warn-ink)">not acquired</b><br>Renew: 300 ms<br>Expire: 1000 ms<br>WS drop: immediate release</div><button class="btn btn-primary btn-block" style="margin-top:12px" id="acquireLease" disabled>Acquire control lease</button><div style="margin-top:10px;font-size:11px;color:var(--tx3)">Emergency stop is always visible during a live session; press-and-hold ≥400 ms, no dialog.</div></div></div></div>`);
  mk('tower',head('Tower','Dispatcher workbench · multi-panel','<span class="chip">sidebar auto-focus</span>')+`<div class="tower-grid"><div class="panel"><div class="panel-head"><span class="panel-title">Live wall</span><div class="spacer"></div><span class="chip">4-up</span></div><div class="panel-body"><div class="mini-wall" id="towerWall"></div></div></div><div class="panel"><div class="panel-head"><span class="panel-title">Intercom</span><div class="spacer"></div><span class="chip" id="towerHeld">2 held</span></div><div class="panel-body" id="towerTalk"></div></div><div class="panel alerts-panel"><div class="panel-head"><span class="panel-title">Alerts &amp; presence</span><div class="spacer"></div><span class="chip">${ALERTS.length} active</span></div><div class="panel-body" id="towerAlerts" style="display:flex;gap:8px;flex-wrap:wrap"></div></div></div>`);
- mk('devices',head('Devices','Enrollment, approval & audit','<div class="seg" id="devSeg"><button data-f="all" class="on">All</button><button data-f="pending">Pending</button></div><div class="search"><span class="ic">⌕</span><input id="devSearch" placeholder="Search devices…"></div>')+`<div class="page-body"><div class="tbl-wrap"><table class="tbl" id="devTbl"><thead><tr><th data-k="id">Device</th><th data-k="kind">Kind</th><th data-k="status">Status</th><th>Capabilities</th><th data-k="seen">Last seen</th><th style="text-align:right">Actions</th></tr></thead><tbody id="devBody"></tbody></table></div></div>`);
+ mk('admin',head('Admin','Assets, observability, security & system','')+`<div class="page-body"><div id="adminHub"></div></div>`);
+mk('devices',head('Devices','Enrollment, approval & audit','<div class="seg" id="devSeg"><button data-f="all" class="on">All</button><button data-f="pending">Pending</button></div><div class="search"><svg class="ic"><use href="#i-search"/></svg><input id="devSearch" placeholder="Search devices…"></div>')+`<div class="page-body"><div class="tbl-wrap"><table class="tbl" id="devTbl"><thead><tr><th data-k="id">Device</th><th data-k="kind">Kind</th><th data-k="status">Status</th><th>Capabilities</th><th data-k="seen">Last seen</th><th style="text-align:right">Actions</th></tr></thead><tbody id="devBody"></tbody></table></div></div>`);
  mk('rooms',head('Rooms','Rooms by kind','<div class="search"><span class="ic">⌕</span><input id="roomSearch" placeholder="Search rooms…"></div>')+`<div class="page-body"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Room</th><th>Kind</th><th>Participants</th><th>State</th><th style="text-align:right">Actions</th></tr></thead><tbody id="roomBody"></tbody></table></div></div>`);
  mk('sessions',head('Sessions & clients','Live principals and shapes','')+`<div class="page-body"><div class="honesty"><span class="g g-warn"></span>No client/session registry API in this build — shapes are inferred from code paths, shown honestly.</div><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Principal</th><th>Client</th><th>Shape</th><th>Kind</th><th>Room</th><th>State</th><th>Since</th></tr></thead><tbody id="sessBody"></tbody></table></div></div>`);
  mk('streams',head('Streams','All producers and health','<div class="search"><span class="ic">⌕</span><input id="streamSearch" placeholder="Search streams…"></div>')+`<div class="page-body"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Stream</th><th>Device</th><th>Res</th><th class="num">FPS</th><th class="num">Bitrate</th><th class="num">RTT</th><th class="num">Loss</th><th>State</th></tr></thead><tbody id="streamBody"></tbody></table></div></div>`);
- mk('config',head('Config push','Presets & per-room overrides','')+`<div class="page-body"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))" id="cfgCards"></div></div>`);
- mk('keys',head('Client keys','Machine credentials','<button class="btn btn-primary btn-sm" id="newKey">＋ New key</button>')+`<div class="page-body"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Label</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Expires</th><th style="text-align:right">Actions</th></tr></thead><tbody id="keyBody"></tbody></table></div></div>`);
- mk('audit',head('Audit log','Security-relevant events','')+`<div class="page-body"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Result</th></tr></thead><tbody id="auditBody"></tbody></table></div></div>`);
+ mk('config',head('Config delivery','Presets & per-room overrides','')+`<div class="page-body"><div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(280px,1fr))" id="cfgCards"></div></div>`);
+ mk('keys',head('Keys','Machine credentials','<button class="btn btn-primary btn-sm" id="newKey"><svg class="ic"><use href="#i-plus"/></svg> New key</button>')+`<div class="page-body"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Label</th><th>Prefix</th><th>Created</th><th>Last used</th><th>Expires</th><th style="text-align:right">Actions</th></tr></thead><tbody id="keyBody"></tbody></table></div></div>`);
+ mk('audit',head('Audit','Security-relevant events','')+`<div class="page-body"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Result</th></tr></thead><tbody id="auditBody"></tbody></table></div></div>`);
  mk('settings',head('Settings','Appearance & access','')+`<div class="page-body"><div class="card" style="max-width:760px"><div class="card-title">Appearance</div><div class="set-row"><div><div class="set-k">Theme</div><div class="set-d">Light / dark, persisted per origin</div></div><div class="set-v"><div class="seg" id="themeSeg"><button data-t="light">Light</button><button data-t="dark" class="on">Dark</button></div></div></div><div class="set-row"><div><div class="set-k">Density</div><div class="set-d">Comfortable / compact rows</div></div><div class="set-v"><div class="seg" id="densSeg"><button data-d="comfortable" class="on">Comfortable</button><button data-d="compact">Compact</button></div></div></div><div class="card-title" style="margin-top:16px">Access</div><div class="set-row"><div><div class="set-k">Identity &amp; access</div><div class="set-d">Managed externally (AccessBase) in platform mode</div></div><div class="set-v"><button class="btn btn-sm" id="idAccess">Open ↗</button></div></div><div class="set-row"><div><div class="set-k">Auth token TTL</div><div class="set-d">Hardened to ≤24 h (B-sec)</div></div><div class="set-v"><span class="chip">24 h</span></div></div></div></div>`);
  mk('signaling',head('Signaling','Endpoint & connectivity','')+`<div class="page-body"><div class="card" style="max-width:760px"><div class="card-title">Endpoint</div><div class="set-row"><div><div class="set-k">Signaling URL</div><div class="set-d">WebSocket endpoint for room / floor events</div></div><div class="set-v"><span class="chip mono">wss://signal.msrtc.local/ws</span><button class="btn btn-sm" id="sigTest">Test</button></div></div><div class="set-row"><div><div class="set-k">Connection</div><div class="set-d">Live state of the admin WS</div></div><div class="set-v"><span class="badge online" id="sigState"><span class="g g-online"></span> connected</span></div></div><div class="set-row"><div><div class="set-k">TURN / relay</div><div class="set-d">coturn credentials provisioned (floor-admin-ops)</div></div><div class="set-v"><span class="chip">configured</span></div></div></div></div>`);
 }
@@ -1688,15 +1727,86 @@ function renderTowerTalk(){
  const th=$('#towerHeld');if(th)th.textContent=GROUPS.filter(g=>g.state==='held').length+' held';
 }
 let devFilter='all',devQ='',devSort={k:'id',dir:1};
+/* B+D (nav IA): Administration collapses to ONE sidebar entry; hub groups spokes by user mental model
+   (Assets / Observability / Security / System); naming converged (Config delivery / Keys / Audit). */
+const ADMIN_DOMAINS=[
+ {name:'Assets',desc:'physical & logical inventory',items:[['devices','Devices','Enrollment, approval & audit'],['rooms','Rooms','Logical grouping of devices']]},
+ {name:'Observability',desc:'live state & diagnostics',items:[['sessions','Sessions','Live principals and shapes'],['streams','Streams','Producers and health'],['signaling','Signaling','Wire-level diagnostics']]},
+ {name:'Security',desc:'credentials & compliance',items:[['keys','Keys','Machine credentials'],['audit','Audit','Who did what, when']]},
+ {name:'System',desc:'configuration & delivery',items:[['settings','Settings','Global & per-domain preferences'],['config','Config delivery','Presets & per-room overrides']]}];
+const ADMIN_SPOKES=ADMIN_DOMAINS.flatMap(d=>d.items.map(i=>i[0]));
+function renderAdmin(){const b=$('#adminHub');if(!b)return;
+ b.innerHTML=ADMIN_DOMAINS.map(d=>`<div class="card" style="margin-bottom:12px"><div class="card-title">${d.name}<span style="color:var(--tx3);font-weight:400;font-size:11px;margin-left:8px">${d.desc}</span></div>${d.items.map(([id,label,desc])=>`<div class="board-row" data-go="${id}" style="grid-template-columns:minmax(0,210px) minmax(0,1fr) auto;cursor:pointer"><div><div class="grp-name">${label}</div><div class="grp-id">${id}</div></div><div class="floor-sub">${desc}</div><svg class="ic" style="width:14px;height:14px;color:var(--tx3)"><use href="#i-chevron"/></svg></div>`).join('')}</div>`).join('');
+ b.querySelectorAll('[data-go]').forEach(r=>r.onclick=()=>goto(r.dataset.go));}
+/* P9 data model + role matrix + config resolver + staged delivery (K17=A/K18=A/K19=B/K20=B). */
+DEVICES.forEach((d,i)=>{d.room=d.room||('zone-'+(i%3+1));d.overrides=d.overrides||{};d.fw=d.fw||'2.4.1';d.lease=d.lease||(d.caps.includes('ctrl')?'lease-7f3a':null);d.revoked=!!d.revoked;d.history=d.history||[{t:'08:0'+(i+1),evt:'enrolled'},{t:'08:1'+(i+1),evt:'status '+d.status}];});
+const ROLE_CAPS={viewer:[],dispatcher:['rename','zone','config'],admin:['rename','zone','config','caps','approve','reject','revoke','restore','reapprove']};
+const effRole=()=>myRole==='field'?'viewer':myRole;
+const can=a=>(ROLE_CAPS[effRole()]||[]).includes(a);
+const DEV_CFG_KEYS=[['video.codec','HD'],['video.fps','25'],['audio.vox','off'],['net.bitrate_kbps','2048']];
+const devDrafts={};
+let devOpen=null,ddTab='overview',devTrigger=null,devTriggerId=null;
+const pushHist=(d,evt)=>{d.history.unshift({t:fmtEvAt(Date.now()),evt});if(d.history.length>12)d.history.pop();};
+const audit=(action,target,ok=true)=>{AUDIT.unshift({t:fmtEvAt(Date.now()),actor:effRole()==='admin'?'admin.x':'dispatch.x',action,target,ok});};
+const resolveConfig=(key,d)=>{const def=(DEV_CFG_KEYS.find(k=>k[0]===key)||[])[1];const g=CONFIG.find(c=>c.key===key&&c.scope==='global');return {inh:g?g.val:def,ov:d.overrides[key],draft:(devDrafts[d.id]||{})[key]};};
+function flushStaged(d){if(d.revoked)return;let n=0;Object.keys(d.overrides).forEach(k=>{const o=d.overrides[k];if(o.state==='staged'){d._rb=d._rb||{};d._rb[k]=(d._rbStage&&d._rbStage[k]!==undefined)?d._rbStage[k]:resolveConfig(k,d).inh;if(d._rbStage)delete d._rbStage[k];o.state='applied';o.at=Date.now();n++;audit('device.config.delivered',d.id+':'+k);}});if(n){pushHist(d,'config delivered ('+n+')');if(devOpen!==d.id)toast('Staged config delivered to '+d.id+' ('+n+')');const lv=$('#ddLive');if(lv)lv.textContent='Staged config delivered to '+d.id;renderDevices();if(devOpen===d.id)renderDrawer();}}
 function renderDevices(){
  let rows=DEVICES.filter(d=>(devFilter==='all'||d.status===devFilter)&&(!devQ||(d.id+d.name+d.kind).toLowerCase().includes(devQ)));
  rows.sort((a,b)=>String(a[devSort.k]).localeCompare(String(b[devSort.k]))*devSort.dir);
- $('#devBody').innerHTML=rows.map(d=>`<tr><td><b>${d.id}</b><div style="font-size:11px;color:var(--tx3)">${d.name}</div></td><td><span class="kind">${d.kind}</span></td><td>${badge(d.status)}</td><td>${d.caps.map(c=>`<span class="chip">${c}</span>`).join(' ')}</td><td class="mono" style="color:var(--tx3)">${d.seen}</td><td><div class="actions">${d.status==='pending'?`<button class="btn btn-sm btn-primary dev-approve" data-id="${d.id}">Approve</button><button class="btn btn-sm btn-danger dev-reject" data-id="${d.id}">Reject</button>`:`<button class="btn btn-sm dev-view" data-id="${d.id}">View</button><button class="btn btn-sm btn-danger dev-revoke" data-id="${d.id}">Revoke</button>`}</div></td></tr>`).join('')||'<tr><td colspan="6"><div class="empty">No devices match.</div></td></tr>';
- document.querySelectorAll('.dev-approve').forEach(b=>b.onclick=()=>{const d=DEVICES.find(x=>x.id===b.dataset.id);d.status='online';d.seen='just now';toast('Approved '+d.id);renderDevices();updateNavBadges();});
- document.querySelectorAll('.dev-reject').forEach(b=>b.onclick=()=>{toast('Rejected '+b.dataset.id);});
- document.querySelectorAll('.dev-revoke').forEach(b=>b.onclick=()=>{const d=DEVICES.find(x=>x.id===b.dataset.id);d.status='offline';toast('Revoked '+d.id);renderDevices();});
- document.querySelectorAll('.dev-view').forEach(b=>b.onclick=()=>toast('Device detail · '+b.dataset.id));
+ $('#devBody').innerHTML=rows.map(d=>{const ov=Object.values(d.overrides||{});const st=ov.some(o=>o.state==='staged'),fl=ov.some(o=>o.state==='failed'),dr=Object.keys(devDrafts[d.id]||{}).length>0;
+  const acts=d.status==='pending'?`<button class="btn btn-sm dev-view" data-id="${d.id}">Details</button><button class="btn btn-sm btn-primary dev-approve" data-id="${d.id}">Approve</button><button class="btn btn-sm btn-danger dev-reject" data-id="${d.id}">Reject</button>`
+   :d.status==='rejected'?`<button class="btn btn-sm dev-view" data-id="${d.id}">Details</button><button class="btn btn-sm dev-reapprove" data-id="${d.id}">Re-approve</button>`
+   :d.revoked?`<button class="btn btn-sm dev-view" data-id="${d.id}">Details</button><button class="btn btn-sm dev-restore" data-id="${d.id}">Restore</button>`
+   :`<button class="btn btn-sm dev-view" data-id="${d.id}">Details</button><button class="btn btn-sm btn-danger dev-revoke" data-id="${d.id}">Revoke</button>`;
+  return `<tr data-id="${d.id}"><td class="dev-primary" data-id="${d.id}" tabindex="0" role="button" aria-label="Open details ${d.id}" style="cursor:pointer"><b>${d.id}</b><div style="font-size:11px;color:var(--tx3)">${d.name}</div></td><td><span class="kind">${d.kind}</span></td><td>${badge(d.status)}${d.revoked?' <span class="state-chip failed">revoked</span>':''}${st?' <span class="state-chip staged" title="staged · offline">staged</span>':''}${fl?' <span class="state-chip failed">failed</span>':''}${dr?' <span class="state-chip draft">draft</span>':''}</td><td>${d.caps.map(c=>`<span class="chip">${c}</span>`).join(' ')}</td><td class="mono" style="color:var(--tx3)">${d.seen}</td><td><div class="actions">${acts}</div></td></tr>`;}).join('')||'<tr><td colspan="6"><div class="empty">No devices match.</div></td></tr>';
+ document.querySelectorAll('#devBody tr[data-id]').forEach(tr=>tr.onclick=e=>{if(e.target.closest('.actions'))return;openDevDrawer(tr.dataset.id,tr.querySelector('.dev-primary'));});
+ document.querySelectorAll('.dev-primary').forEach(td=>{td.onclick=e=>{e.stopPropagation();openDevDrawer(td.dataset.id,td);};td.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();openDevDrawer(td.dataset.id,td);}};});
+ document.querySelectorAll('#devBody .actions .btn').forEach(b=>b.addEventListener('click',e=>e.stopPropagation()));
+ document.querySelectorAll('.dev-approve').forEach(b=>{setGuard(b,!can('approve'),'Approve requires admin role.');b.onclick=()=>{if(!can('approve')){cue('denied');return;}const d=DEVICES.find(x=>x.id===b.dataset.id);d.status='online';d.seen='just now';pushHist(d,'approved');audit('device.approve',d.id);flushStaged(d);toast('Approved '+d.id);renderDevices();updateNavBadges();if(devOpen===d.id)renderDrawer();};});
+ document.querySelectorAll('.dev-reject').forEach(b=>{setGuard(b,!can('reject'),'Reject requires admin role.');b.onclick=()=>{if(!can('reject')){cue('denied');return;}const d=DEVICES.find(x=>x.id===b.dataset.id);confirmDlg('Reject '+d.id,'Device stays rejected (not enrolled); an admin can Re-approve later.',()=>{d.status='rejected';pushHist(d,'rejected');audit('device.reject',d.id);toast('Rejected '+d.id);renderDevices();updateNavBadges();if(devOpen===d.id)renderDrawer();});};});
+ document.querySelectorAll('.dev-revoke').forEach(b=>{setGuard(b,!can('revoke'),'Revoke requires admin role.');b.onclick=()=>{if(!can('revoke')){cue('denied');return;}const d=DEVICES.find(x=>x.id===b.dataset.id);confirmDlg('Revoke '+d.id,'Device goes offline + revoked; staged config is cleared; an admin can Restore to re-approval.',()=>{d.status='offline';d.revoked=true;Object.keys(d.overrides).forEach(k=>{if(d.overrides[k].state==='staged')delete d.overrides[k];});pushHist(d,'revoked');audit('device.revoke',d.id);toast('Revoked '+d.id);renderDevices();updateNavBadges();if(devOpen===d.id)renderDrawer();});};});
+ document.querySelectorAll('.dev-restore').forEach(b=>{setGuard(b,!can('restore'),'Restore requires admin role.');b.onclick=()=>{if(!can('restore')){cue('denied');return;}const d=DEVICES.find(x=>x.id===b.dataset.id);d.revoked=false;d.status='pending';pushHist(d,'restored to pending');audit('device.restore',d.id);toast('Restored '+d.id+' to pending');renderDevices();updateNavBadges();if(devOpen===d.id)renderDrawer();};});
+ document.querySelectorAll('.dev-reapprove').forEach(b=>{setGuard(b,!can('reapprove'),'Re-approve requires admin role.');b.onclick=()=>{if(!can('reapprove')){cue('denied');return;}const d=DEVICES.find(x=>x.id===b.dataset.id);d.status='pending';pushHist(d,'re-approve to pending');audit('device.reapprove',d.id);toast('Re-approval pending for '+d.id);renderDevices();updateNavBadges();if(devOpen===d.id)renderDrawer();};});
+ document.querySelectorAll('.dev-view').forEach(b=>b.onclick=()=>openDevDrawer(b.dataset.id,b));
 }
+/* P9.1 drawer infrastructure (NEW; ch-side is an in-page panel, not reusable as overlay). */
+function openDevDrawer(id,trigger){devOpen=id;ddTab='overview';devTrigger=trigger||document.activeElement;devTriggerId=id;renderDrawer();const dr=$('#devDrawer');dr.classList.add('open');dr.setAttribute('aria-hidden','false');$('#ddClose').focus();}
+function closeDevDrawer(){const dr=$('#devDrawer');dr.classList.remove('open');dr.setAttribute('aria-hidden','true');const id=devOpen;devOpen=null;let t=(devTrigger&&devTrigger.isConnected)?devTrigger:null;if(!t&&id)t=document.querySelector('.dev-primary[data-id="'+id+'"]')||document.querySelector('.dev-view[data-id="'+id+'"]');if(!t)t=$('#devSearch');if(t&&t.focus)t.focus();devTrigger=null;devTriggerId=null;if(Object.keys(devDrafts[id]||{}).length)toast('Draft kept for '+id+' (row badge)');}
+function ddKey(e){const dr=$('#devDrawer');if(!dr.classList.contains('open'))return;if(e.key==='Escape'){e.stopPropagation();const ae=document.activeElement;if(ae&&/^(INPUT|SELECT)$/.test(ae.tagName)){if(ddTab==='config'){const k=ae.dataset.dk;if(k&&devDrafts[devOpen]&&devDrafts[devOpen][k]!==undefined){delete devDrafts[devOpen][k];renderDrawer();toast('Draft edit cancelled');return;}}if(ddTab==='identity'&&(ae.id==='ddName'||ae.id==='ddZone')){const d=DEVICES.find(x=>x.id===devOpen);ae.value=ae.id==='ddName'?d.name:d.room;toast('Identity edit reverted');return;}}closeDevDrawer();return;}
+ if(e.key==='Tab'){const els=[...dr.querySelectorAll('button,input,select')].filter(x=>!x.disabled&&x.offsetParent!==null);if(!els.length)return;const a=els[0],b=els[els.length-1];if(e.shiftKey&&document.activeElement===a){e.preventDefault();b.focus();}else if(!e.shiftKey&&document.activeElement===b){e.preventDefault();a.focus();}return;}
+ if(document.activeElement.classList.contains('dd-tab')){const tabs=[...dr.querySelectorAll('.dd-tab')];const i=tabs.indexOf(document.activeElement);let n=null;if(e.key==='ArrowRight')n=tabs[(i+1)%tabs.length];else if(e.key==='ArrowLeft')n=tabs[(i+tabs.length-1)%tabs.length];else if(e.key==='Home')n=tabs[0];else if(e.key==='End')n=tabs[tabs.length-1];if(n){n.focus();n.click();e.preventDefault();}}}
+function renderDrawer(){const d=DEVICES.find(x=>x.id===devOpen);const dr=$('#devDrawer');if(!d||!dr)return;
+ const ae=document.activeElement;const fsel=ae&&ae.id?'#'+ae.id:(ae&&ae.dataset&&ae.dataset.dk?'[data-dk="'+ae.dataset.dk+'"]':(ae&&ae.dataset&&ae.dataset.dt?'.dd-tab[data-dt="'+ae.dataset.dt+'"]':null));
+ $('#ddTitle').textContent=d.id+' · '+d.name;$('#ddRole').textContent=effRole();$('#ddClose').setAttribute('aria-label',current==='devices'?'Back to Devices':'Close details');$('#ddBody').setAttribute('aria-label',ddTab+' panel');
+ const tabs=[['overview','Overview'],['config','Config'],['identity','Identity'],['events','Events']];
+ $('#ddTabs').innerHTML=tabs.map(([id,l])=>`<button class="dd-tab" role="tab" data-dt="${id}" aria-selected="${ddTab===id}" tabindex="${ddTab===id?0:-1}">${l}</button>`).join('');
+ dr.querySelectorAll('.dd-tab').forEach(t=>t.onclick=()=>{ddTab=t.dataset.dt;renderDrawer();dr.querySelector('.dd-tab[aria-selected="true"]').focus();});
+ const b=$('#ddBody');const st=(d.overrides||{});
+ if(ddTab==='overview'){const ds=(DEV_STREAMS.find(x=>x[0]===d.id)||[])[1]||[];const s0=ds[0];
+  b.innerHTML=`<div class="dd-sec">Health</div>`+(s0?`<div class="dd-row"><span class="k">fps / bitrate</span><span class="mono">${s0[3]} / ${s0[4]}</span></div><div class="dd-row"><span class="k">latency</span><span class="mono">${s0[9]} ms</span></div>`:`<div class="replay-empty">No stream bound to this device.</div>`)+`<div class="dd-row"><span class="k">lease</span><span class="mono">${d.lease||'—'}</span></div><div class="dd-row"><span class="k">last seen</span><span class="mono">${d.seen}</span></div><div class="dd-row"><span class="k">firmware</span><span class="mono">${d.fw}</span></div><div class="dd-row"><span class="k">zone</span><span>${d.room}</span></div><div class="dd-sec">Status timeline</div>`+d.history.map(h=>`<div class="hist-row"><span class="mono" style="color:var(--tx3)">${h.t}</span><span>${h.evt}</span></div>`).join('')+`<div style="margin-top:12px"><button class="btn btn-sm" id="ddMon">Open in Monitor</button></div>`;
+  const bm=$('#ddMon');const monOk=d.status==='online'||d.status==='degraded';setGuard(bm,!monOk,'Device not live (pending/rejected/offline/revoked) — no stream.');bm.onclick=()=>{if(!monOk){cue('denied');return;}closeDevDrawer();goto('monitor');if(!selected.some(x=>x.dev===d.id||String(x).includes(d.id)))toast('Stream not on wall — use Add streams to include '+d.id);};
+ } else if(ddTab==='config'){const rows=DEV_CFG_KEYS.map(([key])=>{const r=resolveConfig(key,d);const o=r.ov;const state=o?o.state:null;
+   return `<div class="dd-row"><span class="k mono">${key}</span><span style="display:flex;gap:6px;align-items:center"><span class="mono" style="color:var(--tx3)">${r.inh}</span>${o?`<span class="mono">${o.val}</span><span class="state-chip ${state}">${state==='staged'?'staged · offline':state}</span>`:''}${state==='staged'?`<button class="btn btn-sm" data-srev="${key}" ${can('config')?'':'disabled data-reason="Config edit requires dispatcher or admin."'}>Revoke staged</button>`:''}${state==='failed'?`<button class="btn btn-sm" data-retry="${key}" ${can('config')?'':'disabled data-reason="Config edit requires dispatcher or admin."'}>Retry</button><button class="btn btn-sm" data-disc="${key}" ${can('config')?'':'disabled data-reason="Config edit requires dispatcher or admin."'}>Discard</button>`:''}<input class="msg-in" style="flex:0 0 84px" data-dk="${key}" value="${r.draft!==undefined?r.draft:(o?o.val:r.inh)}" aria-label="Override ${key}" ${can('config')?'':'disabled data-reason="Config edit requires dispatcher or admin."'}></span></div>`;}).join('');
+  const drafts=Object.entries(devDrafts[d.id]||{});
+  b.innerHTML=`<div class="dd-sec">Inherited (global) → device override</div>`+rows+`<div class="dd-sec">Draft diff (<span id="ddDiffN">${drafts.length}</span>)</div><div id="ddDiff">`+(drafts.map(([k,v])=>`<div class="diff-row"><span class="mono">${k}</span><span class="diff-old">${resolveConfig(k,d).ov?resolveConfig(k,d).ov.val:resolveConfig(k,d).inh}</span>→<span class="mono">${v}</span></div>`).join('')||'<div class="replay-empty">No draft edits.</div>')+`</div>`+`<div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-sm btn-primary" id="ddApply">Apply</button><button class="btn btn-sm" id="ddDraftCancel">Cancel draft</button>${d._rb&&Object.keys(d._rb).length?'<button class="btn btn-sm" id="ddUndo">Undo last apply</button>':''}</div><div class="replay-empty" style="margin-top:8px">Offline Apply = staged (delivered on reconnect); degraded Apply = failed (Retry/Discard). Rollback depth 1.</div>`;
+  b.querySelectorAll('[data-dk]').forEach(inp=>{setGuard(inp,!can('config'),'Config edit requires dispatcher or admin.');inp.oninput=()=>{devDrafts[d.id]=devDrafts[d.id]||{};devDrafts[d.id][inp.dataset.dk]=inp.value;renderDrawerDiffOnly(d);renderDevices();};});
+  const cfgOk=can('config')&&(d.status==='online'||d.status==='degraded'||(d.status==='offline'&&!d.revoked));
+  const ap=$('#ddApply');setGuard(ap,!cfgOk||!drafts.length,!can('config')?'Config edit requires dispatcher or admin.':(!cfgOk?'Device pending/rejected/revoked — config unavailable until enrolled.':'No draft edits to apply.'));
+  ap.onclick=()=>{const dr=Object.entries(devDrafts[d.id]||{});const ok=can('config')&&(d.status==='online'||d.status==='degraded'||(d.status==='offline'&&!d.revoked));if(!ok||!dr.length){cue('denied');return;}const lv=$('#ddLive');if(lv)lv.textContent='Applying config to '+d.id+' (simulated delivery)';ap.classList.add('is-busy');setTimeout(()=>{ap.classList.remove('is-busy');},300);dr.forEach(([k,v])=>{const old=resolveConfig(k,d).ov?resolveConfig(k,d).ov.val:resolveConfig(k,d).inh;let state='applied';if(d.status==='offline')state='staged';else if(d.status==='degraded')state='failed';if(state==='applied'){d._rb=d._rb||{};d._rb[k]=old;}if(state==='staged'){d._rbStage=d._rbStage||{};d._rbStage[k]=old;}d.overrides[k]={val:v,state,at:Date.now()};audit(state==='staged'?'device.config.staged':'device.config.apply',d.id+':'+k,state!=='failed');pushHist(d,'config '+state+' '+k);});devDrafts[d.id]={};if(lv)lv.textContent='Config '+(d.status==='offline'?'staged':d.status==='degraded'?'failed':'applied')+' for '+d.id;toast('Config '+(d.status==='offline'?'staged · offline':d.status==='degraded'?'failed':'applied')+' for '+d.id);renderDevices();renderDrawer();};
+  const dc=$('#ddDraftCancel');setGuard(dc,!can('config'),'Config edit requires dispatcher or admin.');dc.onclick=()=>{if(!can('config')){cue('denied');return;}devDrafts[d.id]={};renderDrawer();renderDevices();toast('Draft discarded');};
+  const un=$('#ddUndo');if(un){setGuard(un,!can('config')||d.revoked,!can('config')?'Config edit requires dispatcher or admin.':'Revoked device — rollback unavailable.');un.onclick=()=>{if(!can('config')||d.revoked){cue('denied');return;}const state=d.status==='offline'?'staged':d.status==='degraded'?'failed':'applied';Object.keys(d._rb).forEach(k=>{d.overrides[k]={val:d._rb[k],state,at:Date.now()};audit('device.config.rollback',d.id+':'+k);});pushHist(d,'config rollback');d._rb={};toast('Rolled back last apply');renderDevices();renderDrawer();};}
+  b.querySelectorAll('[data-srev]').forEach(x=>{setGuard(x,!can('config'),'Config edit requires dispatcher or admin.');x.onclick=()=>{if(!can('config')){cue('denied');return;}delete d.overrides[x.dataset.srev];audit('device.config.staged-revoke',d.id+':'+x.dataset.srev);pushHist(d,'staged revoked '+x.dataset.srev);renderDevices();renderDrawer();};});
+  b.querySelectorAll('[data-retry]').forEach(x=>{setGuard(x,!can('config'),'Config edit requires dispatcher or admin.');x.onclick=()=>{if(!can('config')){cue('denied');return;}const k=x.dataset.retry;const o=d.overrides[k];const state=d.status==='offline'?'staged':d.status==='degraded'?'failed':'applied';if(state==='applied'){d._rb=d._rb||{};d._rb[k]=(d._rbStage&&d._rbStage[k]!==undefined)?d._rbStage[k]:resolveConfig(k,d).inh;}o.state=state;o.at=Date.now();audit('device.config.apply',d.id+':'+k,state!=='failed');renderDevices();renderDrawer();};});
+  b.querySelectorAll('[data-disc]').forEach(x=>{setGuard(x,!can('config'),'Config edit requires dispatcher or admin.');x.onclick=()=>{if(!can('config')){cue('denied');return;}delete d.overrides[x.dataset.disc];audit('device.config.discard',d.id+':'+x.dataset.disc);renderDevices();renderDrawer();};});
+ } else if(ddTab==='identity'){b.innerHTML=`<div class="dd-sec">Identity</div><div class="dd-row"><span class="k">name</span><input class="msg-in" style="flex:0 0 160px" id="ddName" value="${d.name}" ${can('rename')?'':'disabled data-reason="Rename requires dispatcher or admin."'}></div><div class="dd-row"><span class="k">zone</span><input class="msg-in" style="flex:0 0 120px" id="ddZone" value="${d.room}" ${can('zone')?'':'disabled data-reason="Zone edit requires dispatcher or admin."'}></div><div class="dd-sec">Capabilities</div><div style="display:flex;gap:6px;flex-wrap:wrap">${d.caps.map(c=>`<span class="chip">${c} <button class="iconbtn" data-caprm="${c}" aria-label="Remove ${c}" ${can('caps')?'':'disabled data-reason="Capability edit requires admin."'}><svg class="ic"><use href="#i-close"/></svg></button></span>`).join('')}</div><div class="dd-row" style="margin-top:8px"><span class="k">add capability</span><span style="display:flex;gap:6px"><select class="msg-in" style="flex:0 0 110px" id="ddCapAdd" ${can('caps')?'':'disabled data-reason="Capability edit requires admin."'}>${['pull','audio','ctrl','ptz'].filter(c=>!d.caps.includes(c)).map(c=>`<option>${c}</option>`).join('')}</select><button class="btn btn-sm" id="ddCapAddBtn" ${can('caps')?'':'disabled data-reason="Capability edit requires admin."'}>Add</button></span></div><div style="margin-top:12px"><button class="btn btn-sm btn-primary" id="ddSave">Save identity</button></div>`;
+  setGuard($('#ddSave'),!can('rename')&&!can('zone'),'Identity edit requires dispatcher or admin.');
+ $('#ddSave').onclick=()=>{if(!can('rename')&&!can('zone')){cue('denied');return;}d.name=$('#ddName').value||d.name;d.room=$('#ddZone').value||d.room;pushHist(d,'identity updated');audit('device.identity',d.id);toast('Identity saved');renderDevices();renderDrawer();};
+  const cab=$('#ddCapAddBtn');if(cab){setGuard(cab,!can('caps'),'Capability edit requires admin.');cab.onclick=()=>{if(!can('caps')){cue('denied');return;}const c=$('#ddCapAdd').value;if(!c||d.caps.includes(c))return;d.caps.push(c);pushHist(d,'cap added '+c);audit('device.caps.add',d.id+':'+c);toast('Capability added: '+c);renderDevices();renderDrawer();};}
+  b.querySelectorAll('[data-caprm]').forEach(x=>{setGuard(x,!can('caps'),'Capability edit requires admin.');x.onclick=()=>{if(!can('caps')){cue('denied');return;}confirmDlg('Remove capability '+x.dataset.caprm,'Device loses '+x.dataset.caprm+' until re-added; streams/controls relying on it stop.',()=>{d.caps=d.caps.filter(c=>c!==x.dataset.caprm);pushHist(d,'cap removed '+x.dataset.caprm);audit('device.caps',d.id+':'+x.dataset.caprm);renderDevices();renderDrawer();});};});
+ } else {const ev=AUDIT.filter(a=>String(a.target).includes(d.id));b.innerHTML=`<div class="dd-sec">Device events</div>`+(ev.map(a=>`<div class="hist-row"><span class="mono" style="color:var(--tx3)">${a.t}</span><span>${a.action}</span><span class="mono" style="color:var(--tx3)">${a.target}</span></div>`).join('')||'<div class="replay-empty">No events for this device yet.</div>');}
+ if(fsel&&dr.classList.contains('open')){const el=dr.querySelector(fsel);if(el&&el.focus)el.focus();}
+}
+function renderDrawerDiffOnly(d){const box=$('#ddDiff');if(!box)return;const drafts=Object.entries(devDrafts[d.id]||{});box.innerHTML=drafts.map(([k,v])=>`<div class="diff-row"><span class="mono">${k}</span><span class="diff-old">${resolveConfig(k,d).ov?resolveConfig(k,d).ov.val:resolveConfig(k,d).inh}</span>→<span class="mono">${v}</span></div>`).join('')||'<div class="replay-empty">No draft edits.</div>';const n=$('#ddDiffN');if(n)n.textContent=drafts.length;const ap=$('#ddApply');if(ap)setGuard(ap,!can('config')||!drafts.length,!can('config')?'Config edit requires dispatcher or admin.':'No draft edits to apply.');}
 function renderRooms(){
  const q=($('#roomSearch').value||'').toLowerCase();
  $('#roomBody').innerHTML=ROOMS.filter(r=>!q||(r.id+r.name+r.kind).toLowerCase().includes(q)).map(r=>`<tr><td><b>${r.name}</b><div style="font-size:11px;color:var(--tx3)" class="mono">${r.id}</div></td><td><span class="kind">${r.kind}</span></td><td class="num">${r.parts}</td><td>${badge(r.state)}</td><td><div class="actions"><button class="btn btn-sm room-open" data-id="${r.id}">Open</button></div></td></tr>`).join('');
@@ -1722,9 +1832,10 @@ function buildNav(){const sc=$('#navScroll');sc.innerHTML='';NAV.forEach(g=>{con
  el.innerHTML=`<span class="nav-ico"><svg class="ic" aria-hidden="true"><use href="#${it.ico}"/></svg></span><span class="nav-label">${it.label}</span>${badge}`;
  const act=()=>goto(it.id);el.onclick=act;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();act();}};gd.appendChild(el);});sc.appendChild(gd);});}
 function updateNavBadges(){const lb=document.querySelector('[data-livebadge]');if(lb)lb.textContent=selected.length;const db=document.querySelector('[data-badge="devices"]');if(db)db.textContent=DEVICES.filter(d=>d.status==='pending').length;const ib=document.querySelector('[data-badge="intercom"]');if(ib)ib.textContent=GROUPS.filter(g=>g.state==='held').length;}
-function goto(id){if(current==='intercom'&&chanOpen&&id!=='intercom'){const gg=GROUPS.find(x=>x.id===chanOpen);if(gg)recClear(gg);}if(id==='intercom'){notifs.length=0;renderNotif();}current=id;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));const p=$('#page-'+id);if(p)p.classList.add('active');document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.nav===id));
- const[t,s]=TITLES[id]||[id,''];$('#crumb').innerHTML=`${t} <span style="color:var(--tx3)">· ${s}</span>`;
- const R={overview:renderOverview,monitor:renderMonitor,recordings:renderRecordings,intercom:renderBoard,meeting:renderMeeting,tower:renderTower,devices:renderDevices,rooms:renderRooms,sessions:renderSessions,streams:renderStreams,config:renderConfig,keys:renderKeys,audit:renderAudit};
+function goto(id){if(current==='intercom'&&chanOpen&&id!=='intercom'){const gg=GROUPS.find(x=>x.id===chanOpen);if(gg)recClear(gg);}if(id==='intercom'){notifs.length=0;renderNotif();}if(id!=='devices'&&$('#devDrawer').classList.contains('open'))closeDevDrawer();current=id;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));const p=$('#page-'+id);if(p)p.classList.add('active');const navId=ADMIN_SPOKES.includes(id)?'admin':id;document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.nav===navId));
+ if(ADMIN_SPOKES.includes(id)&&p){const ph=p.querySelector('.page-head');if(ph&&!ph.querySelector('[data-back]')){const bb=document.createElement('button');bb.className='iconbtn';bb.dataset.back='1';bb.setAttribute('aria-label','Back to Admin');bb.dataset.tip='Back to Admin hub';bb.innerHTML='<svg class="ic"><use href="#i-arrow-left"/></svg>';bb.onclick=()=>goto('admin');ph.insertBefore(bb,ph.firstChild);}}
+ const[t,s]=TITLES[id]||[id,''];$('#crumb').innerHTML=`${ADMIN_SPOKES.includes(id)?'<button class="crumb-link" data-crumb-admin="1">Admin</button> / ':''}${t} <span style="color:var(--tx3)">· ${s}</span>`;
+ const R={admin:renderAdmin,overview:renderOverview,monitor:renderMonitor,recordings:renderRecordings,intercom:renderBoard,meeting:renderMeeting,tower:renderTower,devices:renderDevices,rooms:renderRooms,sessions:renderSessions,streams:renderStreams,config:renderConfig,keys:renderKeys,audit:renderAudit};
  if(R[id])R[id]();
  if(id==='tower'){$('#body').classList.add('nav-min');$('#navCollapse').textContent='⟩';}
 }
@@ -2013,7 +2124,8 @@ function applyProto(k,v){
  else if(k==='content')applyContent(v);
  else if(k==='labels')document.body.dataset.labels=v;
  else if(k==='badge')document.body.dataset.badge=v;
- else if(k==='role'){myRole=v;toast('My role: '+v+' (simulated)');if(chanOpen)renderChannel();if($('#grpScrim').classList.contains('show'))renderGroups();}
+ else if(k==='role'){myRole=v;toast('My role: '+v+' (simulated)');if(chanOpen)renderChannel();if($('#grpScrim').classList.contains('show'))renderGroups();renderDevices();if(devOpen)renderDrawer();}
+ else if(k==='sim'&&v==='reconnect'){const d=DEVICES.find(x=>x.id===devOpen&&x.status==='offline'&&!x.revoked)||DEVICES.find(x=>x.status==='offline'&&!x.revoked);if(!d){toast('No offline (non-revoked) device to reconnect');return;}d.status='online';d.seen='just now';pushHist(d,'reconnected');flushStaged(d);renderDevices();updateNavBadges();if(devOpen===d.id)renderDrawer();return;}
  else if(k==='sim'&&v==='extemerg'){externalEmergency();return;}
  else if(k==='sim'&&v==='extqueue'){externalQueue();return;}
  else if(k==='sim'&&v==='injectexp'){injectExpired();return;}
@@ -2126,7 +2238,12 @@ function syncCueUI(){
  if(ct){ct.classList.toggle('on',cuesOn);ct.title='Intercom event cues: talk-permit / queue / yield'+(cuesMuted?' (master muted)':'');}
 }
 /* ================= WIRING ================= */
+function labelTables(){document.querySelectorAll('table.tbl').forEach(t=>{const ths=[...t.querySelectorAll('thead th')].map(th=>th.textContent.trim());t.querySelectorAll('tbody tr').forEach(tr=>[...tr.children].forEach((td,i)=>{if(!td.hasAttribute('data-th'))td.setAttribute('data-th',ths[i]||'');}));});}
 function wire(){
+ $('#devDrawer').addEventListener('keydown',ddKey);
+ $('#ddClose').onclick=closeDevDrawer;
+ document.addEventListener('click',e=>{if(e.target.closest('[data-crumb-admin]'))goto('admin');});
+ let ltRaf=0;new MutationObserver(()=>{cancelAnimationFrame(ltRaf);ltRaf=requestAnimationFrame(labelTables);}).observe($('#main'),{childList:true,subtree:true});
  ['grpScrim','cfmScrim','pickerScrim'].forEach(id=>{const sc=$('#'+id);if(sc)sc.addEventListener('keydown',e=>dlgKey(sc,e));});
  $('#grpClose').onclick=()=>dlgClose($('#grpScrim'));
  $('#cfmCancel').onclick=()=>dlgClose($('#cfmScrim'));$('#cfmCancelX').onclick=()=>dlgClose($('#cfmScrim'));$('#cfmOk').onclick=()=>{const cb=cfmCb;cfmCb=null;dlgClose($('#cfmScrim'));if(cb)cb();};
@@ -2180,7 +2297,7 @@ function wire(){
  $('#pickApply').onclick=applyPick;
  $('#zoomClose').onclick=()=>$('#zoom').classList.remove('show');
  $('#zoom').onclick=e=>{if(e.target===$('#zoom'))$('#zoom').classList.remove('show');};
- document.addEventListener('keydown',e=>{if(e.key==='Escape'){const ae=document.activeElement;if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;$('#zoom').classList.remove('show');closePicker();const cp=$('#calPop');if(cp)cp.hidden=true;setComboOpen(false);closeDevtools();if(chanOpen)leaveChannel();if(zoomedId){zoomedId=null;renderWall();}}});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'){const ms=[...document.querySelectorAll('.modal-scrim.show')];if(ms.length){dlgClose(ms[ms.length-1]);return;}if($('#devDrawer').classList.contains('open')){closeDevDrawer();return;}const ae=document.activeElement;if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;$('#zoom').classList.remove('show');closePicker();const cp=$('#calPop');if(cp)cp.hidden=true;setComboOpen(false);closeDevtools();if(chanOpen)leaveChannel();if(zoomedId){zoomedId=null;renderWall();}}});
  /* hold Space = push-to-talk while a channel session is open */
  document.addEventListener('keydown',e=>{
   if(e.code!=='Space'||!chanOpen)return;
