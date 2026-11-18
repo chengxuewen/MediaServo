@@ -37,7 +37,8 @@ Build:
   build:deploy <target>      build then deploy in one step
 
 Release:
-  package <target>           release tarball: host|server|sdk-field|sdk-client
+  package <target>           release tarball: host|server|sdk-field|sdk-client|
+                             image (offline site artifact set)
   deploy <target>            install a built tree: bindings|host|server
 
 Observe:
@@ -186,22 +187,35 @@ case "${1:-}" in
     data)
         shift
         sub="${1:-}"; [ $# -gt 0 ] && shift
+        # B3.6 (container-build-rework): volumes discovered by the compose project
+        # label (brand-derived, robust to key names / -p overrides); backup tars
+        # via the PROD IMAGE itself (--entrypoint sh) — the alpine pull is gone
+        # (unreachable on restricted offline sites; the prod image is already
+        # loaded there). data restore stays deferred (rollback = image+config).
+        _ms_data_brand="${MEDIASERVO_BRAND:-msrtc}"
+        _ms_data_vols() { docker volume ls -q --filter "label=com.docker.compose.project=${_ms_data_brand}"; }
         case "$sub" in
-            inspect) _msvc_run docker volume ls --format '{{.Name}} {{.Mountpoint}}' --filter name=mediaservo_ ;;
+            inspect) _msvc_run docker volume ls --format '{{.Name}} {{.Mountpoint}}' --filter "label=com.docker.compose.project=${_ms_data_brand}" ;;
             backup)
                 target="${1:-backup}"
                 mkdir -p "$target"; abs=$(cd "$target" && pwd)
-                for vol in mediaservo_mediaservo-data mediaservo_mediaservo-recordings; do
-                    _msvc_run docker run --rm -v "${vol}:/data:ro" -v "${abs}:/backup" alpine sh -c "tar czf /backup/${vol}.tar.gz -C /data ."
+                img=$(docker inspect "${_ms_data_brand}-server-1" --format '{{.Config.Image}}' 2>/dev/null || true)
+                [ -n "$img" ] || img="${_ms_data_brand}-server:${TAG:-latest}"
+                docker image inspect "$img" >/dev/null 2>&1 || { echo "Error: backup needs the prod image $img (load it first — no alpine fallback)" >&2; exit 1; }
+                vols=$(_ms_data_vols)
+                [ -n "$vols" ] || { echo "Error: no volumes for project '${_ms_data_brand}' — is the stack up?" >&2; exit 1; }
+                for vol in $vols; do
+                    _msvc_run docker run --rm --entrypoint sh -v "${vol}:/data:ro" -v "${abs}:/backup" "$img" -c "tar czf /backup/${vol}.tar.gz -C /data ."
                     echo "backed up ${vol} → ${abs}/${vol}.tar.gz"
                 done
                 ;;
             reset)
-                [ "${1:-}" = "--force" ] || { read -r -p "reset mediaservo_mediaservo-data + mediaservo_mediaservo-recordings (delete all data)? [y/N] " ans
+                [ "${1:-}" = "--force" ] || { read -r -p "reset all volumes of project '${_ms_data_brand}' (delete all data)? [y/N] " ans
                     [ "$ans" = y ] || [ "$ans" = Y ] || { echo cancelled; exit 0; }; }
                 _msvc_run docker compose -f docker-compose.yml down
-                _msvc_run docker volume rm mediaservo_mediaservo-data mediaservo_mediaservo-recordings
-                echo "volumes deleted — \`mediaservo up --env prod\` re-initializes (keys regenerated)"
+                vols=$(_ms_data_vols)
+                [ -n "$vols" ] && _msvc_run docker volume rm $vols
+                echo "volumes deleted — \`docker compose --env-file .env up -d\` re-initializes (keys regenerated)"
                 ;;
             *) echo "data: expected backup|reset|inspect (got '${sub:-}')" >&2; exit 2 ;;
         esac
@@ -884,6 +898,66 @@ _ms_package() {  # $1=target $2=dist $3=brand $4=release(0/1)
     _ms_reap_dist_daemons "$dist" "$staging"
     [ $rc = 0 ] || exit $rc
 }
+# =============================================================================
+# B3.6 (container-build-rework) -- package image: offline site artifact set.
+# docker save (dual tag version+latest) + sha256 manifest + compose + .env
+# template + site runbook. Site: docker load -> cp .env.example .env (fill) ->
+# docker compose --env-file .env up -d. No registry dependency (R0 publish
+# deferred); the tarball IS the delivery channel for restricted offline sites.
+# =============================================================================
+_ms_package_image() {
+    local dist="" tag="" brand="${MEDIASERVO_BRAND:-msrtc}"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --dist) dist="${2:?package image --dist needs a value}"; shift 2 ;;
+            --tag) tag="${2:?package image --tag needs a value}"; shift 2 ;;
+            --brand) brand="${2:?package image --brand needs a value}"; shift 2 ;;
+            -h|--help)
+                cat <<'PIEOF'
+usage: mediaservo package image [--dist DIR] [--tag TAG] [--brand NAME]
+
+Offline site artifact set (container-build-rework B3.6):
+  <brand>-server-<tag>.tar   docker save image (dual tag: <tag> + latest)
+  SHA256SUMS                 sha256 manifest of the tarball
+  docker-compose.yml         prod compose (tree image, R12/R15/R16)
+  .env.example               four-var contract template (fill -> .env)
+  34-site-deployment.md      site runbook (offline load -> up -> rollback)
+  --dist DIR   output directory (default dist/)
+  --tag TAG    image tag (default: running container tag, else crate version)
+  --brand NAME image brand (default MEDIASERVO_BRAND or msrtc)
+Site: docker load -i <tar> && cp .env.example .env (fill) && docker compose --env-file .env up -d
+PIEOF
+                return 0 ;;
+            *) echo "package image: unexpected argument $1" >&2; return 2 ;;
+        esac
+    done
+    [ -n "$dist" ] || dist="$ROOT/dist"
+    if [ -z "$tag" ]; then
+        tag=$(docker inspect "${brand}-server-1" --format '{{.Config.Image}}' 2>/dev/null | sed 's/.*://' || true)
+    fi
+    [ -n "$tag" ] || tag=$(_ms_crate_version mediaservo-server)
+    local image="${brand}-server:${tag}"
+    docker image inspect "$image" >/dev/null 2>&1 || { echo "Error: image $image absent — build it first (Dockerfile.tree / build image prod)" >&2; return 1; }
+    mkdir -p "$dist"; local abs; abs=$(cd "$dist" && pwd)
+    local tar="${brand}-server-${tag}.tar"
+    # dual tag (version pin + latest floating; rollback = re-pin the old tag)
+    docker tag "$image" "${brand}-server:latest"
+    echo "\$ docker save $image ${brand}-server:latest -> $abs/$tar"
+    docker save -o "$abs/$tar" "$image" "${brand}-server:latest" || return $?
+    (cd "$abs" && sha256sum "$tar" > SHA256SUMS) || return $?
+    cp "$ROOT/docker-compose.yml" "$abs/docker-compose.yml"
+    cp "$ROOT/.env.example" "$abs/.env.example"
+    if [ -f "$ROOT/docs/modules/34-site-deployment.md" ]; then
+        cp "$ROOT/docs/modules/34-site-deployment.md" "$abs/34-site-deployment.md"
+    else
+        echo "WARN: site runbook docs/modules/34-site-deployment.md absent — artifact set incomplete (B3.7)" >&2
+    fi
+    echo "✓ packaged image artifact set: $abs"
+    echo "  image:    $image (+ latest), $(( $(stat -c%s "$abs/$tar") / 1024 / 1024 )) MiB tar"
+    echo "  manifest: SHA256SUMS"
+    echo "  site:     docker load -i $tar && cp .env.example .env (fill) && docker compose --env-file .env up -d"
+}
+
 # sr8 P3 -- GUI dependency face: the SDL3 install prefix is an EXPLICIT-
 # VERB artifact (configure never builds, H2). The ImGui wrapper is consumer-
 # compiled (fetch_only recipe) and needs no verb. Profile auto = the same
@@ -1519,10 +1593,12 @@ LIEOF
         case "${2:-}" in
             -h|--help)
                 cat <<'PKEOF'
-usage: mediaservo package <host|server|sdk-field|sdk-client> [--dist DIR] [--brand NAME] [--release]
+usage: mediaservo package <host|server|sdk-field|sdk-client|image> [--dist DIR] [--brand NAME] [--release]
 
 Builds a release tarball: <dist>/<brand>-<target>-<ver>-<platform>-<arch>.tar.gz
 with a versioned top-level directory (bindings = one-cycle alias of sdk-field).
+`package image` is the offline site artifact set (image tar + sha256 + compose
++ .env template + runbook; see `package image -h`).
   --dist DIR     output directory (default dist/; the parent release shell
                  injects out/packages)
   --brand NAME   package brand
@@ -1533,6 +1609,9 @@ PKEOF
                 ;;
         esac
         shift; tgt="${1:-}"; [ $# -gt 0 ] && shift
+        # B3.6: `package image` = offline site artifact set (save/load + manifest
+        # + compose + .env + runbook), distinct from the release-tarball targets.
+        if [ "$tgt" = image ]; then _ms_package_image "$@"; exit $?; fi
         dist=""; brand=""; release=0
         while [ $# -gt 0 ]; do
             case "$1" in
