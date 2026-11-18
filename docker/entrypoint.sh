@@ -11,8 +11,11 @@
 #   ⑥ set -a 注入 .env → exec setpriv 降权（exec 保 PID-1 信号）
 set -euo pipefail
 
-ETC=/usr/local/etc
+# ETC = brand-derived writable volume (R15/container-build-rework): compose
+# mounts mediaservo-data here; the binary is pointed at it via --config below
+# (bin/../etc would resolve to the image-internal dir = dead mount, PIT fix).
 TEMPLATES=/usr/local/etc/templates
+ETC="/opt/${MEDIASERVO_BRAND:-mediaservo}/etc"
 ENV_FILE="$ETC/.env"
 PASSWD_FILE="$ETC/accounts.yaml"
 
@@ -62,5 +65,7 @@ set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
 set +a
-# 二进制 /usr/local/bin/ → 相对路径 bin/../etc/server.yaml = /usr/local/etc/server.yaml（entrypoint 已生成）
-exec setpriv --reuid="$(id -u mediaservo)" --regid="$(id -g mediaservo)" --clear-groups mediaservo-server "$@"
+# --config 指向卷内配置（bin/../etc 相对解析只认镜像内部目录——死挂载根因）；
+# accounts/devices/api_keys 跟随 config 同目录（main.rs 一处覆盖全部）
+exec setpriv --reuid="$(id -u mediaservo)" --regid="$(id -g mediaservo)" --clear-groups \
+    mediaservo-server --config "$ETC/server.yaml" "$@"

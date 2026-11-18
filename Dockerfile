@@ -229,8 +229,8 @@ COPY --from=builder /workspace/target/release/mediaservo-server /usr/local/bin/
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/templates/ /usr/local/etc/templates/
 RUN chmod 755 /usr/local/bin/entrypoint.sh \
-    && mkdir -p /usr/local/etc /opt/mediaservo/recordings \
-    && chown -R mediaservo:mediaservo /usr/local/etc /opt/mediaservo
+    && mkdir -p /opt/mediaservo/etc /opt/mediaservo/recordings \
+    && chown -R mediaservo:mediaservo /opt/mediaservo
 # Run the entrypoint as root (volume writes must not rely on copy-up behavior) — the server is privilege-dropped by setpriv at the entrypoint's end (exec keeps PID-1)
 USER root
 EXPOSE 9800 40000-40100/udp

@@ -11,6 +11,10 @@ if command -v pixi >/dev/null 2>&1; then
     export PIXI_BIN
 elif [ -x "$HOME/.pixi/bin/pixi" ]; then
     export PIXI_BIN="$HOME/.pixi/bin/pixi"
+elif [ "${MEDIASERVO_NO_PIXI:-}" = 1 ]; then
+    # container-builder bypass (container-build-rework B1/P2-C1): the builder
+    # image provides the equivalent toolchain natively — no pixi, no activation.
+    export MEDIASERVO_NO_PIXI=1
 else
     echo "pixi not installed — run first: source bootstrap.sh" >&2
     exit 1
@@ -74,7 +78,9 @@ HEOF
         exit 0
         ;;
 esac
-source "$ROOT/scripts/pixi-shell.sh"   # activate (same process, PATH/LIBCLANG injection)
+if [ "${MEDIASERVO_NO_PIXI:-}" != 1 ]; then
+    source "$ROOT/scripts/pixi-shell.sh"   # activate (same process, PATH/LIBCLANG injection)
+fi
 
 # =============================================================================
 # SR6 batch-1 -- compose face + dev, bash-owned (moved out of mediaservo_cli.py
@@ -441,13 +447,17 @@ _ms_build_stage_weaknet() {
 _ms_build_server() {
     # $1=image (''|runtime|dev) $2=native(0/1) $3=release(0/1)
     # default native (user ruling B); Docker only on explicit --image.
-    _ms_build_stage_weaknet "$3"
+    # weaknet staging serves the native app tree only — the image never
+    # contains it; skip on --image paths (B1/container-build-rework).
+    if [ -z "$1" ] || [ "$2" = 1 ]; then
+        _ms_build_stage_weaknet "$3"
+    fi
     local out_server="${MSRTC_OUT_ROOT:-$ROOT/out}/server" sbt=Debug
     [ "$3" = 1 ] && sbt=Release
     if [ "$2" = 1 ] || [ -z "$1" ]; then
         _ms_ensure_admin_dist
         _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
-        if [ -z "${MESON:-}" ]; then
+        if [ -z "${MESON:-}" ] && [ "${MEDIASERVO_NO_PIXI:-}" != 1 ]; then
             echo "Error: MESON environment variable not set — invoke via ./mediaservo.sh (source pixi-shell.sh injects the activation env)" >&2
             exit 2
         fi

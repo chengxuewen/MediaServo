@@ -84,22 +84,23 @@ CI (`.github/workflows/docker.yml`) flow: push main → build the runtime stage 
 4. curl -sf http://localhost:9800/health     # Final confirmation
 ```
 
-Health-check gates: the compose healthcheck (30s interval / 3s timeout / 3 retries, `docker-compose.yml:18-22`) and the Dockerfile HEALTHCHECK both exist; compose does not auto-rollback an unhealthy container — manual intervention required.
+Health-check gates: the compose healthcheck (30s interval / 3s timeout / 3 retries, `docker-compose.yml:23-27`) and the Dockerfile HEALTHCHECK both exist; compose does not auto-rollback an unhealthy container — manual intervention required.
 
 ### Rollback
 
 ```
-docker compose pull                          # Or skip: pin the old tag directly
-docker compose up -d ghcr.io/org/mediaservo-server:sha-<old-commit>
-docker compose up -d                         # Restore the compose file's default latest
+TAG=sha-<old-commit> docker compose up -d    # Pin the old image (compose ${TAG:-latest})
+TAG=latest docker compose up -d              # Restore the compose default
 ```
+
+Offline / restricted-network sites (no registry access): keep the previous `docker save` tarball next to the new one and re-pin via `TAG` after `docker load` — the container-build-rework site runbook owns this drill.
 
 Retention policy: `sha-` tags accumulate with main pushes; clean old tags every N releases (manual deletion on ghcr).
 
 ### Config & Data Migration
 
-- Config: `./config/server.docker.yaml` mounted read-only (`docker-compose.yml:24`); image upgrades never touch config; new fields are compatible via serde `#[serde(default)]` (see §Config Migration above).
-- Database: sqlx migrate runs automatically at startup (see §Database Migration below); back up `mediaservo.db` before upgrading (29-operations.md §Backup).
+- Config: state lives in the `mediaservo-data` named volume mounted at the brand-derived `/opt/${MEDIASERVO_BRAND:-mediaservo}/etc` — the entrypoint bootstraps secrets/templates on first boot and never overwrites existing files (PIT-160); image upgrades never touch the volume.
+- Server state is file-based (`accounts.yaml` / `devices.yaml` in the same volume) — there is no server-side SQL database in the container; back up the volume before upgrading (see `data backup`, 29-operations.md §Backup).
 - Version compatibility: follow the §Version Compatibility Matrix (D118) — different MAJORs must upgrade Host/Remote in sync.
 
 ### Differences vs Host Upgrade

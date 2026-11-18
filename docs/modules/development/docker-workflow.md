@@ -100,7 +100,8 @@ cargo clippy --features sfu-mediasoup --all-targets -- -D warnings
 
 | Port | Purpose |
 |------|---------|
-| 8000 | HTTP/signaling |
+| 9800 | HTTP/signaling + embedded admin SPA |
+| 20000/udp | SFU |
 | 40000-40100/udp | mediasoup RTP/RTCP |
 
 > See [SFU mediasoup Integration](../33-sfu-mediasoup-integration.md)

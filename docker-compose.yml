@@ -10,8 +10,10 @@ services:
       - "40000-40100:40000-40100/udp"
     environment:
       RUST_LOG: info
+      # 品牌派生路径（R15）：entrypoint 的 ETC 与卷挂载点用同一解析（缺省 mediaservo）
+      MEDIASERVO_BRAND: ${MEDIASERVO_BRAND:-mediaservo}
       # 生产: 不豁免 dev 凭证守卫（fail-fast）；不设 MEDIASERVO_PSK（entrypoint 首启生成——
-      # 认证路径只读 env（signaling.rs）——卷 .env 持久化；升级/回滚见 docs/modules/26）
+      # 认证路径只读 env（signaling.rs）——卷 .env 持久化；升级/回滚见 docs/modules/31-upgrade-migration.md）
     deploy:
       resources:
         limits:
