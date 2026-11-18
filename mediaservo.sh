@@ -419,10 +419,25 @@ _ms_ensure_admin_dist() {
     echo "\$ pnpm build:admin  (cwd: $ROOT/www)"
     (cd "$ROOT/www" && pnpm build:admin) || exit $?
 }
+_ms_ensure_voice_dist() {
+    # voice app dist (container-build-rework B3.2/P2-C3): the deploy tree
+    # stages web/voice and the R8 smoke asserts /voice content — missing dist
+    # must FATAL loud (AppTree web-legs parity), never silently hollow.
+    local dist="$ROOT/www/apps/voice/dist/index.html" src="$ROOT/www/apps/voice/src"
+    if [ -f "$dist" ] && [ -d "$src" ] && [ -z "$(find "$src" -type f -newer "$dist" -print -quit 2>/dev/null)" ]; then
+        echo "voice dist up to date (www/apps/voice/dist — no src changes) — skipping frontend build, reusing existing dist"
+        return 0
+    fi
+    _ms_check pnpm "pnpm not installed — required for the frontend build (or run manually: cd www && pnpm build:voice)"
+    echo "voice dist stale/missing — building frontend (tsc -b && vite build)..."
+    echo "[build] pnpm build:voice  (cwd: $ROOT/www)"
+    (cd "$ROOT/www" && pnpm build:voice) || exit $?
+}
 _ms_build_web() {
     # frontend-only fast lane: vite invocation stays here (language-native builder,
     # F30); the placement rides the app-tree cmake face (staging=web).
     _ms_ensure_admin_dist
+    _ms_ensure_voice_dist
     _msvc_app_install server "" Debug "${MSRTC_OUT_ROOT:-$ROOT/out}/server" web
 }
 _ms_build_stage_weaknet() {
@@ -456,6 +471,7 @@ _ms_build_server() {
     [ "$3" = 1 ] && sbt=Release
     if [ "$2" = 1 ] || [ -z "$1" ]; then
         _ms_ensure_admin_dist
+        _ms_ensure_voice_dist
         _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
         if [ -z "${MESON:-}" ] && [ "${MEDIASERVO_NO_PIXI:-}" != 1 ]; then
             echo "Error: MESON environment variable not set — invoke via ./mediaservo.sh (source pixi-shell.sh injects the activation env)" >&2

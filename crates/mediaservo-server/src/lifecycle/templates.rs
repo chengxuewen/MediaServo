@@ -189,6 +189,17 @@ __WEB_ADDR__ {
 			flush_interval -1
 		}
 	}
+	# voice app disk SPA (P3-3 posture; container-build-rework B3.2): the
+	# non-embedded binary registers no /voice rust-embed route, so the web
+	# layer serves the dist from <web root>/voice on disk.
+	@voiceroot path /voice
+	redir @voiceroot "/voice/?{query}" 308
+	handle_path /voice/* {
+		root * __WEB_ROOT__/voice
+		try_files {path} /index.html
+		encode zstd gzip
+		file_server
+	}
 	handle {
 		root * __WEB_ROOT__
 		try_files {path} /index.html

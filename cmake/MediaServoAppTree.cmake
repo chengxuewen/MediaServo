@@ -99,8 +99,18 @@ function(_mediaservo_app_web_legs)
         message(FATAL_ERROR
             "Error: no artifacts in ${_dist} — pnpm build:admin not run or failed")
     endif()
+    # voice app disk face (container-build-rework B3.2/P2-C3): staged at
+    # web/voice — the caddy /voice route serves it (the non-embedded binary
+    # registers no /voice rust-embed route). Loud-missing parity with admin:
+    # R8 asserts /voice content, a hollow web/voice would fail by design.
+    set(_voice_dist "${MEDIASERVO_REPO_ROOT}/www/apps/voice/dist")
+    if(NOT EXISTS "${_voice_dist}/index.html")
+        message(FATAL_ERROR
+            "Error: no artifacts in ${_voice_dist} — pnpm build:voice not run or failed")
+    endif()
     install(CODE "execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E rm -rf \"\${CMAKE_INSTALL_PREFIX}/web\")")
     install(DIRECTORY "${_dist}/" DESTINATION web USE_SOURCE_PERMISSIONS)
+    install(DIRECTORY "${_voice_dist}/" DESTINATION web/voice USE_SOURCE_PERMISSIONS)
 endfunction()
 
 # -- swap-install leg (build mode only): file(COPY) into a side dir (preserves

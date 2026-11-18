@@ -31,6 +31,17 @@
 		}
 	}
 
+	# voice 应用磁盘 SPA（P3-3 同款姿态；容器重构 B3.2——非嵌入二进制无
+	# /voice rust-embed 路由，web 层从 ./web/voice 磁盘伺服）
+	@voiceroot path /voice
+	redir @voiceroot "/voice/?{query}" 308
+	handle_path /voice/* {
+		root * ./web/voice
+		try_files {path} /index.html
+		encode zstd gzip
+		file_server
+	}
+
 	# ③ 其余 → 静态 dist（vite hash 资源强缓存；入口 no-cache 防版本偏斜）
 	handle {
 		root * ./web
