@@ -161,3 +161,6 @@ compile_commands.json
 # imgui runtime layout residue (example runs at the repo root, r2-L6)
 /imgui.ini
 /imgui_viewer.ini
+
+# UI harness: assertion JSON tracked, screenshots regenerated locally/CI (C61 rev 2026-11-18)
+docs/ui/prototypes/.harness/*.png
