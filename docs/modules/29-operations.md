@@ -113,31 +113,42 @@ TasksMax=512
 
 ### Docker Resource Limits (compose)
 
-> Related: D208 build optimization | Created per doc-audit M6
+> Related: D208 build optimization, container-build-rework B3.4/R13/R18 | Created per doc-audit M6
 
-The production `docker-compose.yml` declares resource limits for the server service (`docker-compose.yml:10-17`):
+**B3.4 tree-packaged prod image** (`docker-compose.yml`): the single container
+runs the whole deploy tree (msrtc-server + caddy + oxmgr PID1) — caddy is no
+longer a separate proxy service (R12 retired). Resource policy per R13=C:
 
-| Item | limits | reservations |
-|------|--------|--------------|
-| CPU | 2 cores | 1 core |
-| Memory | 4G | 2G |
+| Item | value | rationale |
+|------|-------|-----------|
+| `mem_limit` | `${MEM_LIMIT:-2g}` (provisional) | host protection; value pending the R18 load test |
+| CPU | **unset** | RTP bursts free (R13); no cpus/NanoCpus quota |
 
-**Rationale for the numbers** (aligned with this file's §Capacity Planning "small" tier):
-- **limits 2c/4G**: the container runs the Rust server + the mediasoup C++ Worker (RTP forwarding, Router management) simultaneously; the Caddy reverse proxy is a separate service outside this quota. The small tier (10 rooms/20 peers) plans 2 cores/2GB; the 4G ceiling leaves headroom for the mediasoup Worker's bursty forwarding (large rooms + multiple transports).
-- **reservations 1c/2G**: the signaling baseline is ~0.5 core/200MB; 1c/2G guarantees the worker's startup and regular forwarding aren't starved by scheduling pressure.
+`mem_limit` is the container-level field (works under plain `docker compose up`,
+unlike `deploy.resources` which only applies in Swarm). The R8 smoke asserts
+`HostConfig.Memory > 0` AND `HostConfig.NanoCpus == 0` (R9).
 
-**dev environment intentionally unlimited**: `docker-compose.dev.yml` sets no `deploy.resources`. The dev container bears heavy loads like `cargo build` (mediasoup-sys meson/ninja C++ compilation, PIT-11/33); limits would OOM-kill the build; dev-machine resources are governed by Docker Desktop / the host scheduler.
+**R18 load-test method (user-ruled A, deferred follow-up)**: Small tier
+(10 rooms/20 peers, 720p H.264 ~2Mbps), steady 10min + burst 2min, cgroup
+`memory.peak` / `docker stats` 5s sampling; `mem_limit` = measured peak ×1.3
+round-up to 512MB. Pass = no OOM + /health green. The full multi-peer load
+harness is a tracked follow-up (the existing `e2e-sfu-consume.cjs` /
+`e2e-bitrate-probe.cjs` are single-stream functional E2E, not a load generator).
 
-**⚠️ Scope of effect**: `deploy.resources` only takes effect under Docker Swarm (`docker stack deploy`); plain `docker compose up` ignores it. If the current single-machine deployment needs enforced limits, use container-level fields instead:
+**Measured baseline (2026-11-18, idle — NOT the R18 loaded peak)**:
+`msrtc-server:0.1.3` idle (server + caddy + oxmgr, no media): steady
+**24.67 MiB**, cgroup boot `memory.peak` **28.35 MiB** (29732864 bytes).
+The 2g provisional ceiling carries wide headroom over idle; the loaded
+Small-tier peak must be measured before final production right-sizing.
 
-```yaml
-services:
-  server:
-    mem_limit: 4g
-    cpus: 2
-```
+**dev environment intentionally unlimited**: `docker-compose.dev.yml` sets no
+limits — the dev container bears `cargo build` (mediasoup-sys meson/ninja C++
+compilation, PIT-11/33); limits would OOM-kill the build.
 
-**How to adjust**: scale per the §Capacity Planning tiers — medium (50 rooms/100 peers) suggests limits 4c/8G, reservations 2c/4G; large 8c/16G. After changes run `docker compose up -d` to restart and `docker compose config` to validate.
+**How to adjust**: set `MEM_LIMIT` in `.env` (or the compose default once R18
+lands), `docker compose --env-file .env up -d` to recreate, `docker compose
+config` to validate. Scale per §Capacity Planning tiers once R18 establishes
+the per-tier measured baseline.
 
 ## Log Aggregation
 
