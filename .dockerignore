@@ -42,3 +42,14 @@ config/*.local*
 .host/
 install/
 dist/
+
+# container-build-rework B3.3 (tree-packaged prod image): the live instance
+# tree carries real credentials + runtime state (never a build input — the
+# image assembles a FRESH --prefix staging); build/ holds cmake deploy trees;
+# node_modules is platform-specific and reinstalled by pnpm in-image.
+out/
+build/
+.cache/
+**/node_modules/
+www/apps/admin/dist/
+www/apps/voice/dist/

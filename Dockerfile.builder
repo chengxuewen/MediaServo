@@ -34,6 +34,14 @@ RUN if [ "$MIRROR" = "cn" ]; then \
 ENV CC=gcc-10 \
     CXX=g++-10
 
+# system-default compiler = gcc-10: the deploy goods face sanitizes CC/CXX
+# (F25 anti-pixi-leak bridge), so with CC/CXX stripped the fallback is the
+# system `cc` — the image must guarantee it resolves mediasoup-capable
+RUN update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 \
+                         --slave /usr/bin/g++ g++ /usr/bin/g++-10 && \
+    ln -sf /usr/bin/gcc-10 /usr/bin/cc && ln -sf /usr/bin/g++-10 /usr/bin/c++ && \
+    cc --version | head -1 && gcc --version | head -1
+
 # ---- rustup (R2: >=1.85 stable; tuna mirror per product-Dockerfile precedent) ----
 ENV RUSTUP_HOME=/usr/local/rustup \
     CARGO_HOME=/usr/local/cargo \
@@ -59,6 +67,14 @@ RUN if [ "$MIRROR" = "cn" ]; then \
     else \
         pip3 install "cmake>=3.28,<4"; \
     fi
+
+# pypi mirror baked as default (P2-H7 switchable set): mediasoup-sys tasks.py
+# self-installs meson/ninja via pip at ARTIFACT build time — without this env
+# the in-container build hits files.pythonhosted.org directly (mainland read
+# timeouts, PoC-measured). CI overrides by passing -e PIP_INDEX_URL=...
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
 
 # ---- node 20 + pnpm (npmmirror binary tarball — domestic, no nodesource/proxy) ----
 RUN cd /tmp && \
