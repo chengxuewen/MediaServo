@@ -14,6 +14,19 @@ if(NOT _prc EQUAL 0)
         "likely a pre-lifecycle old build) — rebuild server then re-run packaging")
 endif()
 
+# oxmgr vendor copy (container-build-rework R14: the tree carries the process
+# manager — oxmgr daemon run is the container PID1 face and the start/stop hard
+# dependency). CLI parity with the host-legs vendor copy; the pack face's
+# install(PROGRAMS) row (MediaServoPack.cmake:248) copies first — this
+# version-locked re-copy is idempotent (same MEDIASERVO_OXMGR_BIN source).
+set(_oxmgr_dst "${_root}/bin/oxmgr")
+file(COPY_FILE "@OXMGR_BIN@" "${_oxmgr_dst}" RESULT _oxmgr_rc)
+if(NOT _oxmgr_rc EQUAL 0)
+    message(FATAL_ERROR
+        "Error: oxmgr copy to ${_oxmgr_dst} failed (rc=${_oxmgr_rc}) — "
+        "MEDIASERVO_OXMGR_BIN must resolve to the vendored oxmgr binary")
+endif()
+
 file(MAKE_DIRECTORY "${_root}/run")
 
 # init renders idempotently: etc/Caddyfile + run/oxfile.toml (+ conditional

@@ -348,6 +348,7 @@ function(_mediaservo_add_deploy_target)
             set(SRV_NAME "mediaservo-server")
         endif()
         set(RUST_BRAND "${_brand}")
+        set(OXMGR_BIN "${MEDIASERVO_OXMGR_BIN}")   # R14 version-locked copy leg (server-legs.cmake.in)
         configure_file("${_MSDT_TEMPLATE_DIR}/pack-legs/server-legs.cmake.in"
                        "${CMAKE_BINARY_DIR}/deploy-${_name}-init-server-body.cmake" @ONLY)
         file(WRITE "${CMAKE_BINARY_DIR}/deploy-${_name}-init.cmake"

@@ -253,6 +253,7 @@ function(_msr_pack_server)
 
     set(_gen "${CMAKE_CURRENT_BINARY_DIR}/pkg-gen")
     set(SRV_NAME "${_sname}")
+    set(OXMGR_BIN "${MEDIASERVO_OXMGR_BIN}")   # R14: legs template needs the template var (render scope)
     configure_file("${MEDIASERVO_PACK_LEGS}/server-legs.cmake.in"
                    "${_gen}/server-legs.cmake" @ONLY)
     install(SCRIPT "${_gen}/server-legs.cmake")
