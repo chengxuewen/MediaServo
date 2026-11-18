@@ -1,49 +1,59 @@
-# Production docker-compose — 单容器 all-in-one（server + SFU + admin 嵌入；entrypoint 自举密钥）
-# 团队审核吸收: 命名卷（去 :ro——配发写入）+ 双 tag pin（回滚）+ 无硬编码凭据 + RUST_LOG info
-name: mediaservo
+# Production docker-compose — tree-packaged single container (container-build-rework B3.4)
+#
+# ONE image runs the whole deploy tree: msrtc-server + caddy + oxmgr (PID1).
+# The standalone compose `proxy` service retires (R12=A): caddy lives in-container
+# under oxmgr and serves the browser on 8080; the root Caddyfile is superseded by
+# the tree-rendered etc/Caddyfile.
+#
+# Site invocation face = bare `docker compose` (no CLI/pixi dependency on site):
+#   cp .env.example .env   # fill the four contract vars
+#   docker compose --env-file .env up -d
+# The R7 up-guard (explicit --env / running-state confirm) is a CLI-side convenience;
+# the `${VAR:?}` fail-fast below is the site-side floor (R6=B).
+#
+# .env contract (four vars, all pass-through): TAG + MEDIASERVO_SFU_ANNOUNCED_IP
+#   + MEDIASERVO_ADMIN_PASSWORD + SSH_PORT. MEDIASERVO_BRAND defaults to msrtc
+#   (this workspace's image is msrtc-branded; the volume paths interpolate the
+#   SAME brand so the mount never goes dead — R15 / P2-C2). MEM_LIMIT is an
+#   optional tuning knob (R18 load test sets the measured default).
+name: ${MEDIASERVO_BRAND:-msrtc}
 services:
   server:
-    image: mediaservo-server:${TAG:-latest}
+    image: ${MEDIASERVO_BRAND:-msrtc}-server:${TAG:?set TAG in .env — explicit image pin for rollback}
     ports:
-      - "9800:9800"
-      - "20000:20000/udp"
-      - "40000-40100:40000-40100/udp"
+      # Host-side ports interpolate (defaults = the R16 surface, site unchanged);
+      # the R8 smoke shifts them via env for project isolation. Container targets
+      # stay fixed (the tree listens on these).
+      - "${WEB_PORT:-8080}:8080"                       # browser/caddy entry (R16=A)
+      - "${AGENT_PORT:-9800}:9800"                     # host-agent direct /ws (D-2=B preserved, R16)
+      - "${SSH_PORT:-2222}:22"                         # ssh maintenance (R19; host 2222 avoids CentOS-8 host-sshd)
+      - "${SFU_PORT:-20000}:20000/udp"                 # SFU RTC
+      - "${SFU_PORT_RANGE:-40000-40100}:40000-40100/udp"  # SFU RTC port range
     environment:
       RUST_LOG: info
-      # 品牌派生路径（R15）：entrypoint 的 ETC 与卷挂载点用同一解析（缺省 mediaservo）
-      MEDIASERVO_BRAND: ${MEDIASERVO_BRAND:-mediaservo}
-      # 生产: 不豁免 dev 凭证守卫（fail-fast）；不设 MEDIASERVO_PSK（entrypoint 首启生成——
-      # 认证路径只读 env（signaling.rs）——卷 .env 持久化；升级/回滚见 docs/modules/31-upgrade-migration.md）
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: "4G"
-        reservations:
-          cpus: "1"
-          memory: "2G"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9800/health"]
-      interval: 30s
-      timeout: 3s
-      retries: 3
+      # brand-derived path single source (R15): entrypoint ETC + volume mount point
+      # resolve the SAME value; default msrtc matches the msrtc-branded image.
+      MEDIASERVO_BRAND: ${MEDIASERVO_BRAND:-msrtc}
+      # R6=B fail-fast on empty: multi-NIC sites MUST explicit-fill (auto-detect
+      # concatenates all IPs but the SFU takes the first only — sfu.rs:481-486 —
+      # silent ICE failure). Auto-detect is dev-only convenience.
+      MEDIASERVO_SFU_ANNOUNCED_IP: ${MEDIASERVO_SFU_ANNOUNCED_IP:?set MEDIASERVO_SFU_ANNOUNCED_IP in .env — site-reachable IP, multi-NIC explicit-fill}
+      # first-boot admin bootstrap (init step 3); persisted in the etc volume.
+      MEDIASERVO_ADMIN_PASSWORD: ${MEDIASERVO_ADMIN_PASSWORD:?set MEDIASERVO_ADMIN_PASSWORD in .env — first-boot admin account}
+    # R13=C: mem_limit ONLY (host protection); CPU unset (RTP bursts free).
+    # Value from the R18 Small-tier load test (batch tail) — 2g placeholder until
+    # measured; peak x1.3 round-up 512MB written back here + 29-operations.md.
+    mem_limit: ${MEM_LIMIT:-2g}
     restart: unless-stopped
+    # Named volumes at the brand-derived tree paths (R15). copy-up preserves the
+    # image ownership (mediaservo); the entrypoint init is the first-boot writer.
     volumes:
-      - mediaservo-data:/opt/mediaservo/etc
-      - mediaservo-recordings:/opt/mediaservo/recordings
-
-  # 可选 ingress（80/443）——不需要时注释掉此服务
-  proxy:
-    image: caddy:2
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-    depends_on:
-      - server
-    restart: unless-stopped
+      - msrtc-data:/opt/${MEDIASERVO_BRAND:-msrtc}/etc
+      - msrtc-recordings:/opt/${MEDIASERVO_BRAND:-msrtc}/recordings
+    # healthcheck inherited from the image (R17=B: curl -f localhost:8080/health,
+    # interval 30s / timeout 5s / start_period 60s / retries 3). oxmgr liveness =
+    # PID1-death semantics (R13). STOPSIGNAL SIGINT baked in the image (graceful stop).
 
 volumes:
-  mediaservo-data:
-  mediaservo-recordings:
+  msrtc-data:
+  msrtc-recordings:
