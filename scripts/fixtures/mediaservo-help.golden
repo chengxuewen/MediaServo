@@ -5,11 +5,14 @@ Run 'mediaservo <verb> -h' for a verb's full flags and notes.
 
 Build:
   build <target> [flags]     one target: all|web|host|server|client|bindings|
-                             example|gui-deps (default all; see 'build -h')
+                             example|gui-deps|image (default all; see 'build -h')
+  build image <prod|dev>     container image: prod=tree-packaged server,
+                             dev=native toolchain (see 'build image -h')
   build:deploy <target>      build then deploy in one step
 
 Release:
-  package <target>           release tarball: host|server|sdk-field|sdk-client
+  package <target>           release tarball: host|server|sdk-field|sdk-client|
+                             image (offline site artifact set)
   deploy <target>            install a built tree: bindings|host|server
 
 Observe:
@@ -22,7 +25,7 @@ Containers:
   exec | ps | data           container exec, process list, managed data
 
 Develop:
-  dev web                    vite dev server (hot reload)
+  dev up|down|ssh|web        ssh-resident dev container (R5); web = vite lane
   test | e2e <suite>         workspace test run / end-to-end lane
   config show|validate|set   resolved configuration
 
@@ -36,7 +39,9 @@ Instance commands are not shell verbs -- run them inside a prefix:
 Examples:
   ./mediaservo.sh build server                  # assemble out/ (bin/etc/web)
   ./mediaservo.sh deploy server --prefix <X>    # cmake install rows
-  ./mediaservo.sh build server --image runtime && ./mediaservo.sh up --env prod
+  ./mediaservo.sh build image prod              # tree-packaged prod image
+  ./mediaservo.sh package image --dist dist/    # offline site artifact set
+  ./mediaservo.sh build image dev && ./mediaservo.sh dev up   # dev container
   ./mediaservo.sh build gui-deps --profile auto
 
 Exit codes: 0 success | 1 not running / target missing | 2 bad args

@@ -33,7 +33,9 @@ Run 'mediaservo <verb> -h' for a verb's full flags and notes.
 
 Build:
   build <target> [flags]     one target: all|web|host|server|client|bindings|
-                             example|gui-deps (default all; see 'build -h')
+                             example|gui-deps|image (default all; see 'build -h')
+  build image <prod|dev>     container image: prod=tree-packaged server,
+                             dev=native toolchain (see 'build image -h')
   build:deploy <target>      build then deploy in one step
 
 Release:
@@ -51,7 +53,7 @@ Containers:
   exec | ps | data           container exec, process list, managed data
 
 Develop:
-  dev web                    vite dev server (hot reload)
+  dev up|down|ssh|web        ssh-resident dev container (R5); web = vite lane
   test | e2e <suite>         workspace test run / end-to-end lane
   config show|validate|set   resolved configuration
 
@@ -65,7 +67,9 @@ Instance commands are not shell verbs -- run them inside a prefix:
 Examples:
   ./mediaservo.sh build server                  # assemble out/ (bin/etc/web)
   ./mediaservo.sh deploy server --prefix <X>    # cmake install rows
-  ./mediaservo.sh build server --image runtime && ./mediaservo.sh up --env prod
+  ./mediaservo.sh build image prod              # tree-packaged prod image
+  ./mediaservo.sh package image --dist dist/    # offline site artifact set
+  ./mediaservo.sh build image dev && ./mediaservo.sh dev up   # dev container
   ./mediaservo.sh build gui-deps --profile auto
 
 Exit codes: 0 success | 1 not running / target missing | 2 bad args
@@ -222,13 +226,60 @@ case "${1:-}" in
         exit $?
         ;;
     dev)
+        # B4 (container-build-rework R5): ssh-resident dev container verb group
+        # (absorbs the legacy vite-only `dev web`). up/down/ssh manage a resident
+        # builder container (native toolchain, no pixi inside) with the workspace
+        # bind-mounted; web = the vite hot-reload lane.
         shift
-        [ "${1:-}" = web ] || { echo "dev: only target is web (got '${1:-}')" >&2; exit 2; }
-        shift
-        [ "${1:-}" = "--" ] && shift
-        command -v pnpm >/dev/null 2>&1 || { echo "Error: missing dependency 'pnpm' — dev web needs it (www is a pnpm workspace, or run manually: cd www && pnpm dev)" >&2; exit 1; }
-        cd "$ROOT/www" && _msvc_run pnpm dev "$@"
-        exit $?
+        sub="${1:-}"; [ $# -gt 0 ] && shift
+        DEV_NAME="${DEV_NAME:-msrtc-dev}"
+        DEV_SSH_PORT="${DEV_SSH_PORT:-2222}"
+        DEV_IMAGE="${DEV_IMAGE:-${MEDIASERVO_BRAND:-msrtc}-builder:v1}"
+        case "$sub" in
+            -h|--help)
+                cat <<'DVEOF'
+usage: mediaservo dev <up|down|ssh|web> [...]
+
+ssh-resident dev container (R5; builder image = native toolchain, no pixi
+inside). The workspace root is bind-mounted at /workspace (MediaServo lives
+at /workspace/3rdparty/MediaServo); dev user uid 1000, key-only ssh.
+  up      start resident builder (sshd -D), inject ~/.ssh pubkey
+  down    stop + remove the resident container
+  ssh [-- cmd]   ssh into the container (key auth)
+  web [-- args]  vite dev server (hot reload; absorbed legacy dev web)
+Env: DEV_NAME (msrtc-dev), DEV_SSH_PORT (2222), DEV_IMAGE (msrtc-builder:v1),
+     DEV_PUBKEY (default ~/.ssh/id_ed25519.pub, fallback id_rsa.pub).
+DVEOF
+                exit 0 ;;
+            up)
+                command -v docker >/dev/null 2>&1 || { echo "ERROR: docker not found — install docker and start the daemon" >&2; exit 1; }
+                docker image inspect "$DEV_IMAGE" >/dev/null 2>&1 || { echo "ERROR: dev image $DEV_IMAGE absent — run 'build image dev' first" >&2; exit 1; }
+                key="${DEV_PUBKEY:-$HOME/.ssh/id_ed25519.pub}"
+                [ -f "$key" ] || key="$HOME/.ssh/id_rsa.pub"
+                karg=(); [ -f "$key" ] && karg=(-v "$key:/home/dev/.ssh/authorized_keys:ro")
+                [ -f "$key" ] || echo "WARN: no ssh pubkey (~/.ssh/id_ed25519.pub|id_rsa.pub) — dev ssh refuses login until a key is injected" >&2
+                docker rm -f "$DEV_NAME" >/dev/null 2>&1 || true
+                wsroot="$(cd "$ROOT/../.." && pwd)"
+                echo "\$ docker run -d --name $DEV_NAME -p $DEV_SSH_PORT:22 -v $wsroot:/workspace ${karg[*]:-} $DEV_IMAGE"
+                docker run -d --name "$DEV_NAME" -p "$DEV_SSH_PORT:22" \
+                    -v "$wsroot:/workspace" "${karg[@]}" "$DEV_IMAGE" >/dev/null || exit $?
+                docker exec "$DEV_NAME" chown dev:dev /home/dev/.ssh/authorized_keys 2>/dev/null || true
+                echo "dev container $DEV_NAME up — ssh: mediaservo dev ssh (port $DEV_SSH_PORT); repo: /workspace/3rdparty/MediaServo"
+                exit 0 ;;
+            down)
+                docker rm -f "$DEV_NAME" >/dev/null 2>&1 && echo "dev container $DEV_NAME removed" || echo "dev container $DEV_NAME not running"
+                exit 0 ;;
+            ssh)
+                [ "${1:-}" = "--" ] && shift
+                ssh -p "$DEV_SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null dev@127.0.0.1 "$@"
+                exit $? ;;
+            web)
+                [ "${1:-}" = "--" ] && shift
+                command -v pnpm >/dev/null 2>&1 || { echo "ERROR: missing dependency 'pnpm' — dev web needs it (www is a pnpm workspace, or run manually: cd www && pnpm dev)" >&2; exit 1; }
+                cd "$ROOT/www" && _msvc_run pnpm dev "$@"
+                exit $? ;;
+            *) echo "dev: expected up|down|ssh|web (got '${sub:-}')" >&2; exit 2 ;;
+        esac
         ;;
 esac
 
@@ -471,6 +522,76 @@ _ms_build_stage_weaknet() {
         echo "WARN: weaknet compile failed (rc=$rc) — not blocking the server build; the app-tree weaknet row WARNs if nothing stageable is found (re-run build server after troubleshooting)" >&2
     fi
     return 0
+}
+
+# B4 (container-build-rework R1): `build image <prod|dev>` verb family.
+# prod = Dockerfile.tree (tree-packaged prod image, ${brand}-server:<ver>);
+# dev = Dockerfile.builder (native toolchain image, ${brand}-builder:v1).
+# Supersedes `build server --image runtime|dev` (deprecation window below).
+_ms_image_summary() {  # R21⑤ build-completion summary: name:tag + size + duration
+    local image="$1" t0="$2" size dur
+    size=$(docker image inspect "$image" --format '{{.Size}}' 2>/dev/null || echo 0)
+    dur=$(( $(date +%s) - t0 ))
+    echo "✓ built image $image ($(( size / 1024 / 1024 )) MiB, ${dur}s)"
+}
+_ms_build_image() {
+    local face="${1:-}"; [ $# -gt 0 ] && shift
+    local tag="" mirror="cn"
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --tag) tag="${2:?build image --tag needs a value}"; shift 2 ;;
+            --mirror) mirror="${2:?build image --mirror needs a value}"
+                      case "$mirror" in cn|upstream) ;; *) echo "ERROR: build image --mirror: invalid choice '$mirror' (cn|upstream)" >&2; return 2 ;; esac
+                      shift 2 ;;
+            -h|--help)
+                cat <<'BIEOF'
+usage: mediaservo build image <prod|dev> [--tag TAG] [--mirror cn|upstream]
+
+Container image build (container-build-rework R1; supersedes build server
+--image). Materials ride the git tree; the parent 3rdparty wrap/oxmgr layers
+auto-wire as build contexts when present.
+  prod   Dockerfile.tree -> ${brand}-server:<ver> (+latest); tree-packaged
+         production image (server + caddy + oxmgr PID1, bookworm-slim).
+         --tag TAG   image tag (default: mediaservo-server crate version)
+  dev    Dockerfile.builder -> ${brand}-builder:v1; native toolchain image
+         for the ssh-resident dev container (mediaservo dev up).
+  --mirror cn|upstream   apt/cargo/pip mirror posture (default cn; upstream=CI)
+Examples:
+  mediaservo build image prod                 # msrtc-server:0.1.3
+  mediaservo build image prod --tag 0.1.4     # explicit tag
+  mediaservo build image dev && mediaservo dev up
+BIEOF
+                return 0 ;;
+            *) echo "ERROR: build image: unexpected argument $1" >&2; return 2 ;;
+        esac
+    done
+    case "$face" in prod|dev) ;; *) echo "ERROR: build image: face must be prod|dev (got '${face:-}')" >&2; return 2 ;; esac
+    _ms_check docker "install docker and start the daemon"
+    local brand="${MEDIASERVO_BRAND:-msrtc}" t0 image
+    t0=$(date +%s)
+    if [ "$face" = prod ]; then
+        [ -n "$tag" ] || tag=$(_ms_crate_version mediaservo-server)
+        image="${brand}-server:${tag}"
+        local bctx=() wrap="$ROOT/../../3rdparty/mediasoup-worker" ox="$ROOT/../../3rdparty/oxmgr"
+        [ -d "$wrap" ] && bctx+=(--build-context "wrapcache=$(cd "$wrap" && pwd -P)")
+        [ -d "$ox" ] && bctx+=(--build-context "oxmgrpkg=$(cd "$ox" && pwd -P)")
+        echo "\$ docker build -f Dockerfile.tree -t $image --build-arg MIRROR=$mirror ${bctx[*]:-} ."
+        docker build -f Dockerfile.tree -t "$image" \
+            --build-arg "GIT_REV=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
+            --build-arg "MIRROR=$mirror" "${bctx[@]}" "$ROOT" || return $?
+        docker tag "$image" "${brand}-server:latest"
+    else
+        image="${brand}-builder:v1"
+        # The caddy layer downloads from github releases (foreign) — pass the
+        # proxy build-args through (mainland reachability; same posture as the
+        # retired build server --image runtime path). NO_PROXY stays proxy-free.
+        echo "\$ docker build -f Dockerfile.builder -t $image --build-arg MIRROR=$mirror ."
+        docker build -f Dockerfile.builder -t "$image" --build-arg "MIRROR=$mirror" \
+            --build-arg "HTTP_PROXY=${HTTP_PROXY:-${http_proxy:-}}" \
+            --build-arg "HTTPS_PROXY=${HTTPS_PROXY:-${https_proxy:-}}" \
+            --build-arg "NO_PROXY=${NO_PROXY:-${no_proxy:-}}" "$ROOT" || return $?
+    fi
+    _ms_image_summary "$image" "$t0"
 }
 
 _ms_build_server() {
@@ -1152,26 +1273,35 @@ targets:
   bindings   C ABI / C++ SDK artifacts
   example    examples band (cxx|rs|py; names optional; see 'list example')
   gui-deps   explicit SDL3 build/install verb
+  image      container image (prod|dev; see 'build image -h')
   (build-host / build-server are compat aliases of host / server)
 
-flags:
+flags (general):
   --release              Release configuration (default Debug)
-  --image runtime|dev    Docker path; only build server accepts it
-  --native               bare-metal build; only build server accepts it
-  gui-deps only:
+
+flags (server only):
+  --native               bare-metal build (the default path; explicit form)
+  --image runtime|dev    DEPRECATED -> 'build image prod|dev' (runtime->prod)
+
+flags (gui-deps only):
   --profile auto|headless|linux-desktop   X11 probe decides 'auto'
   --provider none|system|pixi             dependency provider (pixi OFF by default)
   --pixi-env NAME                         environment for --provider pixi
   --ecosystem vcpkg|conan                 dev-only intake leg: build a library
-  --pkg NAME                              from a committed recipe instead of a
-  --generate-ecosystem                    source archive; strict-first, so nothing
-                                          is fetched without this flag; never
+  --pkg NAME                              inside the tool from a committed recipe
+  --generate-ecosystem                    generate the source archive (strict-first:
+                                          nothing fetched without this flag); never
                                           combines with --profile/--provider/
                                           --pixi-env (SDL3/imgui stay on source)
 BHEOF
                 exit 0
                 ;;
         esac
+        # build image -h routes to the image sub-help (the generic flag parser
+        # below would otherwise reject -h as an unrecognized flag).
+        if [ "${2:-}" = image ] && { [ "${3:-}" = "-h" ] || [ "${3:-}" = "--help" ]; }; then
+            _ms_build_image prod -h; exit $?
+        fi
         _ms_orig=("$@")
         case "${_ms_orig[0]}" in
             build-host) set -- build host "${_ms_orig[@]:1}" ;;
@@ -1203,7 +1333,7 @@ BHEOF
             esac
         done
         tgt="${tgt:-all}"
-        case "$tgt" in all|web|host|server|client|bindings|example|gui-deps) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example', 'gui-deps')" >&2; [ "$tgt" = weaknet ] && echo "build: weaknet is not a submodule build target — 'msrtc.sh build weaknet' in the parent shell drives cargo build -p mediaservo-weaknet directly; the app-tree staging leg rides build server" >&2; exit 2 ;; esac
+        case "$tgt" in all|web|host|server|client|bindings|example|gui-deps|image) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example', 'gui-deps', 'image')" >&2; [ "$tgt" = weaknet ] && echo "build: weaknet is not a submodule build target — 'msrtc.sh build weaknet' in the parent shell drives cargo build -p mediaservo-weaknet directly; the app-tree staging leg rides build server" >&2; exit 2 ;; esac
         if [ -n "$gd_profile" ] && [ "$tgt" != gui-deps ]; then echo "build --profile only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$gd_provider" ] && [ "$tgt" != gui-deps ]; then echo "build --provider only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$gd_pixi_env" ] && [ "$tgt" != gui-deps ]; then echo "build --pixi-env only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
@@ -1220,6 +1350,14 @@ BHEOF
             done
         fi
         if [ -n "$image" ] && [ "$tgt" != server ]; then echo "build --image only supports build server (current target=$tgt)" >&2; exit 2; fi
+        # B4 deprecation window (R1): build server --image runtime|dev maps to
+        # build image prod|dev (runtime→prod). Kept working one cycle; the alias
+        # retires with the next CLI face change.
+        if [ -n "$image" ]; then
+            _face=prod; [ "$image" = dev ] && _face=dev
+            echo "WARN: 'build server --image $image' is deprecated — use 'build image $_face' (runtime→prod mapping; alias retires next cycle)" >&2
+            _ms_build_image "$_face"; exit $?
+        fi
         if [ "$native" = 1 ] && [ "$tgt" != server ]; then echo "build --native only supports build server (current target=$tgt)" >&2; exit 2; fi
         case "$tgt" in
             bindings) _ms_build_bindings "$release"; exit $? ;;
@@ -1229,6 +1367,7 @@ BHEOF
             all)    _ms_build_host; _ms_build_server "" 0 0; _ms_build_client ;;
             host)   _ms_build_host ;;
             server) _ms_build_server "$image" "$native" "$release" ;;
+            image)  _ms_build_image "${names[@]}"; exit $? ;;
             client) _ms_build_client ;;
             web)    _ms_build_web ;;
         esac

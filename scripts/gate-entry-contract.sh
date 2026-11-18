@@ -62,6 +62,23 @@ for v in run start stop restart; do
     grep -q "unknown verb '$v'" "$OUT" && ok "B7 $v pointer" || bad "B7 $v pointer"
 done
 
+# B4 (container-build-rework R1/R5): the build image / dev verb family faces
+# and bad-arg contracts. (The --image deprecation redirect itself builds an
+# image, so the gate asserts the static deprecation note in build -h, not a
+# live build.)
+./mediaservo.sh build image -h >"$OUT" 2>&1; rc=$?
+expect_rc "B4 build image -h" 0 "$rc"
+grep -q "build image <prod|dev>" "$OUT" && ok "B4 build image -h face" || bad "B4 build image -h face"
+./mediaservo.sh dev -h >"$OUT" 2>&1; rc=$?
+expect_rc "B4 dev -h" 0 "$rc"
+grep -q "dev <up|down|ssh|web>" "$OUT" && ok "B4 dev -h face" || bad "B4 dev -h face"
+./mediaservo.sh build image bogus >"$OUT" 2>&1; rc=$?
+expect_rc "B4 build image bad face" 2 "$rc"
+./mediaservo.sh dev bogus >"$OUT" 2>&1; rc=$?
+expect_rc "B4 dev bad sub" 2 "$rc"
+./mediaservo.sh build -h >"$OUT" 2>&1
+grep -q "DEPRECATED" "$OUT" && ok "B4 --image deprecation note in build -h" || bad "B4 --image deprecation note"
+
 # G1: -h golden snapshot -- help text is contract; a diff means the CLI face
 # changed and the fixture must be re-shot deliberately (state what changed).
 if [ -f scripts/fixtures/mediaservo-help.golden ]; then

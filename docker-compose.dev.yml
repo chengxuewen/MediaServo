@@ -1,4 +1,9 @@
 # Development docker-compose — build-based, source mount
+# DEPRECATED (container-build-rework B4/R5): superseded by the ssh-resident dev
+# container verb group `mediaservo dev up|down|ssh` (builder image, native
+# toolchain, no pixi inside). Kept for one deprecation cycle (`up --env dev`
+# still works); retires with the next CLI face change. The standalone `proxy`
+# service below is already retired in the prod compose (R12, caddy in-container).
 name: mediaservo
 services:
   server:
