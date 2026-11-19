@@ -1,11 +1,11 @@
-# Dockerfile.builder — msrtc-builder toolchain face (container-build-rework B2/R2)
+# docker/builder/Dockerfile — msrtc-builder toolchain face (container-build-rework B2/R2)
 #
 # Pure toolchain: NO project source, NO wrap archives — materials ride the git
 # tree (R2). Ubuntu 20.04 = the artifact glibc floor (2.31, host parity, R4).
 # Mirrors switchable via --build-arg MIRROR=cn|upstream (P2-H7): cn bakes
 # tuna/rsproxy/npmmirror/PIP-tuna; upstream leaves stock (CI posture).
 #
-# Build:  docker build -f Dockerfile.builder -t msrtc-builder:v1 \
+# Build:  docker build -f docker/builder/Dockerfile -t msrtc-builder:v1 \
 #           --build-arg MIRROR=cn [--build-arg HTTPS_PROXY=http://...] .
 # Use:    ssh-resident dev  -> docker run -d -p 2222:22 ... (CMD sshd -D)
 #         CI / one-shot     -> docker run --rm ... <command> (entrypoint exec)
@@ -114,13 +114,13 @@ RUN useradd -m -s /bin/bash -u "${DEV_UID}" dev && \
     su - dev -c 'git config --global --add safe.directory "*"' && \
     mkdir -p /home/dev/.ssh && chmod 700 /home/dev/.ssh && chown dev:dev /home/dev/.ssh
 
-COPY docker/builder-entry.sh /usr/local/bin/builder-entry
-RUN chmod 755 /usr/local/bin/builder-entry
+COPY docker/builder/entrypoint.sh /usr/local/bin/builder-entrypoint
+RUN chmod 755 /usr/local/bin/builder-entrypoint
 
 # Toolchain-generation provenance (trailing on purpose: one label layer keeps
 # the cached toolchain layers hot). BUILDER_TAG/GIT_REV arrive from
 # `build image dev`. The tag is a THREE-POINT CONTRACT — this image,
-# Dockerfile.tree stage1 `FROM msrtc-builder:v1`, and the `dev up` default;
+# docker/server/Dockerfile stage1 `FROM msrtc-builder:v1`, and the `dev up` default;
 # bump v1->v2 ONLY on semantic toolchain changes (compiler / cmake pin / node /
 # mirror posture), never per product release. Manual bump, all points together
 # (oxmgr-archive precedent: the literal IS the version source).
@@ -133,4 +133,5 @@ LABEL org.opencontainers.image.title="${BUILDER_NAME}" \
       org.opencontainers.image.description="MediaServo native toolchain image (gcc-10 + rust + cmake 3.31 + node20/pnpm + caddy; container-build-rework B2)"
 
 # default = ssh-resident dev mode; CI passes its own command (entrypoint execs it)
+ENTRYPOINT ["/usr/local/bin/builder-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D"]

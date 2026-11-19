@@ -1,5 +1,5 @@
 #!/bin/bash
-# tree-entrypoint.sh — tree-packaged prod image entry (container-build-rework B3.3)
+# server-entrypoint.sh (docker/server/) — tree-packaged prod image entry (container-build-rework B3.3)
 #
 # Boot contract (order matters; root runs this, the daemon drops privileges):
 #   1. <tree>/bin/<brand>-server init <tree> — idempotent first-boot render
@@ -7,7 +7,7 @@
 #      prod-safe empty registries, admin bootstrap from MEDIASERVO_ADMIN_PASSWORD
 #      (init step 3, folded in), etc/Caddyfile + run/oxfile.toml with the RUNTIME
 #      SFU env baked into [apps.env] (sfu_env_passthrough). The image ships NO
-#      etc/ render products and NO run/oxfile.toml (Dockerfile.tree strips them),
+#      etc/ render products and NO run/oxfile.toml (docker/server/Dockerfile strips them),
 #      so init is the single first-boot writer and picks up the container env.
 #   2. sshd (R19 maintenance port): key-only, no root login; host keys +
 #      authorized_keys live in the etc volume (never baked). Root daemon —

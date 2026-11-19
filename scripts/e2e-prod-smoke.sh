@@ -13,7 +13,7 @@
 # JSON); auth-closed is asserted from the config file (random PSK, not the dev
 # placeholder) + the "Server ready" boot marker.
 #
-# Prereq: the tree prod image present (Dockerfile.tree / `build image prod`).
+# Prereq: the tree prod image present (docker/server/Dockerfile / `build image prod`).
 # Env knobs (all optional): TAG MEDIASERVO_BRAND WEB_PORT AGENT_PORT SSH_PORT
 #   SFU_PORT SFU_PORT_RANGE MEDIASERVO_SFU_ANNOUNCED_IP MEM_LIMIT.
 set -euo pipefail
@@ -54,7 +54,7 @@ COMPOSE=(docker compose -p "$PROJECT" -f docker-compose.yml --env-file "$ENVF")
 cleanup() { "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true; rm -f "$ENVF"; }
 trap cleanup EXIT
 
-docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "FAIL: image $IMAGE absent — build it first (Dockerfile.tree)"; exit 1; }
+docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "FAIL: image $IMAGE absent — build it first (docker/server/Dockerfile)"; exit 1; }
 
 wait_health() {
     local h

@@ -267,7 +267,7 @@ case "${1:-}" in
         DEV_NAME="${DEV_NAME:-$(_ms_image_brand)-dev}"
         DEV_SSH_PORT="${DEV_SSH_PORT:-2222}"
         # builder tag = _ms_image_brand resolution + generation v1 (three-point
-        # contract: build image dev / Dockerfile.tree FROM / this default).
+        # contract: build image dev / docker/server/Dockerfile FROM / this default).
         DEV_IMAGE="${DEV_IMAGE:-$(_ms_image_brand)-builder:v1}"
         case "$sub" in
             -h|--help)
@@ -559,8 +559,8 @@ _ms_build_stage_weaknet() {
 }
 
 # B4 (container-build-rework R1): `build image <prod|dev>` verb family.
-# prod = Dockerfile.tree (tree-packaged prod image, ${brand}-server:<ver>);
-# dev = Dockerfile.builder (native toolchain image, ${brand}-builder:v1).
+# prod = docker/server/Dockerfile (tree-packaged prod image, ${brand}-server:<ver>);
+# dev = docker/builder/Dockerfile (native toolchain image, ${brand}-builder:v1).
 # Supersedes `build server --image runtime|dev` (deprecation window below).
 _ms_image_summary() {  # R21⑤ build-completion summary: name:tag + size + duration
     local image="$1" t0="$2" size dur
@@ -584,12 +584,12 @@ usage: mediaservo build image <prod|dev> [--tag TAG] [--mirror cn|upstream]
 Container image build (container-build-rework R1; supersedes build server
 --image). Materials ride the git tree; the parent 3rdparty wrap/oxmgr layers
 auto-wire as build contexts when present.
-  prod   Dockerfile.tree -> ${brand}-server:<ver> (+latest); tree-packaged
+  prod   docker/server/Dockerfile -> ${brand}-server:<ver> (+latest); tree-packaged
          production image (server + caddy + oxmgr PID1, bookworm-slim).
          --tag TAG   image tag (default: mediaservo-server crate version)
-  dev    Dockerfile.builder -> ${brand}-builder:v1; native toolchain image
+  dev    docker/builder/Dockerfile -> ${brand}-builder:v1; native toolchain image
          for the ssh-resident dev container (mediaservo dev up). FIXED tag —
-         three-point contract (Dockerfile.tree FROM / dev up / here); manual
+         three-point contract (docker/server/Dockerfile FROM / dev up / here); manual
          bump v1->v2 on semantic toolchain changes, --tag is prod-only.
   <brand> resolution: env MEDIASERVO_BRAND (the parent shell injects it —
          ./msrtc.sh build image ... is the branded entry) > derived from
@@ -620,8 +620,8 @@ BIEOF
             return 1
         fi
         bctx+=(--build-context "oxmgrpkg=$(cd "$ox" && pwd -P)")
-        echo "\$ docker build -f Dockerfile.tree -t $image --build-arg MIRROR=$mirror --build-arg BRAND=$brand --build-arg BUILDER_IMAGE=${brand}-builder:v1 ${bctx[*]:-} ."
-        docker build -f Dockerfile.tree -t "$image" \
+        echo "\$ docker build -f docker/server/Dockerfile -t $image --build-arg MIRROR=$mirror --build-arg BRAND=$brand --build-arg BUILDER_IMAGE=${brand}-builder:v1 ${bctx[*]:-} ."
+        docker build -f docker/server/Dockerfile -t "$image" \
             --build-arg "GIT_REV=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
             --build-arg "MIRROR=$mirror" \
             --build-arg "BRAND=$brand" \
@@ -629,22 +629,22 @@ BIEOF
             "${bctx[@]}" "$ROOT" || return $?
         docker tag "$image" "${brand}-server:latest"
     else
-        # Toolchain-generation tag: v1 is a THREE-POINT CONTRACT — Dockerfile.tree
+        # Toolchain-generation tag: v1 is a THREE-POINT CONTRACT — docker/server/Dockerfile
         # stage1 `FROM msrtc-builder:v1`, this build, and the `dev up` default.
         # Bump v1->v2 ONLY on semantic toolchain changes (compiler / cmake pin /
         # node / mirror posture), never per product release (the product axis is
         # the prod image tag). Manual bump, all points together (oxmgr-archive
         # precedent: the literal IS the version source). Hence --tag is prod-only.
         if [ -n "$tag" ]; then
-            echo "ERROR: build image --tag is prod-only — the builder tag (v1) is a three-point contract (Dockerfile.tree FROM / dev up / here); bump it manually per the PLAN governance instead" >&2
+            echo "ERROR: build image --tag is prod-only — the builder tag (v1) is a three-point contract (docker/server/Dockerfile FROM / dev up / here); bump it manually per the PLAN governance instead" >&2
             return 2
         fi
         image="${brand}-builder:v1"
         # The caddy layer downloads from github releases (foreign) — pass the
         # proxy build-args through (mainland reachability; same posture as the
         # retired build server --image runtime path). NO_PROXY stays proxy-free.
-        echo "\$ docker build -f Dockerfile.builder -t $image --build-arg MIRROR=$mirror ."
-        docker build -f Dockerfile.builder -t "$image" --build-arg "MIRROR=$mirror" \
+        echo "\$ docker build -f docker/builder/Dockerfile -t $image --build-arg MIRROR=$mirror ."
+        docker build -f docker/builder/Dockerfile -t "$image" --build-arg "MIRROR=$mirror" \
             --build-arg "BUILDER_TAG=v1" \
             --build-arg "BUILDER_NAME=${brand}-builder" \
             --build-arg "GIT_REV=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
@@ -1106,7 +1106,7 @@ PIEOF
     fi
     [ -n "$tag" ] || tag=$(_ms_crate_version mediaservo-server)
     local image="${brand}-server:${tag}"
-    docker image inspect "$image" >/dev/null 2>&1 || { echo "Error: image $image absent — build it first (Dockerfile.tree / build image prod)" >&2; return 1; }
+    docker image inspect "$image" >/dev/null 2>&1 || { echo "Error: image $image absent — build it first (docker/server/Dockerfile / build image prod)" >&2; return 1; }
     mkdir -p "$dist"
     # One wrapper dir per artifact set: the multi-file image set isolates inside
     # --dist — no mixing with the native release tarballs (host/server/sdk land

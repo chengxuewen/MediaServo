@@ -2,8 +2,8 @@ name: Docker
 
 # Post container-build-rework (single artifact chain): the submodule CI can
 # validate the prod compose contract and build the TOOLCHAIN image
-# (Dockerfile.builder, self-contained). The tree-packaged prod image
-# (Dockerfile.tree) is NOT submodule-CI-buildable — it needs the parent
+# (docker/builder/Dockerfile, self-contained). The tree-packaged prod image
+# (docker/server/Dockerfile) is NOT submodule-CI-buildable — it needs the parent
 # workspace layers (--build-context wrapcache/oxmgrpkg, R2 materials-ride-the-
 # tree) and is built via `./msrtc.sh build image prod` from the parent.
 # Registry publish (ghcr push + image smoke) is the deferred R0 publish batch.
@@ -15,8 +15,6 @@ on:
     # PR validation only on build-related changes (guards Dockerfile/compose
     # breakage from merging, PIT-39 lesson)
     paths:
-      - 'Dockerfile.builder'
-      - 'Dockerfile.tree'
       - 'docker/**'
       - 'docker-compose.yml'
       - '.dockerignore'
@@ -49,7 +47,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: Dockerfile.builder
+          file: docker/builder/Dockerfile
           push: false
           build-args: |
             MIRROR=upstream

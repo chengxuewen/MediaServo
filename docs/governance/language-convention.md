@@ -30,7 +30,7 @@
 ## Existing-fact anchors
 
 - Submodule `mediaservo.sh` comments/output English (english-only);
-  `docker/tree-entrypoint.sh` comments English.
+  `docker/server/entrypoint.sh` comments English.
 - Parent `msrtc.sh` comments Chinese (e.g. "③b 发布根注入", "④ 品牌注入").
 - `docs/modules/34-site-deployment.md` Chinese (B3.7 site runbook).
 - Plan ledgers `docs/plans/**/PLAN.md` Chinese (shell face).

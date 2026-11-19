@@ -1,4 +1,4 @@
-# Dockerfile.tree — tree-packaged production image (container-build-rework B3.3)
+# docker/server/Dockerfile — tree-packaged production image (container-build-rework B3.3)
 #
 # Single artifact chain (R3/R11): the msrtc-builder toolchain (B2) runs the SAME
 # native CLI/cmake path as the host IDE; `deploy server --release --prefix` assembles
@@ -8,7 +8,7 @@
 # caddy lives in-container under oxmgr (R12, compose proxy retires).
 #
 # Build (context = this submodule root; dual build-contexts from the parent workspace):
-#   docker build -f Dockerfile.tree -t msrtc-server:0.1.3 \
+#   docker build -f docker/server/Dockerfile -t msrtc-server:0.1.3 \
 #     --build-arg GIT_REV="$(git rev-parse HEAD)" \
 #     --build-context wrapcache=../../3rdparty/mediasoup-worker \
 #     --build-context oxmgrpkg=../../3rdparty/oxmgr .
@@ -21,7 +21,7 @@
 # Brand + builder image are CLI-injected (R15 dual-mode: `build image` passes
 # --build-arg BRAND=<resolved brand> + BUILDER_IMAGE=<brand>-builder:v1 — env
 # from the parent shell > out-tree derivation > upstream mediaservo). Defaults
-# keep the msrtc workspace's bare `docker build -f Dockerfile.tree .` working.
+# keep the msrtc workspace's bare `docker build -f docker/server/Dockerfile .` working.
 # NOTE: must precede the FIRST FROM — FROM-line interpolation only sees args
 # declared above the first FROM (measured: after a scratch-FROM -> blank base).
 ARG BUILDER_IMAGE=msrtc-builder:v1
@@ -95,7 +95,7 @@ RUN rm -f /opt/${BRAND}/etc/server.yaml /opt/${BRAND}/etc/.env \
 # ---- stage 2: runtime (R20 debian:bookworm-slim) ----
 FROM debian:bookworm-slim
 ARG GIT_REV=unknown
-# Switchable apt mirror (P2-H7 parity with Dockerfile.builder): cn bakes tuna
+# Switchable apt mirror (P2-H7 parity with docker/builder/Dockerfile): cn bakes tuna
 # (deb.debian.org throttles mainland pulls to a stall, measured); upstream
 # leaves stock (CI posture). bookworm uses deb822 debian.sources.
 ARG MIRROR=cn
@@ -129,10 +129,10 @@ COPY --from=treebuild /opt/${BRAND} /opt/${BRAND}
 # the package artifact set also ships them as DEPLOY-MANUAL.md / OPS-MANUAL.md).
 COPY --from=treebuild /workspace/docs/modules/34-site-deployment.md /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md
 COPY --from=treebuild /workspace/docs/modules/35-container-ops-manual.md /usr/local/share/doc/${BRAND}/OPS-MANUAL.md
-COPY docker/tree-entrypoint.sh /usr/local/bin/tree-entrypoint.sh
+COPY docker/server/entrypoint.sh /usr/local/bin/server-entrypoint.sh
 # Named-volume copy-up preserves image ownership: pre-create + chown the tree
 # so the mediaservo daemon can write etc/run after the entrypoint drops privs.
-RUN chmod 755 /usr/local/bin/tree-entrypoint.sh && \
+RUN chmod 755 /usr/local/bin/server-entrypoint.sh && \
     chown -R mediaservo:mediaservo /opt/${BRAND}
 # root runs the entrypoint (volume writes + sshd port-22 bind); the daemon is
 # privilege-dropped via setpriv at the entrypoint's exec (PID-1 signal fidelity).
@@ -148,4 +148,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
 # (B3.3 smoke-measured: SIGTERM -> 10s grace -> SIGKILL 137). STOPSIGNAL SIGINT
 # makes `docker stop` take the graceful path while oxmgr stays PID1 (R11).
 STOPSIGNAL SIGINT
-ENTRYPOINT ["/usr/local/bin/tree-entrypoint.sh"]
+ENTRYPOINT ["/usr/local/bin/server-entrypoint.sh"]
