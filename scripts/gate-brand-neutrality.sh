@@ -19,6 +19,7 @@
 #   e2e-trap-lib) which must name the real parent tool / recognize msrtc procs.
 #
 # This gate is submodule-only; the parent msrtc workspace legitimately uses msrtc.
+# The gate excludes ITSELF (it must name the forbidden token to grep for it).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -51,6 +52,7 @@ hits=$(git grep -I -l 'msrtc' -- . \
     ':!scripts/e2e-trap-lib.sh' \
     ':!mediaservo.sh' \
     ':!docker/server/Dockerfile' \
+    ':!scripts/gate-brand-neutrality.sh' \
     ':!bindings' \
     ':!vendor' \
     ':!examples' \

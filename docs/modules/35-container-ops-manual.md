@@ -108,9 +108,12 @@ move the host side to 21000 you must ALSO set `-e MEDIASERVO_SFU_PORT=21000`
 **and** `-p 21000:21000/udp` (1:1); otherwise the announced 20000 mismatches
 the host 21000 → media breaks (signaling fine, black screen).
 
-> Capacity tiers: the standard tier (10 rooms / 20 peers at 720p) measured a
-> peak of 56.81 MiB, so `mem_limit` is 512m (~9× headroom). For larger loads
-> re-measure on a test host with the same method before raising `MEM_LIMIT`.
+> Capacity ladder (`MEM_LIMIT`): **512m** = standard tier (10 rooms / 20 peers
+> @720p, MEASURED peak 56.81 MiB, ~9× headroom); **1g** ≈ 2× standard (e.g. 20
+> rooms / 40 peers — extrapolated, verify on site); **2g** ≈ 4× standard (e.g.
+> 50 rooms / 100 peers — extrapolated, re-measure before relying on it). Memory
+> scales with the room/peer object graph, not bitrate; re-measure when doubling
+> tiers.
 
 ## 5. Verification
 
