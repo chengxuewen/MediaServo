@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#0B0E14">
-<title>MediaServo Portal — Unified Prototype v1.76</title>
+<title>MediaServo Portal — Unified Prototype v1.77</title>
 <script>
 try{var k=localStorage.getItem('msrv_theme')||'light';document.documentElement.dataset.theme=k;}catch(e){}
 </script>
@@ -86,6 +86,14 @@ svg.ic{flex:none;stroke:currentColor;fill:none;stroke-width:1.8;stroke-linecap:r
 .brand{display:flex;align-items:center;gap:var(--sp8);font-weight:600;font-size:var(--fs14)}
 .brand .logo{width:26px;height:26px;border-radius:var(--r6);background:conic-gradient(from 210deg,var(--blue),var(--cyan),var(--green),var(--blue));display:grid;place-items:center;color:#fff;font-size:13px;box-shadow:0 0 14px rgba(67,97,238,.5)}
 .brand small{color:var(--tx3);font-weight:400;font-size:var(--fs11);letter-spacing:.5px}
+.tb-pop{position:fixed;top:44px;right:12px;z-index:90;min-width:250px;max-width:330px;background:var(--surface);border:1px solid var(--bd2);border-radius:var(--r6);box-shadow:0 8px 24px rgba(0,0,0,.18);padding:var(--sp12);display:flex;flex-direction:column;gap:var(--sp8)}
+.tb-pop[hidden]{display:none}
+.tb-pop .dd-sec{margin:0}
+.userchip-btn{display:flex;align-items:center;gap:var(--sp8);height:var(--ctl-h);padding:0 var(--sp8);border-radius:var(--r6);border:1px solid var(--bd);background:var(--surface);color:var(--tx1);font-size:var(--fs12);font-weight:600}
+.userchip-btn .ic{width:12px;height:12px;color:var(--tx3)}
+#floorNotif{position:relative}
+#floorNotif .al-badge{position:absolute;top:-4px;right:-4px}
+@media (max-width:760px){#ucName{display:none}.userchip-btn{padding:0 var(--sp4)}}
 .crumb-link{background:none;border:none;padding:0;color:var(--accent-ink);cursor:pointer;font:inherit}
 .crumb-link:hover{text-decoration:underline}
 .crumb{font-size:var(--fs12);color:var(--tx3);display:flex;align-items:center;gap:var(--sp6)}
@@ -1000,14 +1008,12 @@ body[data-badge="on"] #proto-bar{display:flex}
 </svg>
 <div id="app">
   <header id="topbar">
-    <div class="brand"><span class="logo">◆</span>MediaServo <small>PORTAL</small></div>
+    <div class="brand"><span class="logo">◆</span>MediaServo</div>
     <span class="crumb" id="crumb">Overview</span>
     <div class="spacer"></div>
-    <button class="chip-btn warn-chip" id="floorNotif" hidden aria-live="polite" aria-label="Floor notifications"></button>
-    <div class="conn" id="connChip" title="Click to simulate WS drop / reconnect"><span class="g g-online" id="connGlyph"></span><span id="connTxt">Connected · 3 ms</span></div>
-    <button class="iconbtn" id="themeBtn" title="Toggle light / dark">◐</button>
-    <button class="iconbtn" id="muteBtn" title="Mute all cues"><svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg></button>
-    <span class="chip" id="modeInd" data-tip="Deployment mode / provider health">standalone · built-in</span><div class="userchip"><div class="avatar">DX</div><span style="font-weight:600" id="ucName">dispatch.x</span><span class="role-tag" id="ucRole">D · Dispatcher</span></div>
+    <button class="iconbtn" id="floorNotif" hidden aria-label="Floor notifications"><svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg><span class="al-badge" id="notifBadge"></span></button>
+    <button class="chip-btn" id="statusChip" aria-haspopup="dialog" aria-expanded="false" aria-controls="statusPop" data-tip="System status: connection, deployment mode, provider health"><span class="g g-online" id="statusDot"></span><b id="statusMode">SA</b></button>
+    <button class="userchip-btn" id="userBtn" aria-haspopup="menu" aria-expanded="false" aria-controls="userPop"><span class="avatar">DX</span><span id="ucName">dispatch.x</span><svg class="ic" aria-hidden="true"><use href="#i-chevron-down"/></svg></button>
   </header>
   <div class="deg-banner" id="degBanner" hidden role="status"></div>
   <div id="wsBanner"><span class="g g-warn"></span>Live updates paused — reconnecting…<span class="spacer"></span><span class="mono">cached data shown · stale</span></div>
@@ -1015,7 +1021,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <nav id="sidebar" aria-label="Portal navigation">
       <div class="sb-head"><span class="sb-title">Navigation</span><button id="navCollapse" title="Collapse navigation" aria-label="Collapse navigation"><svg class="ic" aria-hidden="true"><use href="#i-chevron-left"/></svg></button></div>
       <div class="sb-scroll" id="navScroll"></div>
-      <div class="sb-foot"><span>Prototype · v1.76 · not app code</span></div>
+      <div class="sb-foot"><span>Prototype · v1.77 · not app code</span></div>
     </nav>
     <main id="main"></main>
   </div>
@@ -1041,7 +1047,7 @@ body[data-badge="on"] #proto-bar{display:flex}
   </div>
 </div>
 <div id="zoom"><div class="zoom-card"><div class="zoom-media" id="zoomMedia"></div><div class="zoom-bar"><b id="zoomName"></b><span class="mono" id="zoomDrift" style="color:var(--tx3)"></span><div class="spacer"></div><button class="btn" id="zoomClose">Close ✕</button></div><div class="zoom-stats" id="zoomStats"></div></div></div>
-<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.76</span> · prototype watermark · drag to move</div>
+<div id="proto-bar" title="Optional prototype watermark — drag to move"><b>MediaServo</b> unified portal · <span class="ver">v1.77</span> · prototype watermark · drag to move</div>
 <div class="modal-scrim" id="grpScrim"><div class="modal" role="dialog" aria-modal="true" aria-label="Manage groups"><div class="modal-head"><span class="modal-title">Manage groups</span><div class="spacer"></div><button class="iconbtn" id="grpClose" aria-label="Close"><svg class="ic"><use href="#i-close"/></svg></button></div><div class="modal-body" id="grpBody"></div></div></div>
 <div class="modal-scrim" id="accScrim" role="dialog" aria-modal="true" aria-label="Account editor"><div class="modal" style="max-width:460px"><div class="card-title" id="accTitle">New account</div><div class="dd-row"><span class="k">username</span><input class="msg-in" style="flex:0 0 180px" id="accUser" aria-label="Username"></div><div class="dd-row"><span class="k">password</span><input class="msg-in" style="flex:0 0 180px" id="accPass" type="password" aria-label="Password"></div><div class="dd-row"><span class="k">role</span><span style="position:relative"><button class="combo-trigger" id="accRoleBtn" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="accRolePop">viewer</button><ul class="combo-pop" id="accRolePop" role="listbox" aria-label="Role"></ul></span></div><div id="accScopeWrap"><div class="dd-row"><span class="k">device scope</span><span style="display:flex;gap:6px;flex-wrap:wrap" id="accScope"></span></div><div class="replay-empty" style="margin:6px 0" id="accScopeHint">Empty scope = no devices (viewer/operator). Non-vehicle kinds gated: enforcement pending backend extension.</div></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="accCancel">Cancel</button><button class="btn btn-sm btn-primary" id="accSave">Save</button></div></div></div>
 <div class="modal-scrim" id="pskScrim" role="dialog" aria-modal="true" aria-label="Rotate PSK"><div class="modal" style="max-width:420px"><div class="card-title">Rotate pre-shared key</div><div class="dd-row"><span class="k">new value</span><input class="msg-in" style="flex:0 0 200px" id="pskNew" placeholder="optional · 8-128 chars" aria-label="New PSK value (optional)"></div><div class="replay-empty" style="margin:6px 0">Leave empty to generate. All devices/agents must adopt the new PSK; the old one is invalidated. Shown once after rotate.</div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="pskCancel">Cancel</button><button class="btn btn-sm btn-primary" id="pskOk">Rotate</button></div></div></div>
@@ -1052,7 +1058,21 @@ body[data-badge="on"] #proto-bar{display:flex}
 </div></div></div>
 <div class="dev-drawer" id="devDrawer" role="dialog" aria-label="Device details" aria-hidden="true"><div class="dd-head"><span class="dd-title" id="ddTitle"></span><span class="chip" id="ddRole"></span><span id="ddLive" class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)"></span><button class="iconbtn region-collapse" id="ddClose" aria-label="Collapse device details" title="Collapse device details" data-tip="Back to Devices"><svg class="ic" aria-hidden="true"><use href="#i-chevron"/></svg></button></div><div class="dd-tabs" id="ddTabs" role="tablist"></div><div class="dd-body" id="ddBody" role="tabpanel"></div></div>
 <div class="modal-scrim" id="secretScrim" role="dialog" aria-modal="true" aria-label="One-time secret"><div class="modal" style="max-width:440px"><div class="card-title" id="secTitle">Secret</div><div class="bg-card" style="border-color:var(--warn);background:var(--warn-tint)"><span class="bg-tag" style="color:var(--warn-ink);border-color:var(--warn)">shown once</span> This secret is shown only once — save it now. Closing without copying discards it.</div><div class="dd-row"><span class="k">secret</span><span class="mono" id="secVal" style="user-select:all;word-break:break-all"></span></div><div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button class="btn btn-sm" id="secCopy">Copy</button><button class="btn btn-sm btn-primary" id="secDone">Done</button></div><div class="replay-empty" id="secCopyHint" style="margin-top:6px"></div></div>
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<div id="statusPop" class="tb-pop" role="dialog" aria-label="System status" hidden>
+  <div class="dd-sec">Connection</div>
+  <div class="conn" id="connChip" title="Click to simulate WS drop / reconnect"><span class="g g-online" id="connGlyph"></span><span id="connTxt">Connected · 3 ms</span></div>
+  <div class="dd-sec">Identity provider</div>
+  <span class="chip" id="modeInd" data-tip="Deployment mode / provider health">standalone · built-in</span>
+  <div id="statusBg"></div>
+</div>
+<div id="userPop" class="tb-pop" role="menu" aria-label="User menu" hidden>
+  <div class="dd-row"><span class="k">role</span><span class="chip" id="ucRole">D · Dispatcher</span></div>
+  <button class="btn btn-sm" id="themeBtn" role="menuitem">Theme</button>
+  <button class="btn btn-sm" id="muteBtn" role="menuitem">Cues</button>
+  <button class="btn btn-sm" id="userAbout" role="menuitem">About</button>
+  <button class="btn btn-sm" id="userLogout" role="menuitem">Sign out (simulated)</button>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
 <div id="guardTip" role="tooltip" aria-hidden="true"></div>
 <div id="devtools">
   <button id="dtToggle" type="button" title="Open prototype controls (drag to move)"><svg class="ic" aria-hidden="true"><use href="#i-sliders"/></svg>Prototype controls</button>
@@ -1080,7 +1100,7 @@ body[data-badge="on"] #proto-bar{display:flex}
     <div class="dt-row"><div class="dt-label">Sync</div><div class="dt-seg"><button type="button" data-set="sync:on">On</button><button type="button" data-set="sync:off">Off</button></div></div>
     <div class="dt-row"><div class="dt-label">Version badge</div><div class="dt-seg"><button type="button" data-set="badge:off">Hidden</button><button type="button" data-set="badge:on">Floating</button></div></div>
     <div class="dt-row"><div class="dt-label">Simulate event</div><div class="dt-seg"><button type="button" data-set="sim:motion" title="Emit a motion event on the unified bus">Motion</button><button type="button" data-set="sim:alarm" title="Emit an alarm event (drives alarm-to-wall + intercom)">Alarm</button><button type="button" data-set="sim:bookmark" title="Emit a bookmark event">Bookmark</button></div></div>
-    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.76</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
+    <div class="dt-foot"><span>MediaServo unified portal · <b class="dt-ver">v1.77</b> · single iteration baseline · design asset only, not app code.</span><button class="btn btn-sm" id="dtReset" type="button">Reset</button></div>
   </div>
 </div>
 
@@ -1745,9 +1765,9 @@ function floorNotify(type,g){if(!g||g.state==='unknown')return;if(current==='int
  notifs.push({type,groupId:g.id,ts:Date.now(),expires:Date.now()+(type==='held'?FLOOR_CFG.holdTimeoutMs:type==='queued'?60000:10000)});
  if(notifs.length>3)notifs.shift();
  cue('floor_permit');renderNotif();}
-function renderNotif(){const c=$('#floorNotif');if(!c)return;if(!notifs.length||current==='intercom'){c.hidden=true;c.innerHTML='';return;}
+function renderNotif(){const c=$('#floorNotif');if(!c)return;if(!notifs.length||current==='intercom'){c.hidden=true;return;}
  c.hidden=false;const n=notifs[notifs.length-1];const g=GROUPS.find(x=>x.id===n.groupId);
- c.innerHTML='<svg class="ic" aria-hidden="true"><use href="#i-intercom"/></svg>'+NOTIF_TXT[n.type]+(g?' · '+g.name:'')+(notifs.length>1?' +'+(notifs.length-1):'');
+ c.innerHTML='<svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg><span class="al-badge" id="notifBadge">'+notifs.length+'</span>';c.title='Floor notifications: '+notifs.length+' — click to open';
  c.dataset.tip=notifs.map(x=>{const gg=GROUPS.find(y=>y.id===x.groupId);return NOTIF_TXT[x.type]+(gg?' · '+gg.name:'');}).join(' | ')+' — click to open';}
 function notifTick(){const before=notifs.length;for(let i=notifs.length-1;i>=0;i--){const n=notifs[i];const g=GROUPS.find(x=>x.id===n.groupId);const stale=!g||Date.now()>n.expires||(n.type==='held'&&g.holder!=='dispatch.x')||(n.type==='queued'&&!g._q);if(stale)notifs.splice(i,1);}if(notifs.length!==before)renderNotif();}
 function wireNotif(){const c=$('#floorNotif');if(!c)return;c.onclick=()=>{const n=notifs[notifs.length-1];if(!n)return;const g=GROUPS.find(x=>x.id===n.groupId);const ok=g&&(n.type==='held'?g.holder==='dispatch.x':n.type==='queued'?g._q:true);notifs.pop();renderNotif();if(!ok){toast('Notification expired — floor state changed');return;}goto('intercom');enterChannel(g.id);};}
@@ -1790,7 +1810,11 @@ const accManaged=()=>can('accounts')&&capState('accounts')!=='delegated';
 const accBreak=()=>capState('accounts')==='degraded';
 function syncModeInd(){const m=$('#modeInd');if(m){const del=CAP_PROVIDER.accounts!=='builtin';m.innerHTML='<b>'+(del?'PL':'SA')+'</b><span class="mi-tail"> · '+(del?('AccessBase · '+CAP_HEALTH+(CAP_FORCE?' · forced':'')):'built-in')+'</span>';m.dataset.tip=(del?'Platform mode: identity delegated to AccessBase (config-declared); health from simulated /capabilities endpoint.':'Standalone mode: core minimal identity set active.')+' Full: '+(del?('AccessBase · '+CAP_HEALTH):'built-in');}
  const bn=$('#degBanner');if(bn){const deg=CAP_ROWS.some(([c])=>capState(c)==='degraded');bn.hidden=!deg;if(deg)bn.innerHTML='<svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg> Identity provider unreachable — local break-glass available (audited). <button class="btn btn-sm" id="degBg">Break-glass</button>';const g=$('#degBg');if(g)g.onclick=()=>goto('accounts');}
- const sr=$('#setAccessRow');if(sr)sr.style.display=CAP_PROVIDER.accounts==='builtin'?'none':'';}
+ const sr=$('#setAccessRow');if(sr)sr.style.display=CAP_PROVIDER.accounts==='builtin'?'none':'';
+ const del2=CAP_PROVIDER.accounts!=='builtin';const sm=$('#statusMode');if(sm)sm.textContent=del2?'PL':'SA';
+ const sd=$('#statusDot');if(sd)sd.className=(CAP_HEALTH==='reachable'&&!CAP_FORCE)?'g g-online':'g g-warn';
+ const sb=$('#statusBg');if(sb)sb.innerHTML=CAP_ROWS.some(([c])=>capState(c)==='degraded')?'<button class="btn btn-sm btn-danger" id="statusBgBtn">Break-glass available</button>':'<div class="replay-empty">All capabilities healthy.</div>';
+ const sbb=$('#statusBgBtn');if(sbb)sbb.onclick=()=>{closeTbPop($('#statusPop'));goto('accounts');};}
 function fallbackCopy(v,done){const ta=document.createElement('textarea');ta.value=v;ta.style.cssText='position:fixed;left:-9999px';document.body.appendChild(ta);ta.select();let ok=false;try{ok=document.execCommand('copy');}catch(e){ok=false;}document.body.removeChild(ta);if(ok)done();else $('#secCopyHint').textContent='Clipboard unavailable — select the secret above manually (fully selectable).';}
 function sweepGuards(root){if(!root)return;root.querySelectorAll('[disabled][data-reason]').forEach(el=>{const r=el.dataset.reason;el.removeAttribute('disabled');setGuard(el,true,r);});}
 function renderAdmin(){const b=$('#adminHub');if(!b)return;
@@ -2013,7 +2037,7 @@ function buildNav(){const sc=$('#navScroll');sc.innerHTML='';NAV.forEach(g=>{con
 function updateNavBadges(){const lb=document.querySelector('[data-livebadge]');if(lb)lb.textContent=selected.length;const db=document.querySelector('[data-badge="devices"]');if(db)db.textContent=DEVICES.filter(d=>d.status==='pending').length;const ib=document.querySelector('[data-badge="intercom"]');if(ib)ib.textContent=GROUPS.filter(g=>g.state==='held').length;}
 function goto(id,lens){if(lens)devLens=lens;if(current==='intercom'&&chanOpen&&id!=='intercom'){const gg=GROUPS.find(x=>x.id===chanOpen);if(gg)recClear(gg);}if(id==='intercom'){notifs.length=0;renderNotif();}if(id!=='devices'&&$('#devDrawer').classList.contains('open'))closeDevDrawer();current=id;document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));const p=$('#page-'+id);if(p)p.classList.add('active');const navId=ADMIN_SPOKES.includes(id)?'admin':id;document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active',n.dataset.nav===navId));
  if(ADMIN_SPOKES.includes(id)&&p){const ph=p.querySelector('.page-head');if(ph&&!ph.querySelector('[data-back]')){const bb=document.createElement('button');bb.className='iconbtn';bb.dataset.back='1';bb.setAttribute('aria-label','Back to Admin');bb.dataset.tip='Back to Admin hub';bb.innerHTML='<svg class="ic"><use href="#i-arrow-left"/></svg>';bb.onclick=()=>goto('admin');ph.insertBefore(bb,ph.firstChild);}}
- const[t,s]=TITLES[id]||[id,''];$('#crumb').innerHTML=`${ADMIN_SPOKES.includes(id)?'<button class="crumb-link" data-crumb-admin="1">Admin</button> / ':''}${t} <span style="color:var(--tx3)">· ${s}</span>`;
+ const[t,s]=TITLES[id]||[id,''];$('#crumb').innerHTML=`${ADMIN_SPOKES.includes(id)?'<button class="crumb-link" data-crumb-admin="1">Admin</button> / ':''}${t}`;
  const R={admin:renderAdmin,accounts:renderAccounts,overview:renderOverview,monitor:renderMonitor,recordings:renderRecordings,intercom:renderBoard,meeting:renderMeeting,tower:renderTower,devices:renderDevices,rooms:renderRooms,sessions:renderSessions,streams:renderStreams,config:renderConfig,keys:renderKeys,audit:renderAudit};
  if(R[id])R[id]();
  if(id==='tower'){$('#body').classList.add('nav-min');syncNavCollapse();}
@@ -2278,7 +2302,7 @@ let DEFAULT_SELECTED=null;
 function setWsState(dropped){if(arguments[0]&&GROUPS.length&&GROUPS[0].state==='unknown')return;
  const chip=$('#connChip');if(chip)chip.dataset.dropped=dropped?'1':'';
  $('#wsBanner').classList.toggle('show',dropped);const ls=$('#liveStale');if(ls)ls.classList.toggle('show',dropped);
- $('#connGlyph').className=dropped?'g g-warn':'g g-online';$('#connTxt').textContent=dropped?'Reconnecting…':'Connected · 3 ms';
+ $('#connGlyph').className=dropped?'g g-warn':'g g-online';$('#connTxt').textContent=dropped?'Reconnecting…':'Connected · 3 ms';const sd2=$('#statusDot');if(sd2&&!dropped)sd2.className=(CAP_HEALTH==='reachable'&&!CAP_FORCE)?'g g-online':'g g-warn';if(sd2&&dropped)sd2.className='g g-warn';
  const ss=$('#sigState');if(ss)ss.innerHTML=dropped?'<span class="g g-warn"></span> reconnecting':'<span class="g g-online"></span> connected';
  if(dropped){GROUPS.forEach(g=>{g._prev=g.state;g.state='unknown';});}else{GROUPS.forEach(g=>g.state=g._prev||'idle');}
  if(current==='intercom'){if(chanOpen)renderChannel();else renderBoard();}
@@ -2306,6 +2330,9 @@ function protoCur(k){
 }
 function syncDevtools(){const dt=$('#devtools');if(!dt)return;dt.querySelectorAll('[data-set]').forEach(b=>{const p=b.dataset.set.split(':');const on=protoCur(p[0])===p[1];b.classList.toggle('is-on',on);b.setAttribute('aria-pressed',String(on));});}
 function syncNavCollapse(){const c=$('#body').classList.contains('nav-min');const b=$('#navCollapse');if(!b)return;b.innerHTML='<svg class="ic" aria-hidden="true"><use href="#'+(c?'i-chevron':'i-chevron-left')+'"/></svg>';b.title=c?'Expand navigation':'Collapse navigation';b.setAttribute('aria-label',b.title);}
+let tbTrigger=null;
+function openTbPop(pop,trigger){closeTbPop(null,true);pop.hidden=false;trigger.setAttribute('aria-expanded','true');tbTrigger=trigger;const f=pop.querySelector('button,input,select');if(f)f.focus();}
+function closeTbPop(pop,silent){const ps=pop?[pop]:[...document.querySelectorAll('.tb-pop')];ps.forEach(x=>{if(!x.hidden){x.hidden=true;const tr=x.id==='statusPop'?$('#statusChip'):$('#userBtn');if(tr)tr.setAttribute('aria-expanded','false');}});if(!silent&&tbTrigger){tbTrigger.focus();tbTrigger=null;}}
 function applyProto(k,v){
  if(k==='theme')setTheme(v);
  else if(k==='density'){document.documentElement.dataset.density=v;document.querySelectorAll('#densSeg button').forEach(b=>b.classList.toggle('on',b.dataset.d===v));}
@@ -2431,7 +2458,7 @@ function cue(name){
 function syncCueUI(){
  const mb=$('#muteBtn');
  if(mb){mb.innerHTML=cuesMuted?'<svg class="ic" aria-hidden="true"><use href="#i-bell-off"/></svg>':'<svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg>';mb.classList.toggle('active',cuesMuted);
-  mb.title=cuesMuted?'Unmute all cues':(cueUnlocked?'Mute all cues':'Audio locked — click anywhere to enable');}
+  mb.title=cuesMuted?'Unmute all cues':(cueUnlocked?'Mute all cues':'Audio locked — click anywhere to enable');mb.innerHTML=(cuesMuted?'<svg class="ic" aria-hidden="true"><use href="#i-bell-off"/></svg> Cues muted':'<svg class="ic" aria-hidden="true"><use href="#i-bell"/></svg> Cues on');}
  const ct=$('#cueToggle');
  if(ct){ct.classList.toggle('on',cuesOn);ct.title='Intercom event cues: talk-permit / queue / yield'+(cuesMuted?' (master muted)':'');}
 }
@@ -2497,6 +2524,12 @@ function wire(){
  $('#cfmCancel').onclick=()=>dlgClose($('#cfmScrim'));$('#cfmCancelX').onclick=()=>dlgClose($('#cfmScrim'));$('#cfmOk').onclick=()=>{const cb=cfmCb;cfmCb=null;dlgClose($('#cfmScrim'));if(cb)cb();};
  const gm=$('#grpManage');if(gm)gm.onclick=()=>{grpEditId=null;renderGroups();dlgOpen($('#grpScrim'));};
   $('#navCollapse').onclick=function(){$('#body').classList.toggle('nav-min');syncNavCollapse();};
+ $('#statusChip').onclick=function(){const p=$('#statusPop');p.hidden?openTbPop(p,this):closeTbPop(p);};
+ $('#userBtn').onclick=function(){const p=$('#userPop');p.hidden?openTbPop(p,this):closeTbPop(p);};
+ $('#userAbout').onclick=()=>{closeTbPop($('#userPop'));toast('MediaServo unified portal prototype · v1.77 · design asset, not app code');};
+ $('#userLogout').onclick=()=>{closeTbPop($('#userPop'));toast('Sign-out simulated — prototype has no real session');};
+ document.addEventListener('click',e=>{if(e.target.closest('.tb-pop')||e.target.closest('#statusChip')||e.target.closest('#userBtn'))return;closeTbPop(null,true);});
+ document.querySelectorAll('.tb-pop').forEach(p=>p.addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();closeTbPop(p);return;}if(e.key==='Tab'){const els=[...p.querySelectorAll('button,input,select')].filter(x=>!x.disabled&&x.offsetParent!==null);if(!els.length)return;const a=els[0],b=els[els.length-1];if(e.shiftKey&&document.activeElement===a){e.preventDefault();b.focus();}else if(!e.shiftKey&&document.activeElement===b){e.preventDefault();a.focus();}}}));
  $('#themeBtn').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
  $('#muteBtn').onclick=function(){cuesMuted=!cuesMuted;cueUnlock();syncCueUI();toast(cuesMuted?'All cues muted':'Cues on');};
  /* first user gesture unlocks WebAudio (browser autoplay policy); idempotent afterwards */
@@ -2543,7 +2576,7 @@ function wire(){
  $('#pickApply').onclick=applyPick;
  $('#zoomClose').onclick=()=>$('#zoom').classList.remove('show');
  $('#zoom').onclick=e=>{if(e.target===$('#zoom'))$('#zoom').classList.remove('show');};
- document.addEventListener('keydown',e=>{if(e.key==='Escape'){const ms=[...document.querySelectorAll('.modal-scrim.show')];if(ms.length){dlgClose(ms[ms.length-1]);return;}if($('#devDrawer').classList.contains('open')){closeDevDrawer();return;}const ae=document.activeElement;if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;$('#zoom').classList.remove('show');closePicker();const cp=$('#calPop');if(cp)cp.hidden=true;setComboOpen(false);closeDevtools();if(chanOpen)leaveChannel();if(zoomedId){zoomedId=null;renderWall();}}});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'){const ms=[...document.querySelectorAll('.modal-scrim.show')];if(ms.length){dlgClose(ms[ms.length-1]);return;}const tp=[...document.querySelectorAll('.tb-pop')].find(x=>!x.hidden);if(tp){closeTbPop(tp);return;}if($('#devDrawer').classList.contains('open')){closeDevDrawer();return;}const ae=document.activeElement;if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;$('#zoom').classList.remove('show');closePicker();const cp=$('#calPop');if(cp)cp.hidden=true;setComboOpen(false);closeDevtools();if(chanOpen)leaveChannel();if(zoomedId){zoomedId=null;renderWall();}}});
  /* hold Space = push-to-talk while a channel session is open */
  document.addEventListener('keydown',e=>{
   if(e.code!=='Space'||!chanOpen)return;
@@ -2552,7 +2585,7 @@ function wire(){
  document.addEventListener('keyup',e=>{if(!chanOpen)return;if(e.code==='Space'||e.key==='Enter'){const t=e.target;if(t&&t.closest&&t.closest('input,textarea,select'))return;e.preventDefault();pttUp();}});
 }
 function syncUserchip(){const r=effRole();const un=$('#ucName');if(un)un.textContent=CUR_USER;const ur=$('#ucRole');if(ur)ur.textContent=r.charAt(0).toUpperCase()+' · '+r.charAt(0).toUpperCase()+r.slice(1);}
-function setTheme(t){document.documentElement.dataset.theme=t;try{localStorage.setItem('msrv_theme',t);}catch(e){}document.querySelector('meta[name=theme-color]').content=t==='dark'?'#0B0E14':'#F2F4F8';document.querySelectorAll('#themeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));syncDevtools();toast('Theme: '+t);}
+function setTheme(t){const tb=$('#themeBtn');if(tb)tb.innerHTML='<svg class="ic" aria-hidden="true"><use href="#i-swap"/></svg> Theme: '+t;document.documentElement.dataset.theme=t;try{localStorage.setItem('msrv_theme',t);}catch(e){}document.querySelector('meta[name=theme-color]').content=t==='dark'?'#0B0E14':'#F2F4F8';document.querySelectorAll('#themeSeg button').forEach(b=>b.classList.toggle('on',b.dataset.t===t));syncDevtools();toast('Theme: '+t);}
 /* timers */
 setInterval(()=>{floorTick();if(current==='intercom'){if(chanOpen)paintChannelLive();else paintBoardLive();}if(current==='tower')renderTowerTalk();
  if(current==='monitor'){liveSec++;const lc=$('#liveClock');if(lc)lc.textContent=fmtClock(liveSec)+':'+pad2(liveSec%60);}

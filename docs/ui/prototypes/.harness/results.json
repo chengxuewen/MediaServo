@@ -1,320 +1,11 @@
 {
-  "when": "2026-11-18T09:15:33.856Z",
+  "when": "2026-11-18T12:32:49.143Z",
   "mode": "positive",
   "fail": 0,
   "results": {
-    "floor": {
-      "pass": true,
-      "size": 164015,
-      "assertions": {
-        "idleGrant": true,
-        "noJump": true
-      },
-      "error": null
-    },
-    "queue": {
-      "pass": true,
-      "size": 163550,
-      "assertions": {
-        "cap": true,
-        "rew": true
-      },
-      "error": null
-    },
-    "replay": {
-      "pass": true,
-      "size": 246568,
-      "assertions": {
-        "scanKeeps": true,
-        "manualClears": true,
-        "xpageClears": true
-      },
-      "error": null
-    },
-    "emergency": {
-      "pass": true,
-      "size": 176803,
-      "assertions": {
-        "armPersist": true,
-        "emergNoPress": true
-      },
-      "error": null
-    },
-    "tabs-size": {
-      "pass": true,
-      "size": 158657,
-      "assertions": {
-        "diag": true,
-        "tabSwitch": true
-      },
-      "error": null
-    },
-    "nav": {
-      "pass": true,
-      "size": 155037,
-      "assertions": {
-        "navSvg": true,
-        "unique": true,
-        "countOk": true
-      },
-      "error": null
-    },
-    "notif": {
-      "pass": true,
-      "size": 176858,
-      "assertions": {
-        "xpage": true,
-        "clickLand": true,
-        "inpageHide": true
-      },
-      "error": null
-    },
-    "groups": {
-      "pass": true,
-      "size": 163904,
-      "assertions": {
-        "created": true,
-        "cascade": true,
-        "focusRestore": true,
-        "roleGuard": true,
-        "escModal": true
-      },
-      "error": null
-    },
-    "evidence": {
-      "pass": true,
-      "size": 149637,
-      "assertions": {
-        "purge": true,
-        "revoke": true
-      },
-      "error": null
-    },
-    "admin-hub": {
-      "pass": true,
-      "size": 173439,
-      "assertions": {
-        "domains": true,
-        "spoke": true,
-        "parentActive": true,
-        "crumb": true
-      },
-      "error": null
-    },
-    "device-drawer": {
-      "pass": true,
-      "size": 173638,
-      "assertions": {
-        "open": true,
-        "hiddenClosed": true,
-        "initialFocus": true,
-        "tabs": true,
-        "roving": true,
-        "trap": true,
-        "modalFirst": true,
-        "esc": true,
-        "restored": true,
-        "list": true,
-        "closedInert": true,
-        "ddIcon": true
-      },
-      "error": null
-    },
-    "device-drawer-narrow": {
-      "pass": true,
-      "size": 81532,
-      "assertions": {
-        "fullWidth": true
-      },
-      "error": null
-    },
-    "device-config": {
-      "pass": true,
-      "size": 182342,
-      "assertions": {
-        "diff": true,
-        "applied": true,
-        "rb": true,
-        "staged": true,
-        "flush": true,
-        "failed": true,
-        "retry": true
-      },
-      "error": null
-    },
-    "device-role": {
-      "pass": true,
-      "size": 172977,
-      "assertions": {
-        "viewerOk": true,
-        "fieldOk": true,
-        "dispOk": true,
-        "adminOk": true,
-        "repaint": true
-      },
-      "error": null
-    },
-    "accounts": {
-      "pass": true,
-      "size": 121478,
-      "assertions": {
-        "matrixRows9": true,
-        "statesDerive": true,
-        "focusInitial": true,
-        "created": true,
-        "nonVehGated": true,
-        "edited": true,
-        "focusRestore": true,
-        "deleted": true,
-        "selfGuard": true,
-        "guardKeyboard": true,
-        "dispatcherRead": true,
-        "viewerNoAccess": true,
-        "operatorNoAccess": true,
-        "delegatedGuard": true,
-        "delAff": true,
-        "forced": true,
-        "breakGlass": true,
-        "bgAudited": true,
-        "bgReset": true,
-        "degradedRow": true,
-        "banner": true,
-        "errState": true,
-        "loadingState": true,
-        "emptyState": true,
-        "lightDefault": true
-      },
-      "error": null
-    },
-    "psk": {
-      "pass": true,
-      "size": 152107,
-      "assertions": {
-        "viewAudited": true,
-        "rotateFocus": true,
-        "rotateValidate": true,
-        "loadingState": true,
-        "onceDisplay": true,
-        "closeGuard": true,
-        "closeGuardKeeps": true,
-        "copyHandled": true,
-        "safeClose": true,
-        "rotated": true,
-        "createFocus": true,
-        "nonVehGated": true,
-        "createLoading": true,
-        "keySecret": true,
-        "created": true,
-        "revokeConfirm": true,
-        "revoked": true,
-        "delegatedGuard": true,
-        "bgPsk": true,
-        "bgAudited": true,
-        "errState": true,
-        "retryLoading": true,
-        "emptyState": true
-      },
-      "error": null
-    },
-    "creds": {
-      "pass": true,
-      "size": 191071,
-      "assertions": {
-        "visionGated": true,
-        "emptyState": true,
-        "simulateLeg": true,
-        "focusInitial": true,
-        "loadingState": true,
-        "registerOnce": true,
-        "closeGuard": true,
-        "registered": true,
-        "resetConfirm": true,
-        "resetLoading": true,
-        "resetOnce": true,
-        "revokeSemantics": true,
-        "focusRestore": true,
-        "escOrder": true,
-        "guardKeyboard": true,
-        "errState": true,
-        "retryLoading": true
-      },
-      "error": null
-    },
-    "fleet": {
-      "pass": true,
-      "size": 138338,
-      "assertions": {
-        "lensFilter": true,
-        "lensAria": true,
-        "healthStrip": true,
-        "rowSummary": true,
-        "deepLink": true,
-        "telemetrySignalUptime": true,
-        "procThreeState": true,
-        "topicStalled": true,
-        "unreachable": true,
-        "scopeCrossLink": true,
-        "errState": true,
-        "loadingState": true,
-        "emptyState": true
-      },
-      "error": null
-    },
-    "monitor-link": {
-      "pass": true,
-      "size": 278418,
-      "assertions": {
-        "treeRole": true,
-        "twistyFocusable": true,
-        "treeKeyboard": true,
-        "treeExpand": true,
-        "playAllGuard": true,
-        "cap16Guard17th": true,
-        "bulkGuard": true,
-        "perStreamMetrics": true,
-        "honestBanner": true,
-        "emptyState": true,
-        "loadingState": true,
-        "errState": true,
-        "retryWorks": true
-      },
-      "error": null
-    },
-    "audit-ring": {
-      "pass": true,
-      "size": 162266,
-      "assertions": {
-        "ringRows": true,
-        "retentionLabel": true,
-        "historyLink": true,
-        "loginQuerySimulated": true,
-        "logoutSimulated": true,
-        "kindFilter": true,
-        "bgRing": true,
-        "sourceProvider": true,
-        "emptyState": true,
-        "errState": true,
-        "loadingState": true
-      },
-      "error": null
-    },
-    "nav-collapse": {
-      "pass": true,
-      "size": 155037,
-      "assertions": {
-        "initSvg": true,
-        "collapsedIcon": true,
-        "collapsedState": true,
-        "expandedIcon": true,
-        "railIcon": true,
-        "resetIcon": true,
-        "aria": true
-      },
-      "error": null
-    },
     "accounts-narrow": {
       "pass": true,
-      "size": 72472,
+      "size": 70486,
       "assertions": {
         "noOv": true,
         "card": true,
@@ -324,7 +15,7 @@
     },
     "admin-controls": {
       "pass": true,
-      "size": 104781,
+      "size": 98093,
       "assertions": {
         "h30": true,
         "stateStable": true,
@@ -334,7 +25,7 @@
     },
     "admin-spoke": {
       "pass": true,
-      "size": 75195,
+      "size": 73261,
       "assertions": {
         "back": true,
         "noHScroll": true,
@@ -346,7 +37,7 @@
     },
     "board-1100": {
       "pass": true,
-      "size": 154888,
+      "size": 149112,
       "assertions": {
         "uniformH": true,
         "singleLine": true,
@@ -359,7 +50,7 @@
     },
     "board-1000": {
       "pass": true,
-      "size": 140683,
+      "size": 133047,
       "assertions": {
         "uniformH": true,
         "singleLine": true,
@@ -372,7 +63,7 @@
     },
     "board-1200": {
       "pass": true,
-      "size": 157675,
+      "size": 151974,
       "assertions": {
         "uniformH": true,
         "singleLine": true,

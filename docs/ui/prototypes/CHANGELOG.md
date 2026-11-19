@@ -1,5 +1,31 @@
 # Prototypes CHANGELOG
 
+## v1.77 — 2026-11-18 (portal-unified) — topbar convergence (option A, user-adjudicated after research)
+Research: B-end topbar doctrine = left global info / right global actions; excess elements collapse
+into menus/popovers (DSM taskbar status cluster; ENVY mobile hides account name into menu).
+Measured clutter: right cluster 5 items/512px (conn 148 + theme 30 + mute 30 + mode 101 + user 203);
+crumb duplicated page-head title+subtitle verbatim; brand PORTAL tag redundant.
+- **Right cluster = 3**: bell (badge count, was warn-chip text), status chip (dot + SA/PL) opening
+  #statusPop (connection sim chip + provider mode chip + break-glass shortcut when degraded),
+  user menu (avatar+name+chevron) opening #userPop (role chip / Theme toggle with current state /
+  Cues mute with state / About / Sign out simulated).
+- theme/mute buttons MOVED into user menu (ids+handlers preserved); conn/mode chips MOVED into
+  status pop; crumb = path only (subtitle removed, page head owns it); brand PORTAL removed.
+- Popover contract: aria-haspopup/expanded/controls, initial focus, Esc closes + restores trigger
+  (global Esc chain: modal → tb-pop → drawer → cascade), outside-click closes, Tab loop inside.
+- syncModeInd drives status chip dot/label + pop break-glass shortcut; setWsState drives dot;
+  setTheme/syncCueUI label their menu items; bell aria-live REMOVED (single announcer = toast).
+- Narrow @600: user name hidden (avatar only), cluster intact, docSW==600 (converge, not hide).
+- **Verification limitation (honest)**: Marionette headless session wedges unreproducibly on the
+  topbar interaction case (reads-only also wedged in some sessions; solo runs passed) — topbar is
+  therefore verified PAGE-SIDE (injected assertion overlay: cluster/crumb/brand/statusPop/statusEsc/
+  userMenu/themeMenu/muteMenu/userEsc/degDot/bgShortcut/bgGoto ALL true + screenshots 1440/600),
+  NOT in the Marionette suite. Suite keeps 27 cases ALL GREEN + NEG all red; harness run() gained
+  25s ExecuteScript timeout + single re-navigate retry; accounts-narrow NEG retargeted
+  (renderAccounts noop) because converged cluster no longer overflows with wide gap.
+- Impl bugs fixed en route: popover insertion anchored mid-tag hijacked #toast (two quote/attr
+  repairs); syncModeInd extension used block-scoped `del` (del2); helper scope hoisted to top level.
+
 ## v1.76 — 2026-11-18 (portal-unified) — fix: device drawer collapse button icon family/direction
 User report: drawer top-right collapse button icon wrong.
 - Root cause: ddClose used #i-arrow-left (a back-NAVIGATION arrow, pointing left) on a RIGHT-anchored

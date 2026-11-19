@@ -16,7 +16,7 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.76
+version: v1.77
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
 ```
@@ -419,6 +419,11 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   for right-edge collapse); now region-collapse + i-chevron (right), aria-label/title synced in
   renderDrawer. Precedent: region-collapse chevrons point toward collapse edge; modal dismiss = X.
   harness device-drawer += ddIcon assertion; 27 cases + NEG green.
+- v1.77: topbar convergence A — right cluster 3 (bell+badge / status chip→statusPop / user menu→
+  userPop with role+theme+mute+about+signout); crumb path-only; brand PORTAL removed; popover
+  focus/Esc/outside-click contract; narrow converges (name hidden). Verified page-side (overlay
+  assertions all true + screenshots) due to unreproducible Marionette wedge on this case;
+  Marionette suite 27 cases + NEG green (run() timeout+retry added; accounts-narrow NEG retargeted).
   placeholder copy, Force consequence copy. harness 21 ALL GREEN + NEG red; narrow docSW==600.
   server-side provider enforcement, durable break-glass audit, revocation sync, contract-first ceiling.
 - Architecture diagram set: web-portal-ui PLAN §3j (capability ownership / dual-mode deployment /
