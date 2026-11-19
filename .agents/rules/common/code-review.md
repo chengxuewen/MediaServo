@@ -70,6 +70,7 @@ Use these agents for code review:
 |-------|---------|
 | **code-reviewer** | General code quality, patterns, best practices |
 | **security-hardening** skill | Security vulnerabilities, OWASP Top 10 |
+
 Language-specific findings route through the five axes above, executed by the real `code-reviewer` role -- the four former `*-reviewer` rows referenced roles that do not exist (fixed, review-convergence T7).
 
 ## Review Workflow
