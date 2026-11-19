@@ -284,7 +284,7 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     // deployment tree, not of one shell's environment).
     let allow_dev_credentials = config.allow_dev_credentials
         || std::env::var("MEDIASERVO_ALLOW_DEV_CREDENTIALS").as_deref() == Ok("1");
-    if let Err(e) = accounts.check_dev_credentials(allow_dev_credentials) {
+    if let Err(e) = accounts.guard_dev_credentials(allow_dev_credentials) {
         panic!("{e}");
     }
     let accounts = std::sync::Arc::new(accounts);

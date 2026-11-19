@@ -245,6 +245,26 @@ impl AccountRegistry {
         ))
     }
 
+    /// Startup guard with visibility (dev-credentials-hardening D2): same fail-fast
+    /// semantics as `check_dev_credentials` (Err -> caller panics), but when the dev
+    /// placeholders are explicitly ALLOWED it emits a WARN naming them — so a
+    /// production misconfiguration that sets MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 is
+    /// loud in the logs instead of silent (the historical admin123-in-prod incident).
+    /// The Err wording is delegated to `check_dev_credentials` (zero divergence).
+    pub fn guard_dev_credentials(&self, allow_dev: bool) -> Result<(), String> {
+        self.check_dev_credentials(allow_dev)?;
+        if allow_dev {
+            let found = self.dev_credentials_present();
+            if !found.is_empty() {
+                tracing::warn!(
+                    "dev placeholder accounts active ({}): dev only — production must unset MEDIASERVO_ALLOW_DEV_CREDENTIALS",
+                    found.join(", ")
+                );
+            }
+        }
+        Ok(())
+    }
+
     /// Serialize to YAML file content (inverse of from_yaml format).
     fn to_yaml(&self) -> Result<String, CoreError> {
         let inner = self.lock_read();
@@ -463,6 +483,67 @@ mod tests {
             "accounts:\n  carol:\n    password_hash: \"{hash}\"\n    role: operator\n    vehicles: [\"ms-car1\"]\n"
         );
         AccountRegistry::from_yaml(&yaml).unwrap()
+    }
+
+    #[test]
+    fn guard_blocks_dev_placeholders_when_not_allowed() {
+        let reg = dev_registry();
+        let e = reg.guard_dev_credentials(false).unwrap_err();
+        assert!(e.contains("DEVELOPMENT CREDENTIALS DETECTED"));
+        assert!(e.contains("admin"));
+    }
+
+    #[test]
+    fn guard_empty_registry_ok_without_warn() {
+        let reg = test_registry(); // carol/s3cret — not a dev placeholder
+        assert!(reg.guard_dev_credentials(false).is_ok());
+        assert!(reg.dev_credentials_present().is_empty());
+    }
+
+    #[test]
+    fn dev_credentials_present_matches_by_hash_not_username() {
+        // Same username "admin" but a NON-placeholder hash -> not detected.
+        let hash = hash_password("admin", "a-real-password");
+        let yaml = format!("accounts:\n  admin:\n    password_hash: \"{hash}\"\n    role: admin\n");
+        let reg = AccountRegistry::from_yaml(&yaml).unwrap();
+        assert!(reg.dev_credentials_present().is_empty());
+        // The placeholder hashes ARE detected (existing dev_registry: admin + operator).
+        assert_eq!(dev_registry().dev_credentials_present(), vec!["admin", "operator"]);
+    }
+
+    #[test]
+    fn guard_allowed_emits_warn_naming_accounts() {
+        use std::sync::{Arc, Mutex};
+        #[derive(Clone)]
+        struct Cap(Arc<Mutex<Vec<u8>>>);
+        impl std::io::Write for Cap {
+            fn write(&mut self, b: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(b);
+                Ok(b.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Cap {
+            type Writer = Cap;
+            fn make_writer(&'a self) -> Cap {
+                self.clone()
+            }
+        }
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let sub = tracing_subscriber::fmt()
+            .with_writer(Cap(buf.clone()))
+            .with_ansi(false)
+            .finish();
+        let reg = dev_registry();
+        tracing::subscriber::with_default(sub, || {
+            assert!(reg.guard_dev_credentials(true).is_ok());
+        });
+        let out = String::from_utf8(buf.lock().unwrap().clone()).unwrap();
+        assert!(out.contains("dev placeholder accounts active"), "WARN emitted: {out}");
+        assert!(out.contains("admin"), "WARN names the account: {out}");
+        assert!(out.contains("WARN"), "level is WARN: {out}");
     }
 
     #[test]
