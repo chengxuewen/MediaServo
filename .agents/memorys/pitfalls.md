@@ -1985,3 +1985,64 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **解法**: 取证 install 行为三源对账：manifest（仅文件型）+ `--install` 输出的 STATUS 行（swap leg 有 "staged via swap install"）+ 落地现场 mtime/md5。
 - **验证**: tail install 输出找 STATUS + `ls` 落地物对账。
 - **禁止**: 拿 install_manifest 当 install 全量证据。
+
+
+## PIT-241: Dockerfile 全局 ARG 必须在首个 FROM 之前（FROM 插值盲区）(2026-11-19)
+
+**症状**: `docker build -f Dockerfile.tree` 报 `ERROR: failed to solve: base name (${BUILDER_IMAGE}) should not be blank`——ARG 已声明且带默认值，FROM 仍取空。连错两次（先以为"ARG 放使用点之前即可"）。
+
+**根因**: FROM 行插值只认**首个 FROM 之前**声明的全局 ARG；放在 `FROM scratch AS wrapcache` 哨兵之后的 ARG 不参与后续 FROM 插值（BuildKit 实测，dockerfile2llb 行为）。
+
+**解法**: 全局 ARG（BUILDER_IMAGE/BRAND 等）一律置于文件头**所有 FROM 之前**；进 stage 内使用需在 stage 内重新 `ARG` 声明。
+
+**验证**: `docker build --check -f <file> .` 无警告 + 实际构建 FROM 解析成功；`grep -n "^FROM\|^ARG" <file>` 确认全局 ARG 行号先于首个 FROM。
+
+**禁止**: 把全局 ARG 放在两个 FROM 之间"靠近使用点"。
+
+## PIT-242: compose `${VAR:?}` fail-fast 同样拦截 `docker compose config`(2026-11-19)
+
+**症状**: CI/脚本里 `docker compose -f docker-compose.yml config --quiet` 校验直接报 `required variable TAG is missing a value` 退出——compose 文件本身语法没问题。docker.yml 校验步自 B3.4 引入 `${TAG:?}` 起潜在破损，数日后才暴露。
+
+**根因**: `${VAR:?}` 插值发生在 config 解析期，变量未设即中止——它不只拦 `up`，也拦一切读取面的 `config`。
+
+**解法**: 结构校验前喂哑变量（`TAG=ci MEDIASERVO_SFU_ANNOUNCED_IP=127.0.0.1 MEDIASERVO_ADMIN_PASSWORD=ci docker compose ... config --quiet`）或 `--env-file` 指向模板。
+
+**验证**: 无变量跑 config rc≠0、带哑变量 rc=0，两者都符合预期才算理解到位。
+
+## PIT-243: 编辑工具"save failed: unknown"可能是幽灵写入——盲重试产重复(2026-11-19)
+
+**症状**: SearchReplace 对 PLAN.md 报 `save file failed, reason: unknown`，重试一次仍报错——实际两次都已落盘，§5b 出现同一长条目双份；另一文件（entrypoint.sh 头注）同款"失败"实已写入。
+
+**根因**: 工具保存失败的报错与实际写入不原子对应（写盘成功但回执失败），错误不可作为"未写入"的证据。
+
+**解法**: 报此错后**先取证再重试**：`grep -c "<新插入锚文本>" <file>`——>0 即已写入（去重/收尾），==0 才重试；大文件/长文本优先 python `open().write()` 原子重写绕开。
+
+**验证**: 重试前必须留一条 grep 计数输出；提交前 `git diff` 查重复行对。
+
+## PIT-244: 本地基像缺失时 FROM 退走 registry 镜像加速器 → 403 误导读(2026-11-19)
+
+**症状**: `build image prod` 失败于 `failed to resolve source metadata for docker.io/library/msrtc-builder:v1 ... docker.xuanyuan.me ... 403 Forbidden`——像网络问题，实为本地 `msrtc-builder:v1` 已消失（去向未明，环境事件）。
+
+**根因**: FROM 解析先查本地、缺失即按 daemon mirrors 走远端；本地专用基像（never pushed）在远端必然 403，报错误导读为"镜像源故障"。
+
+**解法**: 树镜像构建前预检基像：`docker image inspect <brand>-builder:v1` 缺失则先 `build image dev`（层缓存热，秒级）再 prod。
+
+**验证**: 构建脚本/人工先跑 inspect（rc=0）再 build。
+
+## PIT-245: COPY 入口脚本 ≠ 接线——builder entry 自 B2 起 COPY 未 ENTRYPOINT(2026-11-19)
+
+**症状**: `docker/builder/entrypoint.sh`（原 builder-entry.sh）被 COPY 进镜像却从未出现在 Config.Entrypoint——死资产数月未发现；dev up 侥幸可用是因为等价初始化（sshd host key/mkdir）在 build 期 RUN 里另做了一份。
+
+**根因**: Dockerfile 写了 COPY+chmod 但漏了 `ENTRYPOINT`；CMD 直跑掩盖了缺接线（无报错、功能等价）。
+
+**解法**: 任何镜像 COPY entry 脚本后必须显式 `ENTRYPOINT [...]`；接线后跑透传验证 `docker run --rm <img> echo ok` 期望原样输出。
+
+**验证**: `docker inspect <img> --format '{{.Config.Entrypoint}}'` 非空 + 透传 echo 输出。
+
+## PIT-246: 并行会话 git 礼仪——锁等待勿删、指针包含性验证(2026-11-19)
+
+**症状**: 父仓提交撞 `index.lock: File exists`（并行会话正持锁）；另一刻我 staged 的指针被并行 bump 越过（其提交先落，指向我子仓提交之前的 rev）。
+
+**解法**: ① 撞锁→sleep 重试，**绝不删他人锁**；② 提交前后各跑 `git -C <sub> merge-base --is-ancestor <mine> HEAD` 验包含性——指针被并行前进不慌，只要我的子仓提交是其祖先即无回退；混合 hunk 用 `git apply --cached --unidiff-zero` 只暂存自己的行。
+
+**验证**: 提交后 ancestry 断言输出 ✓ 再收工。

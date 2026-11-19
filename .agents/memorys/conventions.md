@@ -748,3 +748,16 @@ Checks:
 - 禁 Unicode 几何 glyph/emoji 作图标（跨平台变形/⚙变emoji/⚿缺字/不吃 currentColor/光学不齐）；一律 SVG sprite（stroke、currentColor、统一盒尺寸 place-items center）。
 - 一项一图标、语义唯一（禁重复 glyph 表不同功能）；语义对照：overview=gauge/monitor=屏阵/recordings=库播放/intercom=mic/meeting=users/remote=desktop/tower=headset/devices=camera/rooms=door/sessions=plug/streams=waveform/config=sliders/keys=key/audit=list-check/settings=gear/signaling=exchange。
 - Verify: nav/工具栏图标断言（全 SVG、href 唯一、无文本 glyph）。
+
+
+## C57: 镜像品牌解析链——禁止新增 `:-msrtc` 硬编码回退(2026-11-19)
+
+**约束**: 镜像动词（build image / package image / dev up 的 DEV_NAME/DEV_IMAGE）品牌一律经 `_ms_image_brand()`：env `MEDIASERVO_BRAND`（父壳注入，`./msrtc.sh <verb>` 即品牌入口）> `out/server/bin` 派生（首个 `*-server`，deploy 面 hunt 内联）> 上游 `mediaservo`（独立子仓缺省）。独立仓出 `mediaservo-*`，品牌工作区出 `<brand>-*`。唯一豁免：`data` 动词 + docker-compose.yml `name:` 的 project 名对（msrtc 工作区产物集内部一致，成对存在）。
+
+**验证**: 镜像动词函数域零出现——`sed -n '/_ms_build_image()/,/^}/p;/_ms_package_image()/,/^}/p;/DEV_IMAGE=/p' mediaservo.sh | grep -c 'MEDIASERVO_BRAND:-msrtc'` == 0（合法残留仅 data 面 `_ms_data_brand` 1 处 + docker-compose.yml 多处插值[msrtc 产物集豁免对]）。新增镜像动词 PR 必查此项。
+
+## C58: docker/ = 每镜像目录；builder tag v1 三点契约；产物一根一规(2026-11-19)
+
+**约束**: ① 新镜像 = `docker/<name>/{Dockerfile,entrypoint.sh}`（目录名=镜像名=契约词，K8s/Debian 形态；未来分布式角色 ingress/media-node 即 `docker/<role>/`，PLAN §6d 预留位）；② builder tag `v1` = 三点契约（docker/server/Dockerfile 的 `FROM ${BUILDER_IMAGE}` / `build image dev` / `dev up` 默认），仅工具链语义变更（编译器/cmake pin/node/镜像源姿态）手动 bump v1→v2 且三点同笔，**绝不随产品版本**；`build image --tag` 仅 prod 面，dev 面显式拒绝；③ 产物一根一规 `<治理根>/out/<face>`（治理根=MSRTC_OUT_ROOT 或仓根）；package 缺省 `<out-root>/packages`，`dist/` 已退役。
+
+**验证**: `ls docker/` 每子目录恰含 Dockerfile+entrypoint.sh；`grep -c 'ROOT/dist' mediaservo.sh`==0；`grep -n 'builder:v1' mediaservo.sh Dockerfile 两侧` 点数=契约点。裁决与选项分析存 PLAN §5b（C-form/branding/single-root 三条）。
