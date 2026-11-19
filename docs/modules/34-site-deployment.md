@@ -198,8 +198,8 @@ docker compose --env-file .env stop      # takes the SIGINT path, ~1s exit 0
 
 Resources: only `mem_limit` is set (CPU unlimited for RTP bursts); the default
 comes from a standard-tier (10 rooms / 20 peers at 720p) load measurement
-(peak × 1.3 rounded up to 512MB), written back into the compose default and
-`29-operations.md`.
+(peak × 1.3 rounded up to 512MB) — see the MEM_LIMIT ladder in `.env.example`
+before raising it.
 
 ## 7. Rollback Drill (image + configuration level)
 

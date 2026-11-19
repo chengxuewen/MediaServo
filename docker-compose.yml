@@ -1,60 +1,57 @@
-# Production docker-compose — tree-packaged single container (container-build-rework B3.4)
+# Production stack — one all-in-one container: mediaservo-server + caddy (web
+# gateway) + oxmgr (process manager, PID 1). caddy serves the browser on 8080;
+# there is no separate proxy container.
 #
-# ONE image runs the whole deploy tree: mediaservo-server + caddy + oxmgr (PID1).
-# The standalone compose `proxy` service retires (R12=A): caddy lives in-container
-# under oxmgr and serves the browser on 8080; the root Caddyfile is superseded by
-# the tree-rendered etc/Caddyfile.
-#
-# Site invocation face = bare `docker compose` (no CLI/pixi dependency on site):
-#   cp .env.example .env   # fill the four contract vars
+# Site usage (nothing but docker compose needed):
+#   cp .env.example .env    # fill the four required variables
 #   docker compose --env-file .env up -d
-# The R7 up-guard (explicit --env / running-state confirm) is a CLI-side convenience;
-# the `${VAR:?}` fail-fast below is the site-side floor (R6=B).
+# The ${VAR:?} interpolations below refuse to start on an empty required
+# variable — that fail-fast is intentional.
 #
-# .env contract (four vars, all pass-through): TAG + MEDIASERVO_SFU_ANNOUNCED_IP
-#   + MEDIASERVO_ADMIN_PASSWORD + SSH_PORT. MEDIASERVO_BRAND defaults to mediaservo
-#   (the upstream product brand; a parent workspace injects its own; volume paths interpolate the
-#   SAME brand so the mount never goes dead — R15 / P2-C2). MEM_LIMIT is an
-#   optional tuning knob (R18 load test sets the measured default).
+# .env contract (four required vars, passed through to the container): TAG,
+#   MEDIASERVO_SFU_ANNOUNCED_IP, MEDIASERVO_ADMIN_PASSWORD, SSH_PORT.
+#   MEDIASERVO_BRAND defaults to mediaservo — override only for a
+#   differently-branded image (volume paths interpolate the SAME brand, so
+#   mounts never go dead). MEM_LIMIT is an optional capacity knob (see the
+#   recommended ladder in .env.example).
 name: ${MEDIASERVO_BRAND:-mediaservo}
 services:
   server:
     image: ${MEDIASERVO_BRAND:-mediaservo}-server:${TAG:?set TAG in .env — explicit image pin for rollback}
     ports:
-      # Host-side ports interpolate (defaults = the R16 surface, site unchanged);
-      # the R8 smoke shifts them via env for project isolation. Container targets
-      # stay fixed (the tree listens on these).
-      - "${WEB_PORT:-8080}:8080"                       # browser/caddy entry (R16=A)
-      - "${AGENT_PORT:-9800}:9800"                     # host-agent direct /ws (D-2=B preserved, R16)
-      - "${SSH_PORT:-2222}:22"                         # ssh maintenance (R19; host 2222 avoids CentOS-8 host-sshd)
-      - "${SFU_PORT:-20000}:20000/udp"                 # SFU RTC
-      - "${SFU_PORT_RANGE:-40000-40100}:40000-40100/udp"  # SFU RTC port range
+      # Host-side ports are env-overridable (useful for running isolated stacks
+      # on one host); container-side targets are fixed.
+      - "${WEB_PORT:-8080}:8080"                       # browser entry (admin/voice/API/WS)
+      - "${AGENT_PORT:-9800}:9800"                     # host-agent direct /ws
+      - "${SSH_PORT:-2222}:22"                         # ssh maintenance (2222 avoids the CentOS host sshd)
+      - "${SFU_PORT:-20000}:20000/udp"                 # SFU media (single-port mux)
+      - "${SFU_PORT_RANGE:-40000-40100}:40000-40100/udp"  # legacy range, unused by the current model — safe to drop
     environment:
       RUST_LOG: info
-      # brand-derived path single source (R15): entrypoint ETC + volume mount point
-      # resolve the SAME value; default mediaservo matches the upstream image.
+      # Single brand source: the entrypoint paths and the volume mounts below
+      # resolve the same value.
       MEDIASERVO_BRAND: ${MEDIASERVO_BRAND:-mediaservo}
-      # R6=B fail-fast on empty: multi-NIC sites MUST explicit-fill (auto-detect
-      # concatenates all IPs but the SFU takes the first only — sfu.rs:481-486 —
-      # silent ICE failure). Auto-detect is dev-only convenience.
+      # Multi-NIC sites MUST fill this in .env with a client-reachable IP:
+      # auto-detection concatenates all NIC IPs but the SFU uses only the first,
+      # which on multi-NIC hosts is often an unreachable internal interface —
+      # signaling works, media silently fails.
       MEDIASERVO_SFU_ANNOUNCED_IP: ${MEDIASERVO_SFU_ANNOUNCED_IP:?set MEDIASERVO_SFU_ANNOUNCED_IP in .env — site-reachable IP, multi-NIC explicit-fill}
       # first-boot admin bootstrap (init step 3); persisted in the etc volume.
       MEDIASERVO_ADMIN_PASSWORD: ${MEDIASERVO_ADMIN_PASSWORD:?set MEDIASERVO_ADMIN_PASSWORD in .env — first-boot admin account}
-    # R13=C: mem_limit ONLY (host protection); CPU unset (RTP bursts free).
-    # 512m = R18 Small-tier MEASURED (2026-11-18): 10 rooms/20 peers 720p H.264,
-    # steady 10min + burst 2min (30 peers), cgroup memory.peak 56.81MiB ->
-    # peak x1.3 round-up 512MB = 512MiB (29-operations.md). Larger tiers override
-    # MEM_LIMIT per Capacity Planning.
+    # Memory limit only (host protection); CPU is unlimited so RTP bursts stay
+    # smooth. The 512m default is MEASURED at the standard tier (10 rooms /
+    # 20 peers @720p: peak 56.81 MiB, ~9x headroom); see the MEM_LIMIT ladder
+    # in .env.example before raising it.
     mem_limit: ${MEM_LIMIT:-512m}
     restart: unless-stopped
-    # Named volumes at the brand-derived tree paths (R15). copy-up preserves the
-    # image ownership (mediaservo); the entrypoint init is the first-boot writer.
+    # Named volumes at the brand-derived tree paths; the first-boot init is the
+    # single writer that seeds secrets/configs into the etc volume.
     volumes:
       - mediaservo-data:/opt/${MEDIASERVO_BRAND:-mediaservo}/etc
       - mediaservo-recordings:/opt/${MEDIASERVO_BRAND:-mediaservo}/recordings
-    # healthcheck inherited from the image (R17=B: curl -f localhost:8080/health,
-    # interval 30s / timeout 5s / start_period 60s / retries 3). oxmgr liveness =
-    # PID1-death semantics (R13). STOPSIGNAL SIGINT baked in the image (graceful stop).
+    # The healthcheck is inherited from the image (curl localhost:8080/health;
+    # 30s interval, 60s start period). The image's stop signal is SIGINT, so
+    # `docker compose stop` shuts down gracefully (~1s, exit 0).
 
 volumes:
   mediaservo-data:
