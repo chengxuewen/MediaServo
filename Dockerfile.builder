@@ -125,8 +125,9 @@ RUN chmod 755 /usr/local/bin/builder-entry
 # mirror posture), never per product release. Manual bump, all points together
 # (oxmgr-archive precedent: the literal IS the version source).
 ARG BUILDER_TAG=v1
+ARG BUILDER_NAME=msrtc-builder
 ARG GIT_REV=unknown
-LABEL org.opencontainers.image.title="msrtc-builder" \
+LABEL org.opencontainers.image.title="${BUILDER_NAME}" \
       org.opencontainers.image.version="${BUILDER_TAG}" \
       org.opencontainers.image.revision="${GIT_REV}" \
       org.opencontainers.image.description="MediaServo native toolchain image (gcc-10 + rust + cmake 3.31 + node20/pnpm + caddy; container-build-rework B2)"

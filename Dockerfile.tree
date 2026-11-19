@@ -18,6 +18,15 @@
 # Without the wrapcache context the sentinel stays empty and upstream wrap
 # download behavior stays in charge (CI/GitHub posture, product-Dockerfile parity).
 
+# Brand + builder image are CLI-injected (R15 dual-mode: `build image` passes
+# --build-arg BRAND=<resolved brand> + BUILDER_IMAGE=<brand>-builder:v1 — env
+# from the parent shell > out-tree derivation > upstream mediaservo). Defaults
+# keep the msrtc workspace's bare `docker build -f Dockerfile.tree .` working.
+# NOTE: must precede the FIRST FROM — FROM-line interpolation only sees args
+# declared above the first FROM (measured: after a scratch-FROM -> blank base).
+ARG BUILDER_IMAGE=msrtc-builder:v1
+ARG BRAND=msrtc
+
 # ---- build-context sentinels (overridden by --build-context; empty otherwise) ----
 FROM scratch AS wrapcache
 FROM scratch AS oxmgrpkg
@@ -26,7 +35,8 @@ FROM scratch AS oxmgrpkg
 # Toolchain-generation tag (three-point contract with `build image dev` + the
 # `dev up` default; manual bump v1->v2 on semantic toolchain changes only —
 # never per product release; see mediaservo.sh _ms_build_image governance).
-FROM msrtc-builder:v1 AS treebuild
+FROM ${BUILDER_IMAGE} AS treebuild
+ARG BRAND
 WORKDIR /workspace
 COPY . /workspace
 
@@ -60,8 +70,8 @@ RUN --mount=from=wrapcache,target=/wrapcache,ro \
     if [ -n "$(ls -A /wrapcache 2>/dev/null)" ]; then \
         export MESON_PACKAGE_CACHE_DIR=/wrapcache MEDIASOUP_LOCAL_DEV=1; \
     fi; \
-    MEDIASERVO_NO_PIXI=1 CMAKE_BIN=/usr/local/bin/cmake MEDIASERVO_BRAND=msrtc \
-        ./mediaservo.sh deploy server --release --prefix /opt/msrtc
+    MEDIASERVO_NO_PIXI=1 CMAKE_BIN=/usr/local/bin/cmake MEDIASERVO_BRAND=${BRAND} \
+        ./mediaservo.sh deploy server --release --prefix /opt/${BRAND}
 
 # Secrets + render-state OUT of the image (fresh-staging rule, PLAN §2.4④).
 # The deploy-time init seeded etc/ from config/ — dev PSK/JWT + dev announced
@@ -74,13 +84,13 @@ RUN --mount=from=wrapcache,target=/wrapcache,ro \
 # oxfile would never pick up the runtime env — PIT-160 first-writer-wins skips
 # an existing file — so run/oxfile.toml{,.bak} must not ride the image. etc/ is
 # left as empty scaffolding: init is the single first-boot writer.
-RUN rm -f /opt/msrtc/etc/server.yaml /opt/msrtc/etc/.env \
-          /opt/msrtc/etc/accounts.yaml /opt/msrtc/etc/devices.yaml \
-          /opt/msrtc/etc/Caddyfile \
-          /opt/msrtc/run/oxfile.toml /opt/msrtc/run/oxfile.toml.bak && \
-    mkdir -p /opt/msrtc/etc /opt/msrtc/run/logs /opt/msrtc/recordings && \
-    test ! -e /opt/msrtc/etc/server.yaml && \
-    test ! -e /opt/msrtc/run/oxfile.toml
+RUN rm -f /opt/${BRAND}/etc/server.yaml /opt/${BRAND}/etc/.env \
+          /opt/${BRAND}/etc/accounts.yaml /opt/${BRAND}/etc/devices.yaml \
+          /opt/${BRAND}/etc/Caddyfile \
+          /opt/${BRAND}/run/oxfile.toml /opt/${BRAND}/run/oxfile.toml.bak && \
+    mkdir -p /opt/${BRAND}/etc /opt/${BRAND}/run/logs /opt/${BRAND}/recordings && \
+    test ! -e /opt/${BRAND}/etc/server.yaml && \
+    test ! -e /opt/${BRAND}/run/oxfile.toml
 
 # ---- stage 2: runtime (R20 debian:bookworm-slim) ----
 FROM debian:bookworm-slim
@@ -112,17 +122,18 @@ RUN if [ "$MIRROR" = "cn" ]; then \
     && mkdir -p /var/run/sshd
 # Brand identity of THIS image (R15): the entrypoint derives the tree prefix
 # /opt/${MEDIASERVO_BRAND} from it; compose may override for a standalone build.
-ENV MEDIASERVO_BRAND=msrtc
-COPY --from=treebuild /opt/msrtc /opt/msrtc
+ARG BRAND
+ENV MEDIASERVO_BRAND=${BRAND}
+COPY --from=treebuild /opt/${BRAND} /opt/${BRAND}
 # Role-facing manuals baked into the image (the image alone is self-documenting;
 # the package artifact set also ships them as DEPLOY-MANUAL.md / OPS-MANUAL.md).
-COPY --from=treebuild /workspace/docs/modules/34-site-deployment.md /usr/local/share/doc/msrtc/DEPLOY-MANUAL.md
-COPY --from=treebuild /workspace/docs/modules/35-container-ops-manual.md /usr/local/share/doc/msrtc/OPS-MANUAL.md
+COPY --from=treebuild /workspace/docs/modules/34-site-deployment.md /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md
+COPY --from=treebuild /workspace/docs/modules/35-container-ops-manual.md /usr/local/share/doc/${BRAND}/OPS-MANUAL.md
 COPY docker/tree-entrypoint.sh /usr/local/bin/tree-entrypoint.sh
 # Named-volume copy-up preserves image ownership: pre-create + chown the tree
 # so the mediaservo daemon can write etc/run after the entrypoint drops privs.
 RUN chmod 755 /usr/local/bin/tree-entrypoint.sh && \
-    chown -R mediaservo:mediaservo /opt/msrtc
+    chown -R mediaservo:mediaservo /opt/${BRAND}
 # root runs the entrypoint (volume writes + sshd port-22 bind); the daemon is
 # privilege-dropped via setpriv at the entrypoint's exec (PID-1 signal fidelity).
 USER root

@@ -95,6 +95,24 @@ fi
 # of executing (verb-matrix hook; production default off).
 # =============================================================================
 _msvc_run() { echo "$ $*"; if [ "${MEDIASERVO_DRY_RUN:-0}" = 1 ]; then return 0; fi; "$@"; }
+_ms_image_brand() {
+    # Image-brand resolution (container-build-rework, R15 dual-mode): parent-shell
+    # env (msrtc.sh injects MEDIASERVO_BRAND) > derived from the assembled
+    # out/server/bin tree (the deploy face's _ms_derive_brand_server hunt,
+    # inlined here because that function is defined below the early compose/dev
+    # case block which runs before the parser reaches it) > upstream mediaservo.
+    # Consequence: standalone MediaServo emits mediaservo-* images; a branded
+    # parent workspace (msrtc, ...) emits <brand>-* — same literal either way.
+    if [ -n "${MEDIASERVO_BRAND:-}" ]; then echo "$MEDIASERVO_BRAND"; return 0; fi
+    local d="${MSRTC_OUT_ROOT:-$ROOT/out}/server/bin" f
+    for f in $(ls -1 "$d" 2>/dev/null | sort); do
+        case "$f" in
+            mediaservo-server) continue ;;
+            *-server) echo "${f%-server}"; return 0 ;;
+        esac
+    done
+    echo mediaservo
+}
 _msvc_compose_file() { if [ "$1" = prod ]; then echo docker-compose.yml; else echo docker-compose.dev.yml; fi; }
 _msvc_announced_ips() {
     local out
@@ -232,11 +250,11 @@ case "${1:-}" in
         # bind-mounted; web = the vite hot-reload lane.
         shift
         sub="${1:-}"; [ $# -gt 0 ] && shift
-        DEV_NAME="${DEV_NAME:-msrtc-dev}"
+        DEV_NAME="${DEV_NAME:-$(_ms_image_brand)-dev}"
         DEV_SSH_PORT="${DEV_SSH_PORT:-2222}"
-        # builder tag v1 = three-point contract (build image dev / Dockerfile.tree
-        # stage1 FROM / this default); manual bump on semantic toolchain changes.
-        DEV_IMAGE="${DEV_IMAGE:-${MEDIASERVO_BRAND:-msrtc}-builder:v1}"
+        # builder tag = _ms_image_brand resolution + generation v1 (three-point
+        # contract: build image dev / Dockerfile.tree FROM / this default).
+        DEV_IMAGE="${DEV_IMAGE:-$(_ms_image_brand)-builder:v1}"
         case "$sub" in
             -h|--help)
                 cat <<'DVEOF'
@@ -249,7 +267,7 @@ at /workspace/3rdparty/MediaServo); dev user uid 1000, key-only ssh.
   down    stop + remove the resident container
   ssh [-- cmd]   ssh into the container (key auth)
   web [-- args]  vite dev server (hot reload; absorbed legacy dev web)
-Env: DEV_NAME (msrtc-dev), DEV_SSH_PORT (2222), DEV_IMAGE (msrtc-builder:v1),
+Env: DEV_NAME (<brand>-dev), DEV_SSH_PORT (2222), DEV_IMAGE (<brand>-builder:v1),
      DEV_PUBKEY (default ~/.ssh/id_ed25519.pub, fallback id_rsa.pub).
 DVEOF
                 exit 0 ;;
@@ -559,6 +577,9 @@ auto-wire as build contexts when present.
          for the ssh-resident dev container (mediaservo dev up). FIXED tag —
          three-point contract (Dockerfile.tree FROM / dev up / here); manual
          bump v1->v2 on semantic toolchain changes, --tag is prod-only.
+  <brand> resolution: env MEDIASERVO_BRAND (the parent shell injects it —
+         ./msrtc.sh build image ... is the branded entry) > derived from
+         out/server/bin (first *-server) > upstream mediaservo (standalone).
   --mirror cn|upstream   apt/cargo/pip mirror posture (default cn; upstream=CI)
 Examples:
   mediaservo build image prod                 # msrtc-server:0.1.3
@@ -571,18 +592,27 @@ BIEOF
     done
     case "$face" in prod|dev) ;; *) echo "ERROR: build image: face must be prod|dev (got '${face:-}')" >&2; return 2 ;; esac
     _ms_check docker "install docker and start the daemon"
-    local brand="${MEDIASERVO_BRAND:-msrtc}" t0 image
+    local brand t0 image
+    brand="$(_ms_image_brand)"   # env (parent injects) > out-tree derivation > mediaservo
     t0=$(date +%s)
     if [ "$face" = prod ]; then
         [ -n "$tag" ] || tag=$(_ms_crate_version mediaservo-server)
         image="${brand}-server:${tag}"
         local bctx=() wrap="$ROOT/../../3rdparty/mediasoup-worker" ox="$ROOT/../../3rdparty/oxmgr"
-        [ -d "$wrap" ] && bctx+=(--build-context "wrapcache=$(cd "$wrap" && pwd -P)")
-        [ -d "$ox" ] && bctx+=(--build-context "oxmgrpkg=$(cd "$ox" && pwd -P)")
-        echo "\$ docker build -f Dockerfile.tree -t $image --build-arg MIRROR=$mirror ${bctx[*]:-} ."
+        [ -d "$wrap" ] && bctx+=(--build-context "wrapcache=$(cd "$wrap" && pwd -P)") \
+            || echo "WARN: pinned wrap layer $wrap absent — the worker's meson wraps resolve online (CI posture; mainland stalls likely)" >&2
+        if [ ! -d "$ox" ]; then
+            echo "ERROR: build image prod needs the pinned parent layer $ox (the oxmgrpkg COPY hard-fails without it) — the tree-packaged image is a PARENT-workspace deliverable (R2: materials ride the parent git tree); run it from the parent shell (./msrtc.sh build image prod). Standalone MediaServo builds native trees (build/deploy server), not the container image." >&2
+            return 1
+        fi
+        bctx+=(--build-context "oxmgrpkg=$(cd "$ox" && pwd -P)")
+        echo "\$ docker build -f Dockerfile.tree -t $image --build-arg MIRROR=$mirror --build-arg BRAND=$brand --build-arg BUILDER_IMAGE=${brand}-builder:v1 ${bctx[*]:-} ."
         docker build -f Dockerfile.tree -t "$image" \
             --build-arg "GIT_REV=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
-            --build-arg "MIRROR=$mirror" "${bctx[@]}" "$ROOT" || return $?
+            --build-arg "MIRROR=$mirror" \
+            --build-arg "BRAND=$brand" \
+            --build-arg "BUILDER_IMAGE=${brand}-builder:v1" \
+            "${bctx[@]}" "$ROOT" || return $?
         docker tag "$image" "${brand}-server:latest"
     else
         # Toolchain-generation tag: v1 is a THREE-POINT CONTRACT — Dockerfile.tree
@@ -602,6 +632,7 @@ BIEOF
         echo "\$ docker build -f Dockerfile.builder -t $image --build-arg MIRROR=$mirror ."
         docker build -f Dockerfile.builder -t "$image" --build-arg "MIRROR=$mirror" \
             --build-arg "BUILDER_TAG=v1" \
+            --build-arg "BUILDER_NAME=${brand}-builder" \
             --build-arg "GIT_REV=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
             --build-arg "HTTP_PROXY=${HTTP_PROXY:-${http_proxy:-}}" \
             --build-arg "HTTPS_PROXY=${HTTPS_PROXY:-${https_proxy:-}}" \
@@ -1043,7 +1074,8 @@ _ms_package() {  # $1=target $2=dist $3=brand $4=release(0/1)
 # deferred); the tarball IS the delivery channel for restricted offline sites.
 # =============================================================================
 _ms_package_image() {
-    local dist="" tag="" brand="${MEDIASERVO_BRAND:-msrtc}"
+    local dist="" tag="" brand
+    brand="$(_ms_image_brand)"   # env (parent injects) > out-tree derivation > mediaservo
     while [ $# -gt 0 ]; do
         case "$1" in
             --dist) dist="${2:?package image --dist needs a value}"; shift 2 ;;
