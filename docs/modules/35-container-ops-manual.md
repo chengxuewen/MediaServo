@@ -203,6 +203,7 @@ docker compose --env-file .env up -d
 | admin login fails | was `MEDIASERVO_ADMIN_PASSWORD` set on first boot? container logs have the setup-token fallback |
 | ssh unreachable | was a public key delivered to `etc/ssh/authorized_keys` (WARN in logs)? is `SSH_PORT` right? |
 | Container won't start | `docker compose ... logs`; port conflicts (8080/9800/2222); disk full |
+| startup log shows **"dev placeholder accounts active"** | a dev-only toggle is enabled (`MEDIASERVO_ALLOW_DEV_CREDENTIALS`) or dev accounts were mounted into the etc volume — production MUST unset it and use the admin bootstrap instead (DEPLOY-MANUAL §5) |
 | Data lost / secrets changed | are the `etc`/`recordings`/`run/logs` volumes mounted (§4)? no volumes = regenerated on every recreate |
 
 ## 9. First-Install Essentials (details in DEPLOY-MANUAL.md)
