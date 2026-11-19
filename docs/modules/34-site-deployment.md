@@ -1,30 +1,27 @@
 # 34 — 现场部署手册（离线生产镜像）· 部署工程师
 
-> container-build-rework B3.7 / P2-H5。**本手册 = 部署工程师手册**（装机/内核调优/
-> 防火墙/SELinux/离线 load→up→验证/凭据交付/回滚演练），取代
-> `31-upgrade-migration.md` 的容器章节用于现场部署（31 保留为升级/迁移参考）。
-> 随包发布名：`DEPLOY-MANUAL.md`。**日常运维（起/验/日志/备份/排障/升级回滚/速查卡）
-> 见同包《运维手册》`OPS-MANUAL.md`**（`35-container-ops-manual.md`）。
-> 适用产物 = `package image` 离线产物集；目标环境 = 受限内网 CentOS 8 现场（无外网、无 registry）。
-> 语言规范 R22：现场手册中文。
+> **本手册 = 部署工程师手册**（首次安装与上线：系统调优/防火墙/SELinux/离线
+> 加载→启动→验证/凭据交付/回滚演练）；随交付包发布名 `DEPLOY-MANUAL.md`。
+> **日常运维（起/验/日志/备份/排障/升级回滚/速查卡）见同包《运维手册》
+> `OPS-MANUAL.md`**。
+> 适用产物 = 离线交付产物集（整目录）；目标环境 = 受限内网 CentOS 8 现场
+> （无外网、无镜像仓库）。
 
 ## 0. 产物集与边界
 
-`package image --dist <DIR>` 产出整目录 `<DIR>/msrtc-server-image-<tag>/`（每 tag
-一目录，与同目录下的原生 tarball 隔离；父壳 `./msrtc.sh package image` 默认落
-`out/packages/`）：
+交付物 = 整目录 `msrtc-server-image-<tag>/`（每版本一目录，拷贝该目录即完成交付）：
 
 | 文件 | 用途 |
 |---|---|
 | `msrtc-server-<tag>.tar` | `docker save` 镜像（双 tag：`<tag>` + `latest`） |
 | `SHA256SUMS` | tar 包 sha256 清单（交付对账） |
-| `docker-compose.yml` | 生产 compose（树镜像单容器，R12/R15/R16） |
+| `docker-compose.yml` | 生产编排（单容器：服务 + 网关 + 进程管理） |
 | `.env.example` | 四变量契约模板（拷贝为 `.env` 填写） |
-| `34-site-deployment.md` | 本手册 |
+| `DEPLOY-MANUAL.md` | 本手册 |
 
 **单容器拓扑**：`msrtc-server`（server + caddy + oxmgr PID1）。oxmgr 牧羊
 server/web 两进程；caddy 8080 服务浏览器，9800 直连 host-agent。**无独立 proxy
-容器**（R12 退役）。运行基底 debian:bookworm-slim（R20）。
+容器**（无独立代理容器）。运行基底 debian:bookworm-slim。
 
 **回滚边界 = 镜像 + 配置级**（`data restore` 挂账）：回滚靠旧 tar 重新 load +
 `.env` 的 `TAG` 重钉；数据卷不动。
@@ -61,15 +58,15 @@ EOF
 sysctl --system
 ```
 
-### 2.2 firewalld 端口表（R16/R19）
+### 2.2 firewalld 端口表
 
 | 端口 | 协议 | 用途 |
 |---|---|---|
 | 8080 | tcp | 浏览器/caddy 入口（admin/voice/API/WS 反代） |
-| 9800 | tcp | host-agent 直连 /ws（D-2=B） |
+| 9800 | tcp | host-agent 直连 /ws |
 | 20000 | udp | SFU RTC |
 | 40000-40100 | udp | SFU RTC 端口段 |
-| 2222 | tcp | ssh 维护口（`${SSH_PORT:-2222}:22`，R19） |
+| 2222 | tcp | ssh 维护口（`${SSH_PORT:-2222}:22`） |
 
 ```bash
 firewall-cmd --permanent --add-port=8080/tcp
@@ -113,18 +110,18 @@ docker compose --env-file .env up -d
 docker compose --env-file .env ps        # 期望 healthy
 ```
 
-### 3.1 多网卡硬规则（R6 / sfu.rs:481-486）
+### 3.1 多网卡硬规则
 
 **现场必须显式填 `MEDIASERVO_SFU_ANNOUNCED_IP` 为客户端可达的 IP**（公网/
 局域网）。自动探测会把所有网卡 IP 逗号拼接，但 SFU 只取**第一个**
 （`sfu.rs:481-486`）——多网卡下首 IP 常是不可达的内部口 → **静默 ICE 失败**
 （信令通、媒体不通）。自动探测仅供开发便利，现场禁用。compose 的
-`${VAR:?}` 空值 fail-fast 是底线（R6）。
+`${VAR:?}` 空值 fail-fast 是底线。
 
 ## 4. 部署验证
 
 ```bash
-# 健康（caddy 8080 复合探针，R17）
+# 健康（8080 复合探针：网关+路由+服务）
 curl --noproxy '*' -f http://<IP>:8080/health
 # admin / voice 内容判别（经 8080）
 curl --noproxy '*' -s http://<IP>:8080/admin  | grep -o '<title>[^<]*</title>'   # MediaServo Admin
@@ -147,7 +144,7 @@ curl --noproxy '*' -s -X POST http://<IP>:8080/api/auth/login \
 - **admin 密码**：`.env` 的 `MEDIASERVO_ADMIN_PASSWORD` 仅首启引导（init 写入
   `etc/accounts.yaml`，持久化在命名卷）。**交付后通过 admin API 轮换**
   （`POST /api/admin/accounts*` 热生效，C33）；轮换后 `.env` 里的旧密码不再
-  影响已存在账户（PIT-160 首写胜）。密码不出现在容器进程 env（entrypoint
+  影响已存在账户（首启唯一写者，之后改密以账户表为准）。密码不出现在容器进程 env（entrypoint
   init 后 unset）。
 - **ssh key**：key-only（密码登录禁用），mediaservo 用户（uid 1000，禁 root）。
   host key + `authorized_keys` 持久化在 etc 卷（`etc/ssh/`，**绝不烤进镜像**）。
@@ -163,12 +160,12 @@ curl --noproxy '*' -s -X POST http://<IP>:8080/api/auth/login \
   ```
 
   > 账户 shadow 字段为 `*`（禁密码但账户可用）——`useradd` 的 `!` 锁定态会被
-  > UsePAM no 的 sshd 拒绝 pubkey，镜像已 `usermod -p '*'` 修正（B3.3）。
+  > UsePAM no 的 sshd 拒绝 pubkey，镜像已修正账户阴影字段（`usermod -p '*'`）。
 
 ## 6. 运维
 
 ```bash
-# 备份（B3.6：prod 镜像自身 tar，无 alpine 依赖；卷按 compose project 标签发现）
+# 备份（用交付镜像自身的 tar，无外网依赖；卷按 compose project 标签发现）
 mediaservo data backup ./backup        # 需 CLI 环境；裸 docker 见下
 # 裸 docker 等价（无 CLI 现场）：
 docker run --rm --entrypoint sh -v msrtc_msrtc-data:/data:ro \
@@ -182,7 +179,7 @@ docker compose --env-file .env exec server sh -c 'tail -50 /opt/msrtc/run/logs/*
 docker compose --env-file .env stop      # 走 SIGINT，~1s exit 0
 ```
 
-资源：仅 `mem_limit`（R13，CPU 放开供 RTP 突发）；值由 R18 Small 档压测测定
+资源：仅设 `mem_limit`（CPU 不限，供 RTP 突发）；默认值由标准档（10 房/20 人 720p）压测测定
 （峰值×1.3 向上取整 512MB），写回 compose 默认 + `29-operations.md`。
 
 ## 7. 回滚演练（镜像 + 配置级）
