@@ -187,6 +187,9 @@ mediaservo data backup ./backup        # needs the CLI env; bare-docker below
 docker run --rm --entrypoint sh -v msrtc_msrtc-data:/data:ro \
   -v "$PWD/backup:/backup" msrtc-server:<tag> \
   -c 'tar czf /backup/msrtc_msrtc-data.tar.gz -C /data .'
+# recordings and run/logs volumes: same pattern (msrtc_msrtc-recordings /
+# msrtc_msrtc-logs). Logs persist across recreates but grow — archive or
+# truncate run/logs/*.out.log periodically.
 
 # Logs (oxmgr file face, run/logs/*.out.log; NOT docker logs)
 docker compose --env-file .env exec server sh -c 'tail -50 /opt/msrtc/run/logs/*.out.log'

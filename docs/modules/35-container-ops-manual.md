@@ -97,8 +97,14 @@ docker compose --env-file .env ps
 |---|---|
 | `/opt/msrtc/etc` | secrets (PSK/JWT), account/device tables, ssh host keys, Caddyfile (generated on first boot) |
 | `/opt/msrtc/recordings` | recordings |
+| `/opt/msrtc/run/logs` | service logs (oxmgr app `*.out.log`) — persist across recreates (upgrades/rollbacks) |
 
 No volumes = data lost and secrets regenerated on every recreate.
+
+> `run/oxfile.toml` is intentionally NOT persisted: init re-renders it from the
+> current `.env` on every first boot, so env changes (e.g. ANNOUNCED_IP) always
+> take effect. Persistent logs grow over time — truncate or archive
+> `run/logs/*.out.log` periodically.
 
 ### 4.1 The SFU Port Pitfall (Important)
 
@@ -149,7 +155,8 @@ Browser: log in at `http://<IP>:8080/admin`; the intercom page is
 docker compose --env-file .env ps
 docker inspect <container> --format '{{.State.Health.Status}}'
 
-# Logs (service logs are the oxmgr file face run/logs/*.out.log, NOT docker logs)
+# Logs (oxmgr file face run/logs/*.out.log, NOT docker logs; volume-backed so
+# they survive recreates — post-mortem evidence stays after upgrades/rollbacks)
 docker compose --env-file .env exec server sh -c 'tail -100 /opt/msrtc/run/logs/*.out.log'
 
 # Backup (pack the two volumes; uses the image's own tar, no internet needed)
@@ -196,7 +203,7 @@ docker compose --env-file .env up -d
 | admin login fails | was `MEDIASERVO_ADMIN_PASSWORD` set on first boot? container logs have the setup-token fallback |
 | ssh unreachable | was a public key delivered to `etc/ssh/authorized_keys` (WARN in logs)? is `SSH_PORT` right? |
 | Container won't start | `docker compose ... logs`; port conflicts (8080/9800/2222); disk full |
-| Data lost / secrets changed | are the `etc`/`recordings` volumes mounted (§4)? no volumes = regenerated on every recreate |
+| Data lost / secrets changed | are the `etc`/`recordings`/`run/logs` volumes mounted (§4)? no volumes = regenerated on every recreate |
 
 ## 9. First-Install Essentials (details in DEPLOY-MANUAL.md)
 

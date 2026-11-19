@@ -1703,7 +1703,7 @@ LIEOF
             if [ "$mode" = compose ] || [ "$mode" = both ]; then
                 command -v docker >/dev/null || { echo "Error: missing dependency 'docker' — install docker and start the daemon" >&2; exit 1; }
                 cmd=(docker compose -f "$(_msvc_compose_file prod)" down)
-                if [ "$do_all" = 1 ]; then cmd+=(-v); echo "Warning: clean --all deletes the PROD named volumes (etc: secrets/accounts + recordings — irreversible; the legacy cargo-cache volume note retired with the dev compose)"; fi
+                if [ "$do_all" = 1 ]; then cmd+=(-v); echo "Warning: clean --all deletes the PROD named volumes (etc: secrets/accounts + recordings + run/logs — irreversible)"; fi
                 _msvc_run "${cmd[@]}"; rc=$?; [ $rc -ne 0 ] && exit $rc
             fi
         fi
