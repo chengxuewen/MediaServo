@@ -1,6 +1,6 @@
 # MSRTC native 裸机分离形态（frontend-process-split T4/T6——过渡形态，Phase 6 后由 deploy server 生成同款）
 # 用法: cd <out/server 所在发布根> && caddy run --config <repo>/deploy/caddy/Caddyfile.native --adapter caddyfile
-#       （mediaservo build/run web 或 msrtc.sh run web 自动这样调；cwd 需含 ./web 静态目录）
+#       （mediaservo build/run web or the parent-shell run web 自动这样调；cwd 需含 ./web 静态目录）
 # 覆盖: MSRTC_WEB_ADDR（默认 :8080——非 root 可绑；生产上 443+证书由 deploy/锚点层改写本段）
 # 上游: MSRTC_BACKEND（默认 127.0.0.1:9800——D-2=B：host-agent 仍直连 backend，本代理只服务浏览器）
 #       MSRTC_WEAKNET_BACKEND（默认 127.0.0.1:9810——weaknet 面板 serve，簇内常驻）

@@ -357,7 +357,7 @@ the common-cxx contract).
 
 ### 7.2 Consuming the Delivery Tree (out/bindings / the sdk-field package)
 
-`./msrtc.sh build bindings` (or the submodule's `mediaservo.sh build bindings` / `deploy bindings`)
+`the parent shell build bindings` (or the submodule's `mediaservo.sh build bindings` / `deploy bindings`)
 assembles `out/bindings/`: `include/mediaservo/{field.h,field.hpp,common.h,detail/,3rdparty/}`
 (install rules in `cmake/MediaServoBindings.cmake` fan the h/hpp headers per SDK — HEADERS_DIRECTORY, SR4 L2), `lib/libmediaservo_field.so.<major>`,
 `lib/pkgconfig/mediaservo-field.pc`, `lib/cmake/mediaservo/mediaservoConfig.cmake`.

@@ -304,7 +304,7 @@ impl HealthChecker for SignalingServer {
 
 impl ReadinessChecker for SignalingServer {
     /// readiness = alive + SFU worker alive. liveness != readiness: `/health` does not degrade when the worker dies
-    /// (preventing external restart storms from killing signaling); `/ready` returns 503 for observation + a manual `msrtc-server restart`
+    /// (preventing external restart storms from killing signaling); `/ready` returns 503 for observation + a manual `mediaservo-server restart`
     /// to recover (an automatic watchdog is a separate work item -- frontend-process-split T7/B3).
     fn check_readiness(&self) -> HealthStatus {
         #[cfg(feature = "sfu-mediasoup")]

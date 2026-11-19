@@ -116,7 +116,7 @@ TasksMax=512
 > Related: D208 build optimization, container-build-rework B3.4/R13/R18 | Created per doc-audit M6
 
 **B3.4 tree-packaged prod image** (`docker-compose.yml`): the single container
-runs the whole deploy tree (msrtc-server + caddy + oxmgr PID1) — caddy is no
+runs the whole deploy tree (mediaservo-server + caddy + oxmgr PID1) — caddy is no
 longer a separate proxy service (R12 retired). Resource policy per R13=C:
 
 | Item | value | rationale |
@@ -138,7 +138,7 @@ server runs host-networking for reliable WebRTC ICE). The pre-existing
 `e2e-sfu-consume.cjs` / `e2e-bitrate-probe.cjs` are single-stream functional
 E2E, not load generators — the harness fills that gap.
 
-**R18 measured result (`msrtc-server:0.1.3`, 8-core host)**:
+**R18 measured result (`mediaservo-server:0.1.3`, 8-core host)**:
 
 | Phase | Peers | Out (aggregate) | In (aggregate) | Notes |
 |-------|-------|-----------------|----------------|-------|

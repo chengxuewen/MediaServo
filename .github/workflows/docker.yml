@@ -5,7 +5,7 @@ name: Docker
 # (docker/builder/Dockerfile, self-contained). The tree-packaged prod image
 # (docker/server/Dockerfile) is NOT submodule-CI-buildable — it needs the parent
 # workspace layers (--build-context wrapcache/oxmgrpkg, R2 materials-ride-the-
-# tree) and is built via `./msrtc.sh build image prod` from the parent.
+# tree) and is built via the parent shell (`build image prod`).
 # Registry publish (ghcr push + image smoke) is the deferred R0 publish batch.
 on:
   push:

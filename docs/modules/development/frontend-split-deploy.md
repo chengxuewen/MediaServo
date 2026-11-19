@@ -16,9 +16,9 @@ Three modes: ① native split (main path) ② single-container all-in-one (embed
 ## 2. Building
 
 ```bash
-./msrtc.sh build server        # Backend (non-embedded variant) + auto-assembly of out/server/{bin,etc,web}
-./msrtc.sh build web           # Refresh only out/server/web (fast path for TS edits, seconds, no cargo)
-./msrtc.sh build server --image runtime   # Mode ② image (Dockerfile embeds admin-dashboard explicitly)
+the parent shell build server        # Backend (non-embedded variant) + auto-assembly of out/server/{bin,etc,web}
+the parent shell build web           # Refresh only out/server/web (fast path for TS edits, seconds, no cargo)
+the parent shell build server --image runtime   # Mode ② image (Dockerfile embeds admin-dashboard explicitly)
 ```
 
 A one-line TS change → `build web` → browser refresh takes effect (no Rust recompile/restart — C24 narrowed to mode ②).
@@ -27,19 +27,19 @@ A one-line TS change → `build web` → browser refresh takes effect (no Rust r
 
 ```bash
 export MEDIASERVO_ADMIN_PASSWORD='***'      # Required on first production start (dev-template accounts fail fast on bare metal, C35 guard)
-./msrtc.sh deploy server --prefix /opt/msrtc-server      # /opt needs root; idempotent re-runs preserve etc credentials (PIT-160)
+the parent shell deploy server --prefix /opt/mediaservo-server      # /opt needs root; idempotent re-runs preserve etc credentials (PIT-160)
 # Landed tree: <prefix>/{bin/<brand>-server,bin/oxmgr,etc/*,web/,run/{oxfile.toml,oxmgr/,logs/},<brand>-server→bin/ (D269 branded physical name + root-level shortcut)}
-<prefix>/<brand>-server startup on /opt/msrtc-server  # Boot anchor (systemd user unit → oxmgr daemon)
+<prefix>/<brand>-server startup on /opt/mediaservo-server  # Boot anchor (systemd user unit → oxmgr daemon)
 loginctl enable-linger                                   # Recommended: survives without a login session
-<prefix>/<brand>-server status /opt/msrtc-server      # 0=healthy 1=degraded 2=not running (script-consumable)
-<prefix>/<brand>-server doctor /opt/msrtc-server      # Exit code = failure count (PATH/ports/yaml/web dist/announced IP)
+<prefix>/<brand>-server status /opt/mediaservo-server      # 0=healthy 1=degraded 2=not running (script-consumable)
+<prefix>/<brand>-server doctor /opt/mediaservo-server      # Exit code = failure count (PATH/ports/yaml/web dist/announced IP)
 ```
 
 Non-default ports: after changing `etc/server.yaml listen.port`, **manually sync** the `etc/Caddyfile`
 `:8080` site and the `127.0.0.1:<port>` upstream, plus `run/oxfile.toml` `[apps.env]` (`MEDIASERVO_SFU_PORT`
 etc.) — init rendering is a one-time snapshot (improvement item: `init --port`).
 
-## 4. Day-to-Day Ops (instance command surface = same as msrtc-host)
+## 4. Day-to-Day Ops (instance command surface = same as mediaservo-host)
 
 ```bash
 <brand>-server start [dir] [--no-web]   # Whole oxmgr cluster / backend only; interactive takeover on port conflict; caddy missing → auto degrade
@@ -49,7 +49,7 @@ etc.) — init rendering is a one-time snapshot (improvement item: `init --port`
 <brand>-server monit|ps [dir]           # oxmgr TUI / resource columns
 ```
 
-The Python CLI's `run/start/stop/restart server` are retired → guidance (C39); the transitional `run web` caddy has been retired too (SR6 V1, 10-23): web runs cluster-managed (`msrtc-server start <dir>` owns the caddy app); CLI no longer exposes any web runtime target.
+The Python CLI's `run/start/stop/restart server` are retired → guidance (C39); the transitional `run web` caddy has been retired too (SR6 V1, 10-23): web runs cluster-managed (`mediaservo-server start <dir>` owns the caddy app); CLI no longer exposes any web runtime target.
 
 ## 5. Troubleshooting
 

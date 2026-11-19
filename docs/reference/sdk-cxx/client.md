@@ -335,7 +335,7 @@ g++ -std=c++17 \
 
 ### 7.2 find_package (the delivery-tree posture)
 
-`./msrtc.sh build bindings` (or `deploy bindings --prefix ...`) assembles `out/bindings/`:
+`the parent shell build bindings` (or `deploy bindings --prefix ...`) assembles `out/bindings/`:
 `lib/` (the version-full trio + cmake/) + `include/mediaservo/` (C headers + cxx headers) + `pkgconfig/` +
 `cmake/`.
 

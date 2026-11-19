@@ -53,6 +53,7 @@ gate "book structure"              python3 scripts/book/book-check.py --structur
 # Documentation quality: language, dead links, overclaims (C1).
 gate "english gate self-test"      bash scripts/check-english-only.sh --self-test
 gate "english only"               bash scripts/check-english-only.sh
+gate "brand neutrality"           bash scripts/gate-brand-neutrality.sh
 gate "docs link self-test"        python3 scripts/agents/check_docs_links.py --self-test
 gate "docs links"                 python3 scripts/agents/check_docs_links.py
 gate "docs numbering"             python3 scripts/agents/check_docs_numbers.py
@@ -89,9 +90,9 @@ SC_BIN="$(command -v shellcheck || true)"
 if [ -x "$SC_BIN" ]; then
     gate "shellcheck mediaservo.sh (warning+)"  "$SC_BIN" -S warning mediaservo.sh
     if [ -f "$PWD/../../msrtc.sh" ]; then # parent shell colocated (same standalone-checkout pattern as py-retirement above)
-        gate "shellcheck parent msrtc.sh (warning+)"  "$SC_BIN" -S warning "$PWD/../../msrtc.sh"
+        gate "shellcheck parent shell (warning+)"  "$SC_BIN" -S warning "$PWD/../../msrtc.sh"
     else
-        SKIP "shellcheck parent msrtc.sh" "parent shell not colocated (standalone checkout)"
+        SKIP "shellcheck parent shell" "parent shell not colocated (standalone checkout)"
     fi
 else
     SKIP "shellcheck" "pixi default env not installed (pixi install -e default)"

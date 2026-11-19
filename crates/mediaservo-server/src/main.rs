@@ -36,7 +36,7 @@ Examples:
   mediaservo-server -h|-H|--help                  this help";
 
 fn print_usage() {
-    // The env table comes from the common asset (single source, same source as msrtc.sh/host); brand word substituted per product.
+    // The env table comes from the common asset (single source, same source as the parent shell/host); brand word substituted per product.
     println!(
         "{}",
         format!("{}\n\n{}", USAGE, mediaservo_common::env_usage_text())

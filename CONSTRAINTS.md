@@ -43,7 +43,7 @@ Two parts: hand-written anti-gaming rules above, generated gate list below.
 21. `python retirement closure`
 22. `entry contract (E1-E3+golden)`
 23. `shellcheck mediaservo.sh (warning+)`
-24. `shellcheck parent msrtc.sh (warning+)`
+24. `shellcheck parent shell (warning+)`
 25. `check --workspace`
 26. `clippy -D --workspace`
 27. `server stub --all-targets`

@@ -761,3 +761,9 @@ Checks:
 **约束**: ① 新镜像 = `docker/<name>/{Dockerfile,entrypoint.sh}`（目录名=镜像名=契约词，K8s/Debian 形态；未来分布式角色 ingress/media-node 即 `docker/<role>/`，PLAN §6d 预留位）；② builder tag `v1` = 三点契约（docker/server/Dockerfile 的 `FROM ${BUILDER_IMAGE}` / `build image dev` / `dev up` 默认），仅工具链语义变更（编译器/cmake pin/node/镜像源姿态）手动 bump v1→v2 且三点同笔，**绝不随产品版本**；`build image --tag` 仅 prod 面，dev 面显式拒绝；③ 产物一根一规 `<治理根>/out/<face>`（治理根=MSRTC_OUT_ROOT 或仓根）；package 缺省 `<out-root>/packages`，`dist/` 已退役。
 
 **验证**: `ls docker/` 每子目录恰含 Dockerfile+entrypoint.sh；`grep -c 'ROOT/dist' mediaservo.sh`==0；`grep -n 'builder:v1' mediaservo.sh Dockerfile 两侧` 点数=契约点。裁决与选项分析存 PLAN §5b（C-form/branding/single-root 三条）。
+
+## C59: 子仓品牌中立——禁客户品牌 msrtc 字段，门 gate-brand-neutrality 强制(2026-11-19)
+
+**约束**: MediaServo 子仓是品牌中立的上游产品，不得携带客户品牌 `msrtc` 作为品牌字段；品牌由父工作区注入（`MEDIASERVO_BRAND` env / build-args），中立产品默认 = `mediaservo`。门 `scripts/gate-brand-neutrality.sh`（并入 all-gates）禁 msrtc，豁免功能/历史域：品牌识别（host/server 的 KNOWN_BRANDS/SERVER_NAMES，须认出 msrtc 部署，PIT-155/D252）、品牌回归测试、父壳集成脚本、历史叙述（CHANGELOG/archive/research）、agent 资产、msrtc 交付手册 34/35（容器内 OS 用户固定 mediaservo）。渲染分流：compose/.env（mediaservo 源）`s/mediaservo/<brand>/g`；手册（msrtc 源）`s/msrtc/<brand>/g`；均保 title-case MediaServo 与 OS 用户。
+
+**验证**: `bash scripts/gate-brand-neutrality.sh` == ✓。裁决存 PLAN container-build-rework「Brand-neutrality ruling」（五项均 A）。

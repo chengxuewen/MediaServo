@@ -19,7 +19,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-BRAND="${MEDIASERVO_BRAND:-msrtc}"
+BRAND="${MEDIASERVO_BRAND:-mediaservo}"
 TAG="${TAG:-0.1.3}"
 IMAGE="$BRAND-server:$TAG"
 PROJECT="smoke-$$-$RANDOM"

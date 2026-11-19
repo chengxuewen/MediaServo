@@ -1798,7 +1798,7 @@ impl webrtc_sys::peer_connection_factory::PeerConnectionObserver for RealObserve
                             frame.height()
                         );
                         if let Some(ref sink) = *self.sink.lock().unwrap() {
-                            // FIX(msrtc-corruption P1): frame.width()/height() are the RENDER
+                            // FIX(frame-corruption P1): frame.width()/height() are the RENDER
                             // dimensions; the underlying buffer is the CODED one (H.264 pads to
                             // macroblocks, e.g. 540→544) with per-plane row strides. The old code
                             // sliced plane offsets by render size and copied linearly by render

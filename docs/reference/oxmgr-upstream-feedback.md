@@ -58,7 +58,7 @@ warn) when `events.sock` already has a live listener instead of unlink-rebind.
 
 `kill <daemon pid>` (and systemctl stop of a unit wrapping it) leaves every managed
 app running with ppid→1 — they keep streaming. Ops-correct shutdown today is
-apps-first (`our msrtc-host stop` verb order), or systemd KillMode=control-group
+apps-first (`our mediaservo-host stop` verb order), or systemd KillMode=control-group
 cgroup sweep. Vendor-side ask: on daemon SIGTERM, stop children gracefully
 (stop_timeout respected) before exit — or document loudly that the daemon must
 never be signaled directly.

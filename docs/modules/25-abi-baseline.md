@@ -1,7 +1,7 @@
 # 25 - SDK 产物 ABI 兼容基线（方案与实施计划）
 
 > 状态：**已裁决定稿 + 三轮审核修订**（2026-10-15 裁决 #1-#8 见 §8，#9-#11 见 §11.2；第三轮 abi-doc25-v3 两席复核 + 八项用户裁决 **#12-#19** 与勘误批已应用——行尾标 rev3；正文转英仍挂 T15）
-> 触发事故：TPHMI `tp_tst_msrtcBackend` 链接失败（2026-10-15），根因见 §1。
+> 触发事故：TPHMI `tp_tst_mediaservoBackend` 链接失败（2026-10-15），根因见 §1。
 > 本文 = 策略（长期有效）+ 实施任务表（一次性）。任务完成后 §5-T* 打勾留档，策略部分常驻。
 
 ---
@@ -158,7 +158,7 @@ T6（编译器大版本闸门 + pixi update 纪律）未列为独立议题，作
 - 2026-10-15 second-round analysis (abi-doc25-v2, 4 seats + lead): 2 CRITICAL / 5 HIGH / 10 MED clustered into §11; rulings #9-#11 (A/A/A: doc25→English / FFmpeg carry-in-package+$ORIGIN / guard LC_ALL fix + all-gates hard wiring); tasks extended T10-T15. §6 gate as drafted is blind to the incident class it was written for (C1) — do NOT implement T5 before T12 scope/bullet fixes land.
 - 支持矩阵定稿（裁决 #1 派生）：x86 裸机族 = Ubuntu 20.04+（glibc≤2.31；T1 后 C++ 运行时引用=0）；Jetson 族 = JetPack5/L4T35（系统工具链，现状即达标）；server 族 = 容器自含（2.35 封箱内）。重开条件 = 18.04/JetPack4 客户清单出现。
 - 团队审核记录（docs25-abi-review，2026-10-15，3 成员只读）：doc-auditor 1C/2H/6M/3L/4INFO；evidence-verifier 21 断言仓库可证项全 CONFIRMED（1 措辞已修，2 条决策史/叙述项不可机验）；platform-abi-researcher 产出跨平台矩阵（→§10）+发现 T9。本修订轮已应用：§6 脚本 exit 出循环（CRITICAL）/古老计数 76→75/T0 残句清除/mermaid 两处/T4 陈旧选项/T5 补 manifest abi_floor/新增 T9。
-- 2026-10-15 跨会话对账（另会话结论审阅）：一致项——反对降工具链、"底限由引用而非编译器年龄决定"、msrtc-server 无 libstdc++ 需求、门禁+声明面治理、"20.04 解法=静态嵌 libstdc++"；修正项——墙归因（实测 `libwebrtcsys-cxx.a` 31/29 命中 vs `libwebrtc.a` 0 命中，本仓可改）；不采项——"≥22.04 底限声明"及其"YAGNI 等老 OS 客户"（车端就是现存的 focal 客户）。
+- 2026-10-15 跨会话对账（另会话结论审阅）：一致项——反对降工具链、"底限由引用而非编译器年龄决定"、mediaservo-server 无 libstdc++ 需求、门禁+声明面治理、"20.04 解法=静态嵌 libstdc++"；修正项——墙归因（实测 `libwebrtcsys-cxx.a` 31/29 命中 vs `libwebrtc.a` 0 命中，本仓可改）；不采项——"≥22.04 底限声明"及其"YAGNI 等老 OS 客户"（车端就是现存的 focal 客户）。
 - 2026-10-15 跨会话对账·二（Jetson 会话"构建机 OS 定地板"结论）：采纳——支持矩阵是根决策、package 时 objdump 扫地板写 manifest 字段、"conda C++ 运行时永不入裸机交付 NEEDED"三条纪律；修正——"gcc 版本与地板几乎无关"仅对系统工具链路线（C23）成立，conda 路线上 libstdc++ 代别恰由 conda 编译器决定（本事故即反例）；该会话实测矩阵缺 x86 bindings 行（其视域 Jetson），x86 族处方=本文 T1（嵌）或 focal 分箱（系统侧），手段二选一、由同一条门禁执法。三会话共识收敛点：地板=产物属性、按交付族登记、CI 扫描生成、禁止裸机 NEEDED 出现 conda 运行时。
 
 ---
