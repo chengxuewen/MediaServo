@@ -234,6 +234,8 @@ case "${1:-}" in
         sub="${1:-}"; [ $# -gt 0 ] && shift
         DEV_NAME="${DEV_NAME:-msrtc-dev}"
         DEV_SSH_PORT="${DEV_SSH_PORT:-2222}"
+        # builder tag v1 = three-point contract (build image dev / Dockerfile.tree
+        # stage1 FROM / this default); manual bump on semantic toolchain changes.
         DEV_IMAGE="${DEV_IMAGE:-${MEDIASERVO_BRAND:-msrtc}-builder:v1}"
         case "$sub" in
             -h|--help)
@@ -554,7 +556,9 @@ auto-wire as build contexts when present.
          production image (server + caddy + oxmgr PID1, bookworm-slim).
          --tag TAG   image tag (default: mediaservo-server crate version)
   dev    Dockerfile.builder -> ${brand}-builder:v1; native toolchain image
-         for the ssh-resident dev container (mediaservo dev up).
+         for the ssh-resident dev container (mediaservo dev up). FIXED tag —
+         three-point contract (Dockerfile.tree FROM / dev up / here); manual
+         bump v1->v2 on semantic toolchain changes, --tag is prod-only.
   --mirror cn|upstream   apt/cargo/pip mirror posture (default cn; upstream=CI)
 Examples:
   mediaservo build image prod                 # msrtc-server:0.1.3
@@ -581,12 +585,24 @@ BIEOF
             --build-arg "MIRROR=$mirror" "${bctx[@]}" "$ROOT" || return $?
         docker tag "$image" "${brand}-server:latest"
     else
+        # Toolchain-generation tag: v1 is a THREE-POINT CONTRACT — Dockerfile.tree
+        # stage1 `FROM msrtc-builder:v1`, this build, and the `dev up` default.
+        # Bump v1->v2 ONLY on semantic toolchain changes (compiler / cmake pin /
+        # node / mirror posture), never per product release (the product axis is
+        # the prod image tag). Manual bump, all points together (oxmgr-archive
+        # precedent: the literal IS the version source). Hence --tag is prod-only.
+        if [ -n "$tag" ]; then
+            echo "ERROR: build image --tag is prod-only — the builder tag (v1) is a three-point contract (Dockerfile.tree FROM / dev up / here); bump it manually per the PLAN governance instead" >&2
+            return 2
+        fi
         image="${brand}-builder:v1"
         # The caddy layer downloads from github releases (foreign) — pass the
         # proxy build-args through (mainland reachability; same posture as the
         # retired build server --image runtime path). NO_PROXY stays proxy-free.
         echo "\$ docker build -f Dockerfile.builder -t $image --build-arg MIRROR=$mirror ."
         docker build -f Dockerfile.builder -t "$image" --build-arg "MIRROR=$mirror" \
+            --build-arg "BUILDER_TAG=v1" \
+            --build-arg "GIT_REV=$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)" \
             --build-arg "HTTP_PROXY=${HTTP_PROXY:-${http_proxy:-}}" \
             --build-arg "HTTPS_PROXY=${HTTPS_PROXY:-${https_proxy:-}}" \
             --build-arg "NO_PROXY=${NO_PROXY:-${no_proxy:-}}" "$ROOT" || return $?
@@ -1324,7 +1340,7 @@ BHEOF
             build-server) set -- build server "${_ms_orig[@]:1}" ;;
         esac
         shift
-        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0; gd_profile=""; gd_provider=""; gd_pixi_env=""; gd_eco=""; gd_pkg=""; gd_generate=0
+        tgt=""; image=""; native=0; release=0; names=(); seen_tgt=0; gd_profile=""; gd_provider=""; gd_pixi_env=""; gd_eco=""; gd_pkg=""; gd_generate=0; bimg_tag=""; bimg_mirror=""
         while [ $# -gt 0 ]; do
             case "$1" in
                 --release) release=1; shift ;;
@@ -1341,6 +1357,8 @@ BHEOF
                 --profile) gd_profile="${2:?build --profile needs a value}"
                            case "$gd_profile" in auto|headless|linux-desktop) ;; *) echo "build: argument --profile: invalid choice: '$gd_profile' (choose from 'auto', 'headless', 'linux-desktop')" >&2; exit 2 ;; esac
                            shift 2 ;;
+                --tag) bimg_tag="${2:?build --tag needs a value}"; shift 2 ;;   # build image only
+                --mirror) bimg_mirror="${2:?build --mirror needs a value}"; shift 2 ;;   # build image only
                 --image) image="${2:?build --image needs a value}"
                          case "$image" in runtime|dev) ;; *) echo "build: argument --image: invalid choice: '$image' (choose from 'runtime', 'dev')" >&2; exit 2 ;; esac
                          shift 2 ;;
@@ -1366,6 +1384,7 @@ BHEOF
             done
         fi
         if [ -n "$image" ] && [ "$tgt" != server ]; then echo "build --image only supports build server (current target=$tgt)" >&2; exit 2; fi
+        if { [ -n "$bimg_tag" ] || [ -n "$bimg_mirror" ]; } && [ "$tgt" != image ]; then echo "build --tag/--mirror only support build image (current target=$tgt)" >&2; exit 2; fi
         # B4 deprecation window (R1): build server --image runtime|dev maps to
         # build image prod|dev (runtime→prod). Kept working one cycle; the alias
         # retires with the next CLI face change.
@@ -1383,7 +1402,10 @@ BHEOF
             all)    _ms_build_host; _ms_build_server "" 0 0; _ms_build_client ;;
             host)   _ms_build_host ;;
             server) _ms_build_server "$image" "$native" "$release" ;;
-            image)  _ms_build_image "${names[@]}"; exit $? ;;
+            image)  _bimg_args=("${names[@]}")
+                    [ -n "$bimg_tag" ] && _bimg_args+=(--tag "$bimg_tag")
+                    [ -n "$bimg_mirror" ] && _bimg_args+=(--mirror "$bimg_mirror")
+                    _ms_build_image "${_bimg_args[@]}"; exit $? ;;
             client) _ms_build_client ;;
             web)    _ms_build_web ;;
         esac

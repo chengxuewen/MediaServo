@@ -23,6 +23,9 @@ FROM scratch AS wrapcache
 FROM scratch AS oxmgrpkg
 
 # ---- stage 1: assemble a FRESH deploy tree inside the builder toolchain ----
+# Toolchain-generation tag (three-point contract with `build image dev` + the
+# `dev up` default; manual bump v1->v2 on semantic toolchain changes only —
+# never per product release; see mediaservo.sh _ms_build_image governance).
 FROM msrtc-builder:v1 AS treebuild
 WORKDIR /workspace
 COPY . /workspace

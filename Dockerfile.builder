@@ -117,5 +117,19 @@ RUN useradd -m -s /bin/bash -u "${DEV_UID}" dev && \
 COPY docker/builder-entry.sh /usr/local/bin/builder-entry
 RUN chmod 755 /usr/local/bin/builder-entry
 
+# Toolchain-generation provenance (trailing on purpose: one label layer keeps
+# the cached toolchain layers hot). BUILDER_TAG/GIT_REV arrive from
+# `build image dev`. The tag is a THREE-POINT CONTRACT — this image,
+# Dockerfile.tree stage1 `FROM msrtc-builder:v1`, and the `dev up` default;
+# bump v1->v2 ONLY on semantic toolchain changes (compiler / cmake pin / node /
+# mirror posture), never per product release. Manual bump, all points together
+# (oxmgr-archive precedent: the literal IS the version source).
+ARG BUILDER_TAG=v1
+ARG GIT_REV=unknown
+LABEL org.opencontainers.image.title="msrtc-builder" \
+      org.opencontainers.image.version="${BUILDER_TAG}" \
+      org.opencontainers.image.revision="${GIT_REV}" \
+      org.opencontainers.image.description="MediaServo native toolchain image (gcc-10 + rust + cmake 3.31 + node20/pnpm + caddy; container-build-rework B2)"
+
 # default = ssh-resident dev mode; CI passes its own command (entrypoint execs it)
 CMD ["/usr/sbin/sshd", "-D"]
