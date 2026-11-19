@@ -1,0 +1,92 @@
+/* Material 3 theme (light + dark) -- design-multi-style B3b.
+   Projection notes (governance: design-system owns theme true sources):
+   - Adopted: M3 baseline palette (primary #6750A4 light / #D0BCFF dark,
+     neutral + surface-container tints), the M3 corner scale mapped onto the
+     contract slots (md 12 / lg 16 / xl 28), the emphasized easing
+     cubic-bezier(0.2, 0, 0, 1), 40px control height, tinted state layers
+     (8% hover / 12% pressed), and elevation shadow formulas.
+   - Degraded (ruling R-3): Roboto via SYSTEM FONTS (no self-hosted font);
+     pill buttons approximated at 8px (the sm slot serves both buttons and
+     inputs; radius-full stays for avatars/dots); the warning hue is not in
+     the M3 baseline and is approximated for text contrast.
+   - Spec: Google Material 3 (2024 rev). Values curated, not token-dumped. */
+
+html.theme-material {
+  --ms-color-primary: #6750a4;
+  --ms-color-primary-hover: #7f67be;
+  --ms-color-primary-soft: #eaddff;
+  --ms-color-primary-soft-border: #d0bcff;
+  --ms-color-danger: #b3261e;
+  --ms-color-success: #386a20;
+  --ms-color-warning: #7a5900;
+  --ms-color-text: #1d1b20;
+  --ms-color-text-secondary: #49454f;
+  --ms-color-text-tertiary: #141218;
+  --ms-color-text-muted: #79747e;
+  --ms-color-text-faint: #938f99;
+  --ms-color-text-inverse: #ffffff;
+  --ms-color-bg: #f4eff4;
+  --ms-color-surface: #fef7ff;
+  --ms-color-surface-subtle: #f3edf7;
+  --ms-color-surface-hover: #ece6f0;
+  --ms-color-surface-muted: #e7e0ec;
+  --ms-color-border: #cac4d1;
+  --ms-color-border-subtle: #e7e0e8;
+  --ms-color-border-strong: #79747e;
+  --ms-color-border-interactive: #6750a4;
+  --ms-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.15);
+  --ms-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.15);
+  --ms-shadow-3: 0 4px 8px 3px rgba(0, 0, 0, 0.15);
+  --ms-focus-ring-color: #6750a4;
+  --ms-focus-ring-width: 2px;
+  --ms-motion-duration-fast: 0.2s;
+  --ms-motion-duration-base: 0.35s;
+  --ms-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  --ms-control-h-sm: 30px;
+  --ms-control-h-md: 40px;
+  --ms-state-layer-hover: rgba(103, 80, 164, 0.08);
+  --ms-state-layer-pressed: rgba(103, 80, 164, 0.12);
+  --ms-scrim: rgba(0, 0, 0, 0.4);
+  --ms-layer-01: #fef7ff;
+  --ms-layer-02: #f3edf7;
+  --ms-layer-03: #e7e0ec;
+  --ms-radius-sm: 8px;
+  --ms-radius-md: 12px;
+  --ms-radius-lg: 16px;
+  --ms-radius-xl: 28px;
+  --ms-font-family: Roboto, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+html.theme-material.dark {
+  --ms-color-primary: #d0bcff;
+  --ms-color-primary-hover: #e1d6ff;
+  --ms-color-primary-soft: #4f378b;
+  --ms-color-primary-soft-border: #6d5787;
+  --ms-color-danger: #f2b8b5;
+  --ms-color-success: #86d993;
+  --ms-color-warning: #f5c542;
+  --ms-color-text: #e6e0e9;
+  --ms-color-text-secondary: #cac4d0;
+  --ms-color-text-tertiary: #f4eff4;
+  --ms-color-text-muted: #9e98a4;
+  --ms-color-text-faint: #77747f;
+  --ms-color-text-inverse: #1d1b20;
+  --ms-color-bg: #0f0d13;
+  --ms-color-surface: #141218;
+  --ms-color-surface-subtle: #211f26;
+  --ms-color-surface-hover: #2b2930;
+  --ms-color-surface-muted: #36343b;
+  --ms-color-border: #49454f;
+  --ms-color-border-subtle: #3a383e;
+  --ms-color-border-strong: #6e6b74;
+  --ms-color-border-interactive: #d0bcff;
+  --ms-focus-ring-color: #d0bcff;
+  --ms-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --ms-shadow-2: 0 2px 6px rgba(0, 0, 0, 0.3);
+  --ms-shadow-3: 0 4px 8px 3px rgba(0, 0, 0, 0.3);
+  --ms-state-layer-hover: rgba(208, 188, 255, 0.08);
+  --ms-state-layer-pressed: rgba(208, 188, 255, 0.12);
+  --ms-layer-01: #141218;
+  --ms-layer-02: #211f26;
+  --ms-layer-03: #36343b;
+}
