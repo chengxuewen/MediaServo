@@ -2047,3 +2047,44 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 **解法**: ① 撞锁→sleep 重试，**绝不删他人锁**；② 提交前后各跑 `git -C <sub> merge-base --is-ancestor <mine> HEAD` 验包含性——指针被并行前进不慌，只要我的子仓提交是其祖先即无回退；混合 hunk 用 `git apply --cached --unidiff-zero` 只暂存自己的行。
 
 **验证**: 提交后 ancestry 断言输出 ✓ 再收工。
+
+
+## PIT-247: 管道尾命令吞退出码——cargo test | tail 把失败报成 RC=0 (2026-11-19)
+
+**症状**: `cargo test ... | tail -45; echo RC=$?` 在编译失败时仍打印 `RC=0`——差点把红灯当绿灯。
+
+**根因**: 管道退出码 = **最后一个命令**（tail）的状态；cargo 的 101 被丢弃。
+
+**解法**: 用 `set -o pipefail` 包裹，或取 `${PIPESTATUS[0]}`；日志管线（`| tail` / `| tee`）一律套 pipefail。
+
+**验证**: 故意造错跑一次，断言 `RC≠0`；正常路径断言 `RC=0`，双向都测才算懂。
+
+## PIT-248: 既有 Rust 模块插入两连坑——fn 进 struct 体内 / test helper 重名 (2026-11-19)
+
+**症状**: ① `resolve_allow_dev_enroll` 被插进 `pub struct ServerConfig` 字段之间（struct 内不允许 fn 定义）；② 新加 `dev_registry` 测试 helper 与既有 :686 同名 → `E0428 the name dev_registry is defined multiple times`。同轮两连，根因同类。
+
+**根因**: 用字段/相邻项做锚点插入，没先 grep 目标符号与模块边界；锚点错误时 python/SearchReplace 可能静默 no-op 或落到错误层级。
+
+**解法**: 插入前必做两查：`grep -n "fn <新名>" <file>`（防重名）+ `grep -n "pub struct\|^}" <file>`（对齐 struct 闭合/模块边界）；脚本替换用 `assert old in s`（锚错立即炸，不静默）。插入后先读 diff 再编译。
+
+**验证**: `grep -c "fn <name>"` == 预期数；`cargo check` 通过。
+
+## PIT-249: slim 镜像内验证二进制字符串——`strings` 不在，空输出≠不存在 (2026-11-19)
+
+**症状**: 在 bookworm-slim 容器里 `strings <bin> | grep -c "<串>"` 返回 0，误以为镜像未含新串；实际 `strings`（binutils）未安装，stderr 被 2>/dev/null 吞掉。
+
+**根因**: slim/scratch 镜像默认无 binutils；空输出被当成"串不存在"。
+
+**解法**: 用 `grep -a`（按文本读二进制）直接计数；先 `command -v strings` 确认工具在（参见 PIT 二进制验证先例 :1602）。
+
+**验证**: `grep -ac "<串>" <bin>` 结果与源码预期一致；无 2>/dev/null 掩盖错误。
+
+## PIT-250: compose 交付集演练三坑——项目名/-p、缺 .env、/tmp 只读 (2026-11-19)
+
+**症状**: ① `COMPOSE_PROJECT_NAME=<名>` 不生效，容器仍是 `<name:>-server-1`；② 产物集目录只有 `.env.example`，`--env-file .env up` 静默失败（容器没起）；③ 沙箱内 `cp /tmp/x.bak` 报 `Read-only file system`。
+
+**根因**: ① compose v2 项目名优先级——`-p` 旗标最高，`COMPOSE_PROJECT_NAME` ≠ 覆盖 compose 顶层 `name:`（本次实测 name: 生效）；② 产物集不含 `.env`（模板叫 .env.example）；③ 本宿主沙箱只允许写工作区。
+
+**解法**: 演练一律 `docker compose -p <隔离名> --env-file .env up -d`，且先 `cp .env.example .env` 并填值（在**沙目录**做，勿污染交付目录）；临时备份/日志写工作区 `.cache/`，不写 `/tmp`。
+
+**验证**: `docker ps` 见 `<隔离名>-server-1`；`docker inspect` 挂载/健康符合预期；脚本备份路径在 `.cache/`。

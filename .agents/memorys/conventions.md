@@ -774,3 +774,10 @@ Checks:
 **约束**: ① dev 放行开关（allow_dev_credentials）放行占位账号时必须发 WARN 并列账号名（guard_dev_credentials，禁静默）；② 开关 env 一律 `MEDIASERVO_` 前缀（canonical），无前缀旧名仅作弃用窗别名+deprecation WARN（窗末移除，挂账 O1）；③ 生产 docker-compose.yml 禁设任何 ALLOW_DEV* 开关、禁引用 accounts.yaml/devices.yaml（gate-prod-compose-safety 门，仅查代码行豁免注释）；启动守卫=主网、镜像剥离=二层、门=三层。
 
 **验证**: `bash scripts/gate-prod-compose-safety.sh` == ✓；`cargo test -p mediaservo-server --lib accounts`（guard 三态+WARN）与 `-p mediaservo-common --lib config`（resolver 五态）绿。
+
+
+## C61: 交付三面同步纪律——源码/镜像/产物集缺一即 stale(2026-11-19)
+
+**约束**: 任何面向交付的产品代码改动（Rust/入口/配置默认），**源码修复 ≠ 交付完成**：必须 ① `build image prod`（重烤含新二进制与烤入手册）② `package image`（双品牌产物集按需重打包）③ 验证镜像内二进制串（`grep -a`）与烤入/随包手册含新内容。否则现场拿到的是旧 tar——修复到不了现场（本轮实测：代码提交后 3 小时镜像仍旧，用户问"手册同步了吗"才暴露）。
+
+**验证**: 镜像 `CreatedSince` 晚于相关提交；`grep -ac <新串> /opt/<brand>/bin/<brand>-server` ≥1；烤入与随包手册 grep 命中新行。
