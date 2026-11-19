@@ -156,9 +156,10 @@ E2E, not load generators — the harness fills that gap.
   the 512 MiB ceiling holds at full 2 Mbps; re-measure on the production host
   for larger tiers (medium 50 rooms/100 peers, large) per §Capacity Planning.
 
-**dev environment intentionally unlimited**: `docker-compose.dev.yml` sets no
-limits — the dev container bears `cargo build` (mediasoup-sys meson/ninja C++
-compilation, PIT-11/33); limits would OOM-kill the build.
+**dev environment intentionally unlimited**: the ssh-resident dev container
+(`dev up`, builder image) sets no limits — it bears `cargo build` (mediasoup-sys
+meson/ninja C++ compilation, PIT-11/33); limits would OOM-kill the build. (The
+legacy build-based `docker-compose.dev.yml` retired with the embedded line.)
 
 **How to adjust**: set `MEM_LIMIT` in `.env` (default 512m = Small-tier measured),
 `docker compose --env-file .env up -d` to recreate, `docker compose config` to

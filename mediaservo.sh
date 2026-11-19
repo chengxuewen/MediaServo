@@ -49,7 +49,7 @@ Observe:
   doctor | version           diagnosis (always exit 0) / workspace version
 
 Containers:
-  up | down                  compose face (--env dev|prod)
+  up | down                  compose face (prod tree stack; dev = dev up|down|ssh)
   exec | ps | data           container exec, process list, managed data
 
 Develop:
@@ -113,7 +113,13 @@ _ms_image_brand() {
     done
     echo mediaservo
 }
-_msvc_compose_file() { if [ "$1" = prod ]; then echo docker-compose.yml; else echo docker-compose.dev.yml; fi; }
+_msvc_compose_file() {
+    # Single-stack post-rework: the only compose file is the prod tree-image
+    # docker-compose.yml (dev = the `dev` verb group; the legacy build-based
+    # docker-compose.dev.yml retired with the embedded line, R5 window closed).
+    # The env argument is kept for call-site stability and is now vestigial.
+    echo docker-compose.yml
+}
 _msvc_announced_ips() {
     local out
     out=$(ip -o -4 addr show 2>/dev/null | awk '{print $2, $4}' || true)
@@ -148,12 +154,12 @@ _msvc_detect_env() {  # dev|prod via the running container's compose config_file
             *docker-compose.yml*) case "$cfg" in *dev*) ;; *) echo prod; return ;; esac ;;
         esac
     fi
-    echo dev
+    echo prod   # single compose stack post-rework (legacy dev fallback retired)
 }
 case "${1:-}" in
     up)
         shift
-        svc=server; env=dev; build=0; announced=""; pos=0
+        svc=server; env=prod; build=0; announced=""; pos=0
         while [ $# -gt 0 ]; do
             case "$1" in
                 --env) env="${2:?--env needs a value}"; shift 2 ;;
@@ -163,10 +169,14 @@ case "${1:-}" in
                 *) pos=$((pos+1)); [ $pos -eq 1 ] && svc="$1" || { echo "up: unexpected extra arg: $1" >&2; exit 2; }; shift ;;
             esac
         done
-        case "$env" in dev|prod) ;; *) echo "up: --env must be dev|prod (got $env)" >&2; exit 2 ;; esac
+        case "$env" in
+            prod) ;;
+            dev) echo "up: --env dev retired (R5 window closed) — dev workflow = 'mediaservo dev up' (ssh-resident builder container)" >&2; exit 2 ;;
+            *) echo "up: --env must be prod (got $env)" >&2; exit 2 ;;
+        esac
+        if [ "$build" = 1 ]; then echo "up: --build retired — the prod stack is image-only (no build: in docker-compose.yml); build it first: mediaservo build image prod" >&2; exit 2; fi
         _msvc_compose_env "$announced"
         cmd=(docker compose -f "$(_msvc_compose_file "$env")" up)
-        [ "$build" = 1 ] && cmd+=(--build)
         cmd+=(-d "$svc")
         _msvc_run "${cmd[@]}"
         exit $?
@@ -181,13 +191,17 @@ case "${1:-}" in
             esac
         done
         if [ -z "$env" ]; then env=$(_msvc_detect_env); echo "down: detected environment $env"; fi
-        case "$env" in dev|prod) ;; *) echo "down: --env must be dev|prod" >&2; exit 2 ;; esac
+        case "$env" in
+            prod) ;;
+            dev) echo "down: --env dev retired (R5 window closed) — dev workflow = 'mediaservo dev down'" >&2; exit 2 ;;
+            *) echo "down: --env must be prod" >&2; exit 2 ;;
+        esac
         _msvc_run docker compose -f "$(_msvc_compose_file "$env")" down
         exit $?
         ;;
     ps)
         shift
-        env=dev
+        env=prod
         while [ $# -gt 0 ]; do
             case "$1" in
                 --env) env="${2:?--env needs a value}"; shift 2 ;;
@@ -203,7 +217,7 @@ case "${1:-}" in
         svc="$1"; shift
         [ "${1:-}" = "--" ] && shift
         [ $# -ge 1 ] || { echo "Usage: mediaservo exec <svc> -- <cmd>" >&2; exit 2; }
-        _msvc_run docker compose -f docker-compose.dev.yml exec -T "$svc" "$@"
+        _msvc_run docker compose -f "$(_msvc_compose_file prod)" exec -T "$svc" "$@"   # dev container = 'mediaservo dev ssh'
         exit $?
         ;;
     data)
@@ -690,31 +704,12 @@ _ms_build_server() {
         # build-face legs, first-writer-wins) — the CLI seeding tail is gone.
         return 0
     fi
-    _ms_check docker "install docker and start the daemon"
-    if [ "$1" = runtime ]; then
-        # Plan-Y wrap layer, docker face (native-leg parity above): feed the
-        # parent's pinned mediasoup wrap archives via a named build context so
-        # meson resolves wraps offline. Mainland failure mode it fixes: proxy
-        # set under lowercase env names -> Docker's auto proxy injection never
-        # reaches the Dockerfile's uppercase ARG HTTP_PROXY -> foreign wrap
-        # hosts (dist.libuv.org / wrapdb) unreachable inside the container.
-        local bctx=() wrap_layer="$ROOT/../../3rdparty/mediasoup-worker"
-        if [ -d "$wrap_layer" ]; then
-            bctx+=(--build-context "wrapcache=$(cd "$wrap_layer" && pwd -P)")
-        fi
-        # Size-canonicalize the proxy: explicit build args cover hosts whose
-        # env only carries lowercase http_proxy (Docker auto-injection is
-        # name-exact). NO_PROXY stays proxy-free via the Dockerfile default.
-        echo "\$ docker build --target runtime -t mediaservo-server:latest ${bctx[*]:-} ."
-        docker build --target runtime -t mediaservo-server:latest \
-            --build-arg "HTTP_PROXY=${HTTP_PROXY:-${http_proxy:-}}" \
-            --build-arg "HTTPS_PROXY=${HTTPS_PROXY:-${https_proxy:-}}" \
-            --build-arg "NO_PROXY=${NO_PROXY:-${no_proxy:-}}" \
-            "${bctx[@]}" . || exit $?
-    else
-        echo "\$ docker compose -f docker-compose.dev.yml build server"
-        docker compose -f docker-compose.dev.yml build server || exit $?
-    fi
+    # Unreachable post-B4: the build-case deprecation intercept maps
+    # `build server --image runtime|dev` to `build image prod|dev` and exits
+    # before this call; the legacy embedded-line targets (Dockerfile runtime
+    # stage / docker-compose.dev.yml build) retired with those files.
+    echo "ERROR: _ms_build_server: --image path retired — use 'mediaservo build image prod|dev'" >&2
+    exit 2
 }
 _ms_build_client() {
     _ms_check cargo "pixi environment not activated? Run first: source bootstrap.sh / pixi.bat"
@@ -1532,7 +1527,7 @@ LIEOF
                 --native) [ $seen_mode = 0 ] || { echo "logs: argument --native: not allowed with the other mode flags" >&2; exit 2; }
                         mode=native; seen_mode=1; shift ;;
                 --env) [ $seen_mode = 0 ] || { echo "logs: argument --env: not allowed with the other mode flags" >&2; exit 2; }
-                       case "${2:-}" in dev|prod) mode=compose;; *) echo "logs: argument --env: invalid choice '$2'" >&2; exit 2;; esac
+                       case "${2:-}" in prod) mode=compose;; dev) echo "logs: --env dev retired — dev workflow = 'mediaservo dev ssh' / dev container logs" >&2; exit 2;; *) echo "logs: argument --env: invalid choice '$2'" >&2; exit 2;; esac
                        seen_mode=1; shift 2 ;;
                 -f|--follow) follow=1; shift ;;
                 *) echo "logs: unexpected argument $1" >&2; exit 2 ;;
@@ -1557,7 +1552,7 @@ LIEOF
                 echo "\$ $exe logs"; exec "$exe" logs
             fi
             command -v docker >/dev/null || { echo "Error: missing dependency 'docker' — install docker and start the daemon" >&2; exit 1; }
-            cmd=(docker compose -f docker-compose.dev.yml logs)
+            cmd=(docker compose -f "$(_msvc_compose_file prod)" logs)
             [ "$follow" = 1 ] && cmd+=(-f)
             cmd+=(server)
             _msvc_run "${cmd[@]}"
@@ -1584,13 +1579,13 @@ LIEOF
                 --native) [ $seen_mode = 0 ] || { echo "status: argument --native: not allowed with the other mode flags" >&2; exit 2; }
                         mode=native; seen_mode=1; shift ;;
                 --env) [ $seen_mode = 0 ] || { echo "status: argument --env: not allowed with the other mode flags" >&2; exit 2; }
-                       case "${2:-}" in dev|prod) env_arg="$2"; mode=compose;; *) echo "status: argument --env: invalid choice '$2'" >&2; exit 2;; esac
+                       case "${2:-}" in prod) env_arg="$2"; mode=compose;; dev) echo "status: --env dev retired — single prod compose stack" >&2; exit 2;; *) echo "status: argument --env: invalid choice '$2'" >&2; exit 2;; esac
                        seen_mode=1; shift 2 ;;
                 *) echo "status: unexpected argument $1" >&2; exit 2 ;;
             esac
         done
         if [ -z "$tgt" ] || { [ "$tgt" != server ] && [ "$tgt" != host ]; }; then
-            echo "usage: status {server,host} [--mode native|compose] [--env dev|prod]" >&2; exit 2; fi
+            echo "usage: status {server,host} [--mode native|compose] [--env prod]" >&2; exit 2; fi
         if [ "$tgt" = server ] && [ "${mode:-native}" = native ]; then
             inst="${MSRTC_OUT_ROOT:-$ROOT/out}/server"
             exe=""
@@ -1654,7 +1649,7 @@ LIEOF
                 --native) [ $seen_mode = 0 ] || { echo "clean: argument --native: not allowed with the other mode flags" >&2; exit 2; }
                         mode=native; seen_mode=1; shift ;;
                 --env) [ $seen_mode = 0 ] || { echo "clean: argument --env: not allowed with the other mode flags" >&2; exit 2; }
-                       case "${2:-}" in dev|prod) mode=compose;; *) echo "clean: argument --env: invalid choice '$2'" >&2; exit 2;; esac
+                       case "${2:-}" in prod) mode=compose;; dev) echo "clean: --env dev retired — single prod compose stack" >&2; exit 2;; *) echo "clean: argument --env: invalid choice '$2'" >&2; exit 2;; esac
                        seen_mode=1; shift 2 ;;
                 --all) do_all=1; shift ;;
                 *) echo "clean: unexpected argument $1" >&2; exit 2 ;;
@@ -1690,8 +1685,8 @@ LIEOF
             fi
             if [ "$mode" = compose ] || [ "$mode" = both ]; then
                 command -v docker >/dev/null || { echo "Error: missing dependency 'docker' — install docker and start the daemon" >&2; exit 1; }
-                cmd=(docker compose -f docker-compose.dev.yml down)
-                if [ "$do_all" = 1 ]; then cmd+=(-v); echo "Warning: clean --all deletes the cargo-cache named volume (the next server build recompiles fully, 15-30 minutes)"; fi
+                cmd=(docker compose -f "$(_msvc_compose_file prod)" down)
+                if [ "$do_all" = 1 ]; then cmd+=(-v); echo "Warning: clean --all deletes the PROD named volumes (etc: secrets/accounts + recordings — irreversible; the legacy cargo-cache volume note retired with the dev compose)"; fi
                 _msvc_run "${cmd[@]}"; rc=$?; [ $rc -ne 0 ] && exit $rc
             fi
         fi

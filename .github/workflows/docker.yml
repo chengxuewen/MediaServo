@@ -1,15 +1,24 @@
 name: Docker
 
+# Post container-build-rework (single artifact chain): the submodule CI can
+# validate the prod compose contract and build the TOOLCHAIN image
+# (Dockerfile.builder, self-contained). The tree-packaged prod image
+# (Dockerfile.tree) is NOT submodule-CI-buildable — it needs the parent
+# workspace layers (--build-context wrapcache/oxmgrpkg, R2 materials-ride-the-
+# tree) and is built via `./msrtc.sh build image prod` from the parent.
+# Registry publish (ghcr push + image smoke) is the deferred R0 publish batch.
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-    # PR build validation runs only on build-related changes (guards Dockerfile/compose breakage from merging, PIT-39 lesson)
+    # PR validation only on build-related changes (guards Dockerfile/compose
+    # breakage from merging, PIT-39 lesson)
     paths:
-      - 'Dockerfile'
+      - 'Dockerfile.builder'
+      - 'Dockerfile.tree'
+      - 'docker/**'
       - 'docker-compose.yml'
-      - 'docker-compose.dev.yml'
       - '.dockerignore'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -20,64 +29,27 @@ jobs:
     runs-on: ubuntu-22.04  # mediasoup prebuild base (widest glibc compatibility)
     permissions:
       contents: read
-      packages: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Validate docker-compose config (PIT-32 gate)
         run: |
-          docker compose -f docker-compose.yml config --quiet && echo "prod compose OK"
-          docker compose -f docker-compose.dev.yml config --quiet && echo "dev compose OK"
+          # The four-var contract uses ${VAR:?} fail-fast interpolation, which
+          # also aborts `compose config` when unset — feed dummy values for the
+          # syntax/structure validation only (real values live in the site .env).
+          TAG=ci MEDIASERVO_SFU_ANNOUNCED_IP=127.0.0.1 MEDIASERVO_ADMIN_PASSWORD=ci \
+            docker compose -f docker-compose.yml config --quiet && echo "prod compose OK"
           # Gate: production compose must NOT contain build: (image:+build: anti-pattern)
           if grep -qE '^\s+build:' docker-compose.yml; then
             echo "ERROR: docker-compose.yml contains build: — PIT-32 anti-pattern (image: never pulled)"
             exit 1
           fi
 
-      - name: Log in to ghcr.io
-        if: github.event_name == 'push'
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      # PR: build-only validation (no push); push: build and write the gha cache for the runtime step to reuse
-      - name: Build builder stage
+      - name: Build toolchain image (PR sanity, upstream posture)
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: Dockerfile.builder
           push: false
-          target: builder
-          cache-from: type=gha
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
-
-      - name: Build and push runtime image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: ${{ github.event_name == 'push' }}
-          target: runtime
-          tags: |
-            ghcr.io/org/mediaservo-server:latest
-            ghcr.io/org/mediaservo-server:sha-${{ github.sha }}
-          cache-from: type=gha
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,mode=max' || '' }}
-
-      # PIT-39 gate: a green build ≠ a runnable artifact — after push the runtime image must pass a smoke test
-      - name: Smoke test runtime image (PIT-39 gate)
-        if: github.event_name == 'push'
-        run: |
-          docker run --rm -d --name mediaservo-smoke -p 9800:9800 \
-            ghcr.io/org/mediaservo-server:sha-${{ github.sha }}
-          for i in $(seq 1 10); do
-            if curl -sf http://localhost:9800/health > /dev/null 2>&1; then
-              echo "SMOKE OK: runtime image health endpoint 200"
-              docker stop mediaservo-smoke
-              exit 0
-            fi
-            sleep 3
-          done
-          docker logs mediaservo-smoke 2>&1 | tail -30
-          echo "SMOKE FAILED: runtime image did not become healthy in 30s"
-          exit 1
+          build-args: |
+            MIRROR=upstream

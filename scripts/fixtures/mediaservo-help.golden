@@ -21,7 +21,7 @@ Observe:
   doctor | version           diagnosis (always exit 0) / workspace version
 
 Containers:
-  up | down                  compose face (--env dev|prod)
+  up | down                  compose face (prod tree stack; dev = dev up|down|ssh)
   exec | ps | data           container exec, process list, managed data
 
 Develop:
