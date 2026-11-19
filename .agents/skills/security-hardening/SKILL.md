@@ -1,6 +1,6 @@
 ---
 name: security-hardening
-description: "MediaServo security audit and hardening. OWASP Top 10 checks, hardcoded secrets/ports/URLs scan (merged review-hardcode), PSK/JWT auth flow review, WebSocket security, secrets management (PIT-10 lesson), mediasoup SFU transport security. Use before release, after auth changes, or when onboarding new PSK keys. Absorbs the retired review-hardcode scan (B11)."
+description: "MediaServo security audit and hardening. OWASP Top 10 checks, hardcoded secrets/ports/URLs scan (merged review-hardcode), PSK/JWT auth flow review, WebSocket security, secrets management (PIT-10 lesson), mediasoup SFU transport security. Use before release, after auth changes, or when onboarding new PSK keys. Also accessible via /review-hardcode."
 ---
 
 # security-hardening — Security Hardening
@@ -175,7 +175,7 @@ grep -rn 'apiKey\|api_key\|API_KEY' .opencode/ --include='*.json' --include='*.j
 
 ### Hardcoded-Value Severity (formerly review-hardcode)
 
-This skill absorbed the full scanning capability of `review-hardcode` (retired B11/O-30); that skill's slash command no longer exists.
+This skill absorbed the full scanning capability of `review-hardcode`. The `/review-hardcode` command points here.
 
 | Pattern | Severity | Notes |
 |------|--------|------|
