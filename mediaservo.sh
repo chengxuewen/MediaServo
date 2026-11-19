@@ -1043,7 +1043,7 @@ _ms_package() {  # $1=target $2=dist $3=brand $4=release(0/1)
             echo "WARN: Cargo.toml has uncommitted changes carrying version $ver — before release: commit the bump + tag v$ver (this package's CHANGES header version has no git anchor)" >&2
         fi
     fi
-    local dist="${2:-$ROOT/dist}" package_root="" rc=0
+    local dist="${2:-${MSRTC_OUT_ROOT:-$ROOT/out}/packages}" package_root="" rc=0
     mkdir -p "$dist"
     local staging; staging=$(mktemp -d "$dist/ms-$1-pkg-XXXXXX")
     if [ "$1" = host ] || [ "$1" = server ]; then
@@ -1092,7 +1092,9 @@ Offline site artifact set (container-build-rework B3.6):
   .env.example               four-var contract template (fill -> .env)
   DEPLOY-MANUAL.md           deployment engineer manual (install/tuning/drill)
   OPS-MANUAL.md              ops manual (load/up/verify/day-2/troubleshoot/rollback)
-  --dist DIR   parent output directory (default dist/); the set lands in
+  --dist DIR   parent output directory (default <out-root>/packages — the
+               workspace root when the parent shell injects MSRTC_OUT_ROOT,
+               else this repo's own out/); the set lands in
                <dist>/<brand>-server-image-<tag>/ (one folder per tag — hand
                that folder to the site as-is)
   --tag TAG    image tag (default: running container tag, else crate version)
@@ -1103,7 +1105,7 @@ PIEOF
             *) echo "package image: unexpected argument $1" >&2; return 2 ;;
         esac
     done
-    [ -n "$dist" ] || dist="$ROOT/dist"
+    [ -n "$dist" ] || dist="${MSRTC_OUT_ROOT:-$ROOT/out}/packages"
     if [ -z "$tag" ]; then
         tag=$(docker inspect "${brand}-server-1" --format '{{.Config.Image}}' 2>/dev/null | sed 's/.*://' || true)
     fi
@@ -1808,8 +1810,9 @@ Builds a release tarball: <dist>/<brand>-<target>-<ver>-<platform>-<arch>.tar.gz
 with a versioned top-level directory (bindings = one-cycle alias of sdk-field).
 `package image` is the offline site artifact set (image tar + sha256 + compose
 + .env template + runbook; see `package image -h`).
-  --dist DIR     output directory (default dist/; the parent release shell
-                 injects out/packages)
+  --dist DIR     output directory (default <out-root>/packages — the parent
+                 release shell injects the workspace out/; a standalone run
+                 defaults to this repo's own out/; the legacy dist/ retired)
   --brand NAME   package brand
   --release      Release configuration
 Unpack: tar xzf pkg.tar.gz -C <prefix> --strip-components=1
