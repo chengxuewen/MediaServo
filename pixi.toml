@@ -175,6 +175,7 @@ shell = "scripts/pixi-shell.sh"
 agents = "python3 scripts/agents/cli.py"
 gate-agents = "python3 scripts/agents/cli.py check"
 all-gates = "bash scripts/all-gates.sh"  # H4 fix (r43/r51): the full chain finally runnable
+design-tests = "python3 -m unittest discover -s .agents/skills/design-library/scripts/tests -q"
 gate-mcp = "python3 scripts/agents/gate_mcp.py"
 gate-guards = "python3 scripts/agents/check_guards.py"
 gate-memory = "bash scripts/agents/check_memory.sh"

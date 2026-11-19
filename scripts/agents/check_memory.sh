@@ -1,4 +1,4 @@
-#\!/usr/bin/env bash
+#!/usr/bin/env bash
 # C5 batch-close memory disposition gate (manual; not in all-gates).
 # Usage: bash scripts/agents/check_memory.sh <base>..<head>
 set -uo pipefail

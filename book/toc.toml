@@ -145,18 +145,18 @@ group = "Auth & plugins"
 
 [[chapter]]
 title = "Security Architecture"
-source = "docs/modules/security-architecture.md"
+source = "docs/modules/28-security-architecture.md"
 type = "explanation"
 group = "Quality & ops"
 
 [[chapter]]
 title = "Testing Strategy"
-source = "docs/modules/testing-strategy.md"
+source = "docs/modules/30-testing-strategy.md"
 type = "reference"
 group = "Quality & ops"
 
 [[chapter]]
 title = "Operations"
-source = "docs/modules/operations.md"
+source = "docs/modules/29-operations.md"
 type = "reference"
 group = "Quality & ops"

@@ -45,6 +45,8 @@ gate "build mediaservo-gates"      cargo build -q -p mediaservo-gates
 # Agent single-source layer (plan agent-infra-thin-shell): generated view and guards.
 gate "agent single source"         python3 scripts/agents/cli.py check
 gate "agent toolchain"             bash scripts/agents/tools-check.sh
+gate "mcp registry"               python3 scripts/agents/gate_mcp.py
+gate "design-library tests"       python3 -m unittest discover -s .agents/skills/design-library/scripts/tests -q
 # Book structure: check-only; SKIPs when build/book-src/SUMMARY.md is absent (bare clone).
 gate "book structure"              python3 scripts/book/book-check.py --structure
 
@@ -118,13 +120,16 @@ else
     SKIP "7 heavy gates" "--full not given"
 fi
 
+# leaked-tracked gate pair runs BEFORE the summary so its verdict appears in it
+gate "tracked-file leaks"      bash scripts/check-leaks.sh
+gate "leaks self-test"         bash scripts/check-leaks.sh --self-test
+
 echo; echo "════════ all-gates summary ════════"
 printf '%s\n' "${RESULTS[@]}"
 echo "══════════════════════════════════════"
 # census row (C46 extension): pass/skip/fail counts + skip list + execution
 # face — skips must never read as green (vacuous-green family), the counts make
 # them loud; evidence lines elsewhere name this face.
-gate "tracked-file leaks"      bash scripts/check-leaks.sh
 echo "ALL-GATES: PASS" | { [ "$FAILS" = 0 ] && cat || true; }
 [ "$FAILS" = 0 ] || echo "ALL-GATES: $FAILS FAILED"
 _np=0; for r in "${RESULTS[@]}"; do case "$r" in ✅*) _np=$(( _np + 1 ));; esac; done

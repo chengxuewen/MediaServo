@@ -13,11 +13,11 @@ MediaServo/
 ├── .cargo/
 ├── .codebuddy/
 ├── .devcontainer/
+├── .githooks/
+├── .github/
 ├── .omo/
 ├── .opencode/  # OpenCode configuration (plugins, MCP, LSP, instructions)
-├── .pixi-cache/
 ├── .qoder/
-├── .serena/
 ├── .vscode/
 ├── PolyOrch/  # product-surface submodule (orchestration UI)
 ├── bindings/  # FFI bindings (python / c)
@@ -36,7 +36,6 @@ MediaServo/
 ├── docker/  # container build + compose
 ├── docs/  # design docs (architecture + modules + reference + research)
 ├── examples/  # example programs (cxx / rs / py)
-├── out/
 ├── scripts/  # engineering scripts (gates / agent toolchain / book)
 │   └── agents/  # agent toolchain (generator, MCP launcher, guards, lints)
 ├── tools/  # build/host tools (mediaservo-gates)
@@ -206,9 +205,6 @@ _Project has entered the code implementation phase. Current state:_
 - D294: ABI recipe + decode-sink contract shipped in-tree (2026-10-15, consumer-side session; commits 721f47c..9c6745a)
 
 ### pitfalls (last 15)
-- PIT-226: grep -P Unicode class silently matches NOTHING under non-UTF-8 locale (2026-10-15)
-- PIT-227: conda-forge gcc's `-static-libstdc++` is a SILENT NO-OP for cdylib links (2026-10-15)
-- PIT-228: stop self-proof brand-needle vacuity — legacy name list matches NOTHING on branded trees (2026-10-16)
 
 ### conventions (last 10)
 - C50: Cross-end signaling & media-negotiation compatibility governance — four-plane model (2026-10-14, user-ratified)

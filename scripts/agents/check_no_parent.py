@@ -1,4 +1,4 @@
-#\!/usr/bin/env python3
+#!/usr/bin/env python3
 """Forbid parent-workspace literals in the submodule's agent layer (C15)."""
 import os
 import sys

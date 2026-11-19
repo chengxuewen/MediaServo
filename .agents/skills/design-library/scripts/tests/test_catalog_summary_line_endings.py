@@ -14,10 +14,14 @@ import tempfile
 import unittest
 from pathlib import Path
 
-REPO = next(
-    parent for parent in Path(__file__).resolve().parents
-    if (parent / "scripts" / "generate-catalog-summary.py").is_file()
-)
+try:
+    REPO = next(
+        parent for parent in Path(__file__).resolve().parents
+        if (parent / "scripts" / "generate-catalog-summary.py").is_file()
+    )
+except StopIteration:
+    raise unittest.SkipTest(
+        "donor-layout anchor missing (ported context; this is an upstream-only test)")
 DATA = REPO / "src/ui-ux-pro-max/data"
 SNAPSHOT_FILES = (
     "google-fonts.csv",

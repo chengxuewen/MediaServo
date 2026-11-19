@@ -1,4 +1,4 @@
-#\!/usr/bin/env python3
+#!/usr/bin/env python3
 """Run the agent guard family: numbering, skills, rule refs, parent literals."""
 import os
 import subprocess
@@ -21,12 +21,11 @@ CHECKS = [
 
 
 def check_c10():
-    proc = subprocess.run(["git", "ls-files", "-ci", "--exclude-standard"],
+    # Single implementation: the leaks gate (audit Full#2 de-fork).
+    proc = subprocess.run(["bash", "scripts/check-leaks.sh"],
                           cwd=ROOT, capture_output=True, text=True, check=False)
-    tracked = proc.stdout.strip()
-    if tracked:
-        print("C10 ✗ tracked files matched by .gitignore:")
-        print(tracked)
+    if proc.returncode != 0:
+        print("C10 ✗ " + (proc.stdout.strip() or "check-leaks failed"))
         return 1
     print("C10 ✓")
     return 0

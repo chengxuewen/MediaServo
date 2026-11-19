@@ -18,40 +18,43 @@ Two parts: hand-written anti-gaming rules above, generated gate list below.
   gates are not retrofitted.
 
 <!-- BEGIN:ci-gates -->
-## Gate list (generated from `scripts/all-gates.sh`; 34 sites)
+## Gate list (generated from `scripts/all-gates.sh`; 37 sites)
 
 1. `build mediaservo-gates`
 2. `agent single source`
 3. `agent toolchain`
-4. `book structure`
-5. `english gate self-test`
-6. `english only`
-7. `docs link self-test`
-8. `docs links`
-9. `docs numbering`
-10. `promises self-test`
-11. `doc promises`
-12. `fmt --check (incremental)`
-13. `changelog markers (F11-X)`
-14. `wire changelog pairing (G3)`
-15. `bindings version parity`
-16. `crate literal versions`
-17. `crate lanes reconciliation`
-18. `python retirement closure`
-19. `entry contract (E1-E3+golden)`
-20. `shellcheck mediaservo.sh (warning+)`
-21. `shellcheck parent msrtc.sh (warning+)`
-22. `check --workspace`
-23. `clippy -D --workspace`
-24. `server stub --all-targets`
-25. `test --workspace (lib)`
-26. `openapi validate`
-27. `build-c cdylibs`
-28. `test-cxx`
-29. `abi drift+client`
-30. `delivery smoke`
-31. `gui example`
-32. `gstreamer`
-33. `mediasoup`
-34. `tracked-file leaks`
+4. `mcp registry`
+5. `design-library tests`
+6. `book structure`
+7. `english gate self-test`
+8. `english only`
+9. `docs link self-test`
+10. `docs links`
+11. `docs numbering`
+12. `promises self-test`
+13. `doc promises`
+14. `fmt --check (incremental)`
+15. `changelog markers (F11-X)`
+16. `wire changelog pairing (G3)`
+17. `bindings version parity`
+18. `crate literal versions`
+19. `crate lanes reconciliation`
+20. `python retirement closure`
+21. `entry contract (E1-E3+golden)`
+22. `shellcheck mediaservo.sh (warning+)`
+23. `shellcheck parent msrtc.sh (warning+)`
+24. `check --workspace`
+25. `clippy -D --workspace`
+26. `server stub --all-targets`
+27. `test --workspace (lib)`
+28. `openapi validate`
+29. `build-c cdylibs`
+30. `test-cxx`
+31. `abi drift+client`
+32. `delivery smoke`
+33. `gui example`
+34. `gstreamer`
+35. `mediasoup`
+36. `tracked-file leaks`
+37. `leaks self-test`
 <!-- END:ci-gates -->

@@ -303,8 +303,8 @@ STRUCTURE_END = "<!-- END:structure-tree -->"
 # mechanical dir listing (can never drift); Tier 2 is OPTIONAL notes for
 # valuable annotations -- new dirs appear automatically without a note,
 # notes pointing at vanished dirs simply stop rendering.
-STRUCTURE_TERRITORIES = {"build", "target", ".pixi", ".cache", "node_modules",
-                         ".ruff_cache", ".git"}
+STRUCTURE_TERRITORIES = {"build", "target", ".pixi", ".pixi-cache", ".cache",
+                         "node_modules", ".ruff_cache", ".serena", "out", ".turbo", ".git"}
 STRUCTURE_NOTES = {
     ".agents": "agent system (rules / skills / agents / teams / memorys)",
     ".opencode": "OpenCode configuration (plugins, MCP, LSP, instructions)",
@@ -340,7 +340,7 @@ def structure_block(source):
     for name in sorted(os.listdir(root)):
         p = os.path.join(root, name)
         if (os.path.isdir(p) and name not in STRUCTURE_TERRITORIES
-                and not name.startswith(".git")):
+                and name != ".git"):
             names.append(name)
     lines = ["```", os.path.basename(root) + "/"]
     last = len(names) - 1

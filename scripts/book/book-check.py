@@ -21,11 +21,18 @@ def structure_failures():
         if not os.path.isfile(os.path.join(common.SRC, rel)):
             print(f"BOOK-CHECK ✗ SUMMARY entry missing: {rel}")
             failures += 1
+    return entries, failures
+
+
+def toc_source_failures() -> int:
+    """Pure-static toc source check -- runs BEFORE the SUMMARY gate so a
+    clean checkout can never report vacuous green (audit Full#2 finding)."""
+    failures = 0
     for entry in common.load_toc().get("chapter", []):
         if not os.path.isfile(os.path.join(common.ROOT, entry["source"])):
             print(f"BOOK-CHECK ✗ toc source missing: {entry['source']}")
             failures += 1
-    return entries, failures
+    return failures
 
 
 def main() -> int:
@@ -33,10 +40,14 @@ def main() -> int:
     parser.add_argument("--structure", action="store_true", help="only check SUMMARY entries")
     args = parser.parse_args()
 
+    toc_fails = toc_source_failures()
+    if toc_fails:
+        return 1
+
     summary = os.path.join(common.SRC, "SUMMARY.md")
     if not os.path.isfile(summary):
         if args.structure:
-            print("BOOK-CHECK - no build/book-src/SUMMARY.md (SKIP)")
+            print("BOOK-CHECK ✓ toc sources ok; no build/book-src/SUMMARY.md (structure SKIP)")
             return 0
         print("BOOK-CHECK ✗ no build/book-src (run: pixi run book-build)")
         return 1
