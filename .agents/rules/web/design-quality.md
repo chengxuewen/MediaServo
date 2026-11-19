@@ -35,6 +35,9 @@ suggestions -- not a redesign. Tells, beyond the banned patterns above:
 - Uppercase letter-spaced labels, italic emphasis, 3+ font weights
 - Every element centered; every section the same width
 
+Industry-specific anti-patterns (beyond these generic tells): consult the
+design-library skill (`data/ui-reasoning.csv`, Anti_Patterns column).
+
 ### Required Qualities
 
 Every meaningful frontend surface should demonstrate at least four of these:
@@ -60,11 +63,46 @@ for decoration is the same disease in a new outfit. (The style directions
 below stay valid when they serve the product's pushed direction, not as
 decoration swaps.)
 
+### Style-system precedence (multi-style era)
+
+Faithfully implementing a CHOSEN design system (Fluent / Material / Ant /
+Carbon via `www/packages/ui/themes/`) is not "unmodified library defaults
+passed off as finished design": when a style system is the ruled direction,
+conformance is judged against THAT system's patterns (see the theme file's
+projection notes). The template test still applies to what the system
+leaves open -- layout composition, content hierarchy, signature moments.
+
+## Accessibility floor (universal, all styles)
+
+- Text/background contrast meets 4.5:1 for body text (3:1 for large text).
+- Keyboard focus is visible; nothing is keyboard-trapped.
+- Motion respects `prefers-reduced-motion`; no information is conveyed by
+  motion or by color alone.
+- Interactive targets are reachable and operable without a pointer.
+
+## Base style parameters (style-relative values)
+
+The values below are the BASE style's parameters -- an active style system
+(`themes/`) overrides them per its own parameter set; see the
+design-library skill and each theme file's projection notes. Quality
+floors (hierarchy, alignment discipline, the a11y floor, no-AI-tells) are
+style-independent and stay binding under every theme.
+
+- Grid: 4px base (Carbon's 2x grid = 8px under its theme)
+- Icons: lucide at 16/18px; the icon-size dimension is owned by the token layer
+- Type: two weights (400/500), sentence case
+- Accent budget: one restrained accent (= --ms-color-primary; semantic
+  roles exempt) in the BASE style; Material/Ant bring their own scales
+- Motion: one easing curve in the BASE style; each system ships its family
+- Radius and nested-radius math: base values; per-system scales in themes
+
 ## Nine-Step Visual Pass (ordered)
 
 Visual changes run in this order -- each step builds on the previous frame.
 Micro-fixes touch only the relevant step. Values adapt to the token vocabulary
-(`tokens.css` stays the single source for color and type roles):
+(`tokens.css` stays the single source for color and type roles), and the
+numeric values below are BASE parameters -- an active theme overrides them
+per its projection notes:
 
 1. Spacing -- 4px grid; same-class elements share sizes; navigation densest.
 2. Color -- neutral scale + three text roles, all via tokens; ONE restrained

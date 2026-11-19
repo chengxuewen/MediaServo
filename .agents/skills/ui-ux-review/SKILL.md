@@ -25,18 +25,22 @@ description: Structured interface-quality review method. Use when evaluating a U
 1. **Three states.** Inspect the surface in **empty**, **error**, and **loading**
    states — not just the happy path. A surface that only works when full of data is
    not done. Screenshot each state that is reachable.
-2. **Contrast.** Check text/background contrast for primary, secondary, and muted
+2. **Contrast + motion.** Check text/background contrast for primary, secondary, and muted
    text (the `--ms-color-text*` tokens on their surfaces). Flag any pair below the
-   readable threshold; muted-on-white is the usual offender.
+   readable threshold; muted-on-white is the usual offender. Motion respects
+   `prefers-reduced-motion`, and no information is conveyed by motion or color alone.
 3. **Focus order & keyboard.** Tab through interactive elements: order matches the
    visual layout, focus is visible, nothing is keyboard-trapped. Note the focus ring.
-4. **Token consistency.** Verify styles consume `@mediaservo/ui` tokens (see
-   `design-system`); flag raw hex / magic spacing / off-palette values.
+4. **Token consistency + style conformance.** Verify styles consume `@mediaservo/ui` tokens (see
+   `design-system`); flag raw hex / magic spacing / off-palette values. When a
+   theme is active (`html.theme-*`), verify the rendered values match that
+   theme file's projection notes.
 5. **Anti-template + signs.** Apply `.agents/rules/web/design-quality.md`:
    audit the AI-look tells and grade severity (heavy / light / none — "none"
-   earns at most 2-3 small suggestions, not a redesign); then hierarchy,
-   layering, intentional spacing — not a generic uniform card grid. State the
-   reason, not just "looks template-y".
+   earns at most 2-3 small suggestions, not a redesign); industry-specific
+   anti-patterns come from the design-library (`data/ui-reasoning.csv`);
+   then hierarchy, layering, intentional spacing — not a generic uniform
+   card grid. State the reason, not just "looks template-y".
 6. **Template test.** Swap in another product's name and content: if the
    surface still works unchanged, the direction is not pushed enough — flag it
    and name the elements that stayed generic.

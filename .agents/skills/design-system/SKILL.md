@@ -48,6 +48,23 @@ description: Govern the MediaServo design-token layer (@mediaservo/ui). Use when
 - Every new `--ms-*` token has a consumer and follows the naming convention.
 - The app entry imports `@mediaservo/ui/tokens.css` exactly once.
 
+## Governance (design-multi-style)
+
+- `www/packages/ui/themes/*.css` are true sources owned here; every theme
+  file carries a projection-notes header (which official dimensions are
+  adopted, which degrade to system-stack approximations, spec version).
+- Theme selectors are class-scoped (`html.theme-<name>` light,
+  `html.theme-<name>.dark` dark); `tokens.css` stays the semantic contract
+  -- existing names are never renamed or semantically drifted (additions
+  only).
+- New-token naming authority sits here: additive-only, each addition lands
+  with a consumer or an explicit reservation note.
+- Icon system ownership: icon-set conventions and the `--ms-icon-size`
+  dimension live in the token layer.
+- Candidate landing flow: design-library outputs are candidates -> WCAG
+  contrast check -> design-system lands the values into theme files. The
+  library engine's `--persist`/`--preview` never writes here.
+
 ## Boundaries
 
 - This skill governs token mechanics; it does not approve visual quality
