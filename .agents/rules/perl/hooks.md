@@ -12,7 +12,8 @@ paths:
 
 ## PostToolUse Hooks
 
-Configure in `~/.claude/settings.json`:
+Host-orchestration example (upstream Claude Code settings form; this repo's
+hook face lives under `.agents/` and is not configured there -- reference only):
 
 - **perltidy**: Auto-format `.pl` and `.pm` files after edit
 - **perlcritic**: Run lint check after editing `.pm` files

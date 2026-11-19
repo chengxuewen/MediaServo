@@ -944,6 +944,8 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
 
 ## D290: Book 站点 —— English-only + VE 一致的 Python 构建 + H6 (2026-10-30, U1=C / U2=A / U3=B / U4=A)
 
+> 注记（2026-11-19 audit Full#2）：本条在文中位置晚于 D296/D297——属补录追加，编号即记录时序，允许物理位置滞后（登记规则见文件头）。
+
 - **决策**: mdBook 站点采用 VE 同构：`book/toc.toml` + `tomllib` + `scripts/book/*.py`（H6：6 文件 / 1200 行）；输出 `build/book`；不引入 gettext / `mdbook-i18n-helpers` / `po/`；未登记文档按 Appendix append-all（>60 章 WARN）；mermaid vendor + 懒加载；all-gates 只做 SUMMARY 结构检查（不建书）。
 - **原因**: English-only（C49）；与 VE 构建行为 1:1 降低迁移成本；U3=B 避免 all-gates 变慢。
 - **影响**: H6 档进入 SR6 口径 H1-H6；`book-build` / `book-check` 为手动任务；`book/` 仅子模块持有。

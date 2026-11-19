@@ -90,7 +90,7 @@ sequential track. Do not use it for plans/docs (type mismatch).
 **Applies**: hosts providing `team_create` / `team_task_create` (opencode /
 omo), and reviews that parallelize with low inter-member dependency.
 
-Keeps the original team-mode semantics: 3-5 **read-only** members, **no git
+Keeps the original team-mode semantics: up to 4 **read-only** members (team quota), **no git
 writes**, each member in a true independent context (strongest isolation), lead
 merges, dedupes, publishes the ranked report, and **closes the team
 immediately**. Member briefs and output formats are identical to Track 1.

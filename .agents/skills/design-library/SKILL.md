@@ -49,4 +49,11 @@ Evidence standard: every recommendation cites its CSV row or
 data-provenance.json (bottom line #5).
 
 Quality floor for candidates: palette candidates must pass the WCAG
-contrast check before design-system may land them as theme values.
+contrast check. The check is EXECUTED by `design-system`'s landing flow
+(it owns the gate); this skill only states the floor.
+
+Provenance note: this is a 2B install path (verbatim data port from a
+vetted MIT donor, ledger `docs/reference/design-library.md`), not a 2C
+mechanism adoption -- mechanism-porting's "never port content" rule does
+not apply here; the governance equivalent is the dedicated ledger + the
+boundary contract above.

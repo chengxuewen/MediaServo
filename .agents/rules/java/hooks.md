@@ -11,7 +11,8 @@ paths:
 
 ## PostToolUse Hooks
 
-Configure in `~/.claude/settings.json`:
+Host-orchestration example (upstream Claude Code settings form; this repo's
+hook face lives under `.agents/` and is not configured there -- reference only):
 
 - **google-java-format**: Auto-format `.java` files after edit
 - **checkstyle**: Run style checks after editing Java files

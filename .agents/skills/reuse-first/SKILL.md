@@ -1,6 +1,6 @@
 ---
 name: reuse-first
-description: "Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, wrapper, generator, config block). Four-step evidence chain — face inventory scan, NOTE reading, command-body verification, waiver declaration. Use when about to write a new X, or when a review finds a suspected duplicate. The charter (docs/governance/reuse-first-charter.md, ledger C60) is normative; this skill is its operational protocol."
+description: "Borrow before build: prove the existing supplier face cannot take it BEFORE writing any new mechanism (CMake target/function, script verb, wrapper, generator, config block). Four-step evidence chain — face inventory scan, NOTE reading, command-body verification, waiver declaration. Use when about to write a new X, or when a review finds a suspected duplicate. The charter (docs/governance/reuse-first-consumer.md projection, ledger C60) is normative; this skill is its operational protocol."
 ---
 
 # Reuse-First — Borrow Before Build
@@ -80,4 +80,5 @@ A newly registered button/target/verb is exercised once before the task is calle
 - `think-before-act` — the approval gate (whether to act); this skill sits **before** it (build vs borrow)
 - `source-driven-development` — external/upstream docs; this skill is the in-repo counterpart
 - `code-simplification` / ponytail — post-hoc pruning; this skill is pre-hoc prevention
-- **Normative source**: `docs/governance/reuse-first-charter.md` (ratified 2026-11-05) · ledger `C60` · consumer projection `docs/governance/reuse-first-consumer.md` (planned, PLAN B3) · CI lint = conditional (charter §1.6: graduates only after 2 more human-side misses)
+- **Normative source**: `docs/governance/reuse-first-consumer.md` (the charter itself was consumed into the consumer projection; no separate charter file exists -- audit Full#2 correction) · ledger `C60` · CI lint = conditional (graduates only after 2 more human-side misses)
+- `mechanism-porting` — consumes this evidence chain when a ruled adoption needs the reuse check (added 2026-11-19 audit)

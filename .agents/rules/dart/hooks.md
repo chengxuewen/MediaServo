@@ -10,7 +10,8 @@ paths:
 
 ## PostToolUse Hooks
 
-Configure in `~/.claude/settings.json`:
+Host-orchestration example (upstream Claude Code settings form; this repo's
+hook face lives under `.agents/` and is not configured there -- reference only):
 
 - **dart format**: Auto-format `.dart` files after edit
 - **dart analyze**: Run static analysis after editing Dart files and surface warnings

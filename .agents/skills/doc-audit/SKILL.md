@@ -94,7 +94,7 @@ Check Phase progress vs doc claims vs code reality.
 ## Audit Modes
 
 ### A. Team Mode (recommended — large audits)
-3+ large documents. Convene a 4-6 member panel via the shared engine
+3+ large documents. Convene a panel (up to 4 members -- team quota) via the shared engine
 `expert-panel-review` — its Track 2 (parallel) when the host provides
 `team_create`, its Track 1 (sequential role passes) otherwise. The four
 dimension lanes are owned by THIS skill; the engine owns how the team runs:

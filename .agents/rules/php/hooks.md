@@ -12,7 +12,8 @@ paths:
 
 ## PostToolUse Hooks
 
-Configure in `~/.claude/settings.json`:
+Host-orchestration example (upstream Claude Code settings form; this repo's
+hook face lives under `.agents/` and is not configured there -- reference only):
 
 - **Pint / PHP-CS-Fixer**: Auto-format edited `.php` files.
 - **PHPStan / Psalm**: Run static analysis after PHP edits in typed codebases.

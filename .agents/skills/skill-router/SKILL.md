@@ -22,13 +22,13 @@ Read the user message and classify:
 | Class | Keywords | Default Recommendation |
 |------|--------|---------|
 | **Implement** | "添加"/"实现"/"创建"/"修改" (add/implement/create/modify) | `/think-before-act` + `/test-driven-development` | <!-- c49:trigger -->
-| **Fix** | "修复"/"bug"/"错误"/"不工作" (fix/bug/error/not working) | `/systematic-debugging` | <!-- c49:trigger -->
-| **Refactor** | "重构"/"优化"/"简化"/"清理" (refactor/optimize/simplify/cleanup) | `/think-before-act` + `/remove-ai-slops` | <!-- c49:trigger -->
-| **Design** | "设计"/"架构"/"方案"/"怎么做" (design/architecture/plan/how-to) | `/brainstorming` + `/openspec-propose` | <!-- c49:trigger -->
-| **Test** | "测试"/"E2E"/"覆盖率" (test/E2E/coverage) | `/test-driven-development` + `/playwright` | <!-- c49:trigger -->
+| **Fix** | "修复"/"bug"/"错误"/"不工作" (fix/bug/error/not working) | `/debugging-and-error-recovery` | <!-- c49:trigger -->
+| **Refactor** | "重构"/"优化"/"简化"/"清理" (refactor/optimize/simplify/cleanup) | `/think-before-act` + `/ui-ux-review` (design-quality rules for de-slop) | <!-- c49:trigger -->
+| **Design** | "设计"/"架构"/"方案"/"怎么做" (design/architecture/plan/how-to) | `/openspec-propose` + `/think-before-act` | <!-- c49:trigger -->
+| **Test** | "测试"/"E2E"/"覆盖率" (test/E2E/coverage) | `/test-driven-development` + `/browser-testing` | <!-- c49:trigger -->
 | **Docs** | "文档"/"README"/"说明" (docs/README/explanation) | `/doc-audit` | <!-- c49:trigger -->
-| **Security** | "安全"/"权限"/"认证" (security/permissions/auth) | `/security-review` | <!-- c49:trigger -->
-| **Explore** | "调研"/"对比"/"有什么方案" (research/compare/what options) | `/repo-audit` + librarian agent | <!-- c49:trigger -->
+| **Security** | "安全"/"权限"/"认证" (security/permissions/auth) | `/security-hardening` | <!-- c49:trigger -->
+| **Explore** | "调研"/"对比"/"有什么方案" (research/compare/what options) | `/repo-audit` (external scan + 2C lanes) | <!-- c49:trigger -->
 | **Ambiguous** | no clear keyword | propose 2-3 possible directions, let the user choose |
 
 ### Step 2: Context Check

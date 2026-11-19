@@ -124,34 +124,8 @@ Before submitting work touching multiple crates:
 
 ## Task → skill routing
 
-After identifying user intent, proactively suggest loading the matching skill:
-
-| Keyword/scenario | Suggested skill | Trigger condition |
-|------------|---------|---------|
-| "实现/添加/创建 + 功能" (implement/add/create + feature) | `incremental-implementation` | cross-file changes | <!-- c49:trigger -->
-| "修复/bug/报错/不工作" (fix/bug/error/not working) | `systematic-debugging` | runtime errors | <!-- c49:trigger -->
-| "怎么用/文档/API + 库名" (how to use/docs/API + lib name) | `source-driven-development` | external dependencies | <!-- c49:trigger -->
-| "写测试/测试失败" (write tests/test failure) | `test-driven-development` | test-related work | <!-- c49:trigger -->
-| "页面/UI/前端/Admin" (page/UI/frontend/Admin) | `browser-testing` | browser changes | <!-- c49:trigger -->
-| "安全/密钥/认证/漏洞" (security/secret/auth/vulnerability) | `security-hardening` | security work | <!-- c49:trigger -->
-| "审查/review/检查代码" (review/inspect code) | code-review rules | after code changes | <!-- c49:trigger -->
-| "性能/慢/卡顿/延迟" (performance/slow/lag/latency) | `performance-optimization` | performance issues | <!-- c49:trigger -->
-| "架构/设计/trait/协议" (architecture/design/trait/protocol) | `api-interface-design` | API design | <!-- c49:trigger -->
-| "切换/上下文/语言" (switch/context/language) | `context-engineering` | multi-language tasks | <!-- c49:trigger -->
-| "CI/CD/Docker/pipeline" | `ci-cd-automation` | CI changes |
-| "简化/重构/清理" (simplify/refactor/cleanup) | `code-simplification` | reduce complexity | <!-- c49:trigger -->
-| "优化 agent/审计/技能" (optimize agents/audit/skills) | `repo-audit` | agent ecosystem | <!-- c49:trigger -->
-| "总结/记录/教训/经验" (summarize/log lessons) | `lesson-review` | session end | <!-- c49:trigger -->
-| before any non-trivial action | `think-before-act` | automatic |
-| "审计/一致性/文档矛盾" (audit/consistency/doc conflicts) | `doc-audit` | docs audit | <!-- c49:trigger -->
-| "方案/提案/标准化变更" (proposal/spec-driven change) | `openspec-propose` | architecture changes | <!-- c49:trigger -->
-| "实施/按方案/逐步" (implement per plan/step by step) | `openspec-apply-change` | plan execution | <!-- c49:trigger -->
-| "归档/完成变更" (archive/complete change) | `openspec-archive-change` | change archiving | <!-- c49:trigger -->
-| "探索/调研/思路" (explore/research/ideas) | `openspec-explore` | option research | <!-- c49:trigger -->
-| "生成测试/测试骨架" (generate tests/test skeleton) | `test-harness` | test tooling | <!-- c49:trigger -->
-| "硬编码/密钥/端口扫描" (hardcode/secret/port scan) | `security-hardening` | security scan (Phase 1 quick scan) | <!-- c49:trigger -->
-| "文档转技能/书籍" (docs/book → skill) | `book-to-skill` | document conversion | <!-- c49:trigger -->
-| "同步规格/delta" (sync specs/delta) | `openspec-sync-specs` | spec sync | <!-- c49:trigger -->
+The routing table lives in ONE place: `.agents/skills/TRIGGERS.md`
+(and the skill-router intent classes). Do not maintain a copy here.
 
 ## Proactive suggestion mechanism
 

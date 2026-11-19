@@ -88,8 +88,6 @@ hook layer for the commit being born + gate layer for anchor..HEAD):
 
 Types: feat, fix, refactor, docs, test, chore, perf, ci
 
-Note: Attribution disabled globally via ~/.claude/settings.json.
-
 ## Pull Request Workflow
 
 When creating PRs:

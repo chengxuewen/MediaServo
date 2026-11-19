@@ -38,7 +38,7 @@ Before marking code complete:
 
 ## Security Review Triggers
 
-**STOP and use security-reviewer agent when:**
+**STOP and invoke the `security-hardening` skill when:**
 
 - Authentication or authorization code
 - User input handling
@@ -64,7 +64,7 @@ Use these agents for code review:
 | Agent | Purpose |
 |-------|---------|
 | **code-reviewer** | General code quality, patterns, best practices |
-| **security-reviewer** | Security vulnerabilities, OWASP Top 10 |
+| **security-hardening** skill | Security vulnerabilities, OWASP Top 10 |
 | **typescript-reviewer** | TypeScript/JavaScript specific issues |
 | **python-reviewer** | Python specific issues |
 | **go-reviewer** | Go specific issues |

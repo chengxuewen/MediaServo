@@ -13,7 +13,8 @@ paths:
 
 ## PostToolUse Hooks
 
-Configure in `~/.claude/settings.json`:
+Host-orchestration example (upstream Claude Code settings form; this repo's
+hook face lives under `.agents/` and is not configured there -- reference only):
 
 - **dotnet format**: Auto-format edited C# files and apply analyzer fixes
 - **dotnet build**: Verify the solution or project still compiles after edits

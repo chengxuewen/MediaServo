@@ -138,4 +138,4 @@ match order_service.find_by_id(id) {
 ## References
 
 See skill: `rust-patterns` for unsafe code guidelines and ownership patterns.
-See skill: `security-review` for general security checklists.
+See skill: `security-hardening` for general security checklists.

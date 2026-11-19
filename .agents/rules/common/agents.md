@@ -15,9 +15,9 @@ This path is configured in `.opencode/opencode.json`. Do NOT use memory_create_e
 
 ## Available Agents
 
-Located in `.agents/agents/` (role layer lands with plan `agent-subagent-layer` B3/B4;
-until then the main session orchestrates directly). The former `~/.claude/agents/`
-roster is retired -- it was an external system with no in-repo anchor.
+Located in `.agents/agents/` (role layer LANDED, B1b; the main session still orchestrates
+by default). The former `~/.claude/agents/` roster is retired -- it was an external
+system with no in-repo anchor.
 
 Planned roster (11 = 10 submodule + 1 parent shell; hard cap, see Quotas below):
 
@@ -88,7 +88,7 @@ will read this table, keep the shape):
 | role files (true source, both repos) | 11 | submodule 10 + parent 1; inherited visibility does not count | add one, remove one |
 | skills | net +2 per quarter | true-source directories only; projection does not count | retire one first, or prove no existing skill covers it |
 | MCP servers | no count limit (ruled 11-13) | every entry version-pinned & launcher-routed; gate_mcp enforces pins + same-name, not count | n/a (quality gated by pins, not count) |
-| members per team | 4 | standing expert teams | answer "which new judgment path does this member bring?" first |
+| members per team | 4 | standing teams AND convened panels (larger needs a user ruling) | answer "which new judgment path does this member bring?" first |
 
 **Role admission rule**: a role exists if and only if it can state ONE acceptance
 command/criterion nobody else can give. No independent judgment path -> no

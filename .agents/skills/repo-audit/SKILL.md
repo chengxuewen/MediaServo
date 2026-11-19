@@ -6,7 +6,7 @@ description: Whole-repo engineering audit across 11 domains (skills, rules, mcp,
 # repo-audit — Whole-Repo Engineering Audit + Ecosystem Scan
 
 > Two-tier scan (Quick daily / Full deep) across **11 engineering domains**, quality scoring, security-audit gate.
-> Governing principle: **gates-first** -- this repo runs 32 gate sites in `scripts/all-gates.sh` (quick 25 + heavy 7);
+> Governing principle: **gates-first** -- this repo runs 34 gate sites in `scripts/all-gates.sh` (quick 27 + heavy 7);
 > the scan never re-checks by hand what a gate proves. The scan (a) verifies every surface HAS an enforcement owner,
 > (b) runs gap checks where no gate exists, (c) spends deep analysis only where judgment is needed.
 > Reference precedents: [autoskills](https://github.com/B143KC47/autoskills), [agent-skill-discovery](https://github.com/ericgandrade/claude-superskills), [skill-update-team](https://github.com/franktsai2008-eng/skill-update-team), [agent-self-audit](https://github.com/Xxt-XN/agent-self-audit).
@@ -70,7 +70,7 @@ With no arguments, pop up:
 
 ## Phase 1: Quick Scan (default)
 
-### 1A: Local fast audit (10 items, one per domain)
+### 1A: Local fast audit (11 items, one per domain)
 
 ```
 1. skills:    every SKILL.md has name + description frontmatter; directory table covers all
@@ -106,7 +106,7 @@ Fetch READMEs with `webfetch`; 3-dimension quick scoring: tech-stack fit / alrea
 
 ## Phase 2: Full Scan
 
-### 2A: Local deep audit (24 items across 10 domains)
+### 2A: Local deep audit (26+ items across 11 domains)
 
 | Domain | Deep checks |
 |--------|-------------|

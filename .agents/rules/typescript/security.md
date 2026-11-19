@@ -25,4 +25,4 @@ if (!apiKey) {
 
 ## Agent Support
 
-- Use **security-reviewer** skill for comprehensive security audits
+- Use the `security-hardening` skill for comprehensive security audits

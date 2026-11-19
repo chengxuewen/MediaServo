@@ -55,4 +55,4 @@ await connection.QueryAsync<Order>(sql, new { customerId });
 
 ## References
 
-See skill: `security-review` for broader application security review checklists.
+See skill: `security-hardening` for broader application security review checklists.

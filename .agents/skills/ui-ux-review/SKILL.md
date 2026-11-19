@@ -35,15 +35,14 @@ description: Structured interface-quality review method. Use when evaluating a U
    `design-system`); flag raw hex / magic spacing / off-palette values. When a
    theme is active (`html.theme-*`), verify the rendered values match that
    theme file's projection notes.
-5. **Anti-template + signs.** Apply `.agents/rules/web/design-quality.md`:
-   audit the AI-look tells and grade severity (heavy / light / none — "none"
-   earns at most 2-3 small suggestions, not a redesign); industry-specific
-   anti-patterns come from the design-library (`data/ui-reasoning.csv`);
-   then hierarchy, layering, intentional spacing — not a generic uniform
-   card grid. State the reason, not just "looks template-y".
-6. **Template test.** Swap in another product's name and content: if the
-   surface still works unchanged, the direction is not pushed enough — flag it
-   and name the elements that stayed generic.
+5. **Anti-template + signs.** The tells taxonomy, the severity triage and
+   the industry anti-pattern reference live in ONE place:
+   `.agents/rules/web/design-quality.md` (+ design-library
+   `data/ui-reasoning.csv`). Apply them; then judge hierarchy, layering,
+   intentional spacing. State the reason, not just "looks template-y".
+6. **Template test.** Run it per `.agents/rules/web/design-quality.md`
+   (single source): swap a sibling product's name in; if the surface still
+   works unchanged, flag the direction and name the generic elements.
 7. **Verdict.** Reflect (re-open every cited location; all CRITICAL/HIGH,
    sample the rest), then emit a verdict (pass / needs-work) plus a findings
    table: `check | evidence (screenshot / file:line) | rule or token violated |
