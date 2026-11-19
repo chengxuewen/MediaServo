@@ -1,54 +1,59 @@
-# 现场部署手册（离线生产镜像）· 部署工程师
+# Site Deployment Manual (Offline Production Image) — Deployment Engineer
 
-> **本手册 = 部署工程师手册**（首次安装与上线：系统调优/防火墙/SELinux/离线
-> 加载→启动→验证/凭据交付/回滚演练）；随交付包发布名 `DEPLOY-MANUAL.md`。
-> **日常运维（起/验/日志/备份/排障/升级回滚/速查卡）见同包《运维手册》
-> `OPS-MANUAL.md`**。
-> 适用产物 = 离线交付产物集（整目录）；目标环境 = 受限内网 CentOS 8 现场
-> （无外网、无镜像仓库）。
+> **This manual = the deployment engineer's handbook** (first install and
+> go-live: system tuning / firewall / SELinux / offline load → start → verify /
+> credential handover / rollback drill). It ships in the delivery folder as
+> `DEPLOY-MANUAL.md`.
+> **Day-2 operations (start/verify/logs/backup/troubleshooting/upgrade/rollback/
+> cheat card) live in the companion `OPS-MANUAL.md`.**
+> Scope = the offline delivery folder (one directory); target environment =
+> restricted intranet CentOS 8 sites (no internet, no image registry).
 
-## 0. 产物集与边界
+## 0. Delivery Set and Boundaries
 
-交付物 = 整目录 `msrtc-server-image-<tag>/`（每版本一目录，拷贝该目录即完成交付）：
+The deliverable is one directory `msrtc-server-image-<tag>/` (one folder per
+release; copying that folder IS the handover):
 
-| 文件 | 用途 |
+| File | Purpose |
 |---|---|
-| `msrtc-server-<tag>.tar` | `docker save` 镜像（双 tag：`<tag>` + `latest`） |
-| `SHA256SUMS` | tar 包 sha256 清单（交付对账） |
-| `docker-compose.yml` | 生产编排（单容器：服务 + 网关 + 进程管理） |
-| `.env.example` | 四变量契约模板（拷贝为 `.env` 填写） |
-| `DEPLOY-MANUAL.md` | 本手册 |
+| `msrtc-server-<tag>.tar` | `docker save` image archive (dual tags: `<tag>` + `latest`) |
+| `SHA256SUMS` | sha256 manifest of the tar (handover reconciliation) |
+| `docker-compose.yml` | production compose (single container: service + gateway + process manager) |
+| `.env.example` | four-variable contract template (copy to `.env` and fill) |
+| `DEPLOY-MANUAL.md` | this manual |
 
-**单容器拓扑**：`msrtc-server`（server + caddy + oxmgr PID1）。oxmgr 牧羊
-server/web 两进程；caddy 8080 服务浏览器，9800 直连 host-agent。**无独立 proxy
-容器**（无独立代理容器）。运行基底 debian:bookworm-slim。
+**Single-container topology**: `msrtc-server` (server + caddy + oxmgr as PID1).
+oxmgr shepherds the server/web processes; caddy serves browsers on 8080, while
+9800 is the direct host-agent face. **No separate proxy container.** Runtime
+base: debian:bookworm-slim.
 
-**回滚边界 = 镜像 + 配置级**（`data restore` 挂账）：回滚靠旧 tar 重新 load +
-`.env` 的 `TAG` 重钉；数据卷不动。
+**Rollback boundary = image + configuration level** (volume-level restore is a
+tracked follow-up): rollback = re-load the old tar + re-pin `TAG` in `.env`;
+data volumes are untouched.
 
-## 1. 前置：CentOS 8 装 docker-ce（vault 源）
+## 1. Prerequisite: docker-ce on CentOS 8 (vault repos)
 
-CentOS 8 已 EOL，`mirror.centos.org` 失效 → 切 `vault.centos.org`：
+CentOS 8 is EOL and `mirror.centos.org` is dead → switch to `vault.centos.org`:
 
 ```bash
-# 基础源切 vault（EOL 归档）
+# Point the base repos at vault (EOL archive)
 sed -i 's|mirror.centos.org|vault.centos.org|g; s|^#baseurl|baseurl|g; s|^mirrorlist|#mirrorlist|g' \
     /etc/yum.repos.d/CentOS-*.repo
 dnf install -y dnf-utils
-# docker-ce 官方仓（CentOS 8 路径仍在）
+# docker-ce official repo (the CentOS 8 path is still served)
 dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
 dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable --now docker
-docker compose version   # 确认 compose v2 插件
+docker compose version   # confirm the compose v2 plugin
 ```
 
-> 离线现场若无法访问 download.docker.com：在有网机器 `dnf download --resolve
-> docker-ce docker-ce-cli containerd.io docker-compose-plugin` 下载 rpm 集，
-> 拷贝到现场 `dnf localinstall *.rpm`。
+> If the site cannot reach download.docker.com: on an internet-connected
+  machine run `dnf download --resolve docker-ce docker-ce-cli containerd.io
+  docker-compose-plugin`, copy the rpm set over, and `dnf localinstall *.rpm`.
 
-## 2. 系统调优
+## 2. System Tuning
 
-### 2.1 UDP sysctl（SFU RTP 收包）
+### 2.1 UDP sysctl (SFU RTP receive path)
 
 ```bash
 cat > /etc/sysctl.d/99-msrtc.conf <<'EOF'
@@ -58,15 +63,15 @@ EOF
 sysctl --system
 ```
 
-### 2.2 firewalld 端口表
+### 2.2 firewalld Port Table
 
-| 端口 | 协议 | 用途 |
+| Port | Proto | Purpose |
 |---|---|---|
-| 8080 | tcp | 浏览器/caddy 入口（admin/voice/API/WS 反代） |
-| 9800 | tcp | host-agent 直连 /ws |
+| 8080 | tcp | browser / caddy entry (admin/voice/API/WS reverse proxy) |
+| 9800 | tcp | host-agent direct /ws |
 | 20000 | udp | SFU RTC |
-| 40000-40100 | udp | SFU RTC 端口段 |
-| 2222 | tcp | ssh 维护口（`${SSH_PORT:-2222}:22`） |
+| 40000-40100 | udp | SFU RTC range |
+| 2222 | tcp | ssh maintenance (`${SSH_PORT:-2222}:22`) |
 
 ```bash
 firewall-cmd --permanent --add-port=8080/tcp
@@ -79,139 +84,156 @@ firewall-cmd --reload
 
 ### 2.3 SELinux
 
-命名卷由 docker 管理标签，通常 enforcing 即可运行。若 bind mount 需 `:z`
-后缀。**不要 blanket 关闭 SELinux**；遇阻先查 `ausearch -m avc -ts recent`，
-按审计日志精修策略。
+Named volumes get their labels managed by docker; enforcing mode usually just
+works. Bind mounts may need the `:z` suffix. **Do NOT blanket-disable
+SELinux**; on denials check `ausearch -m avc -ts recent` first and refine the
+policy from the audit log.
 
-## 3. 离线部署
+## 3. Offline Deployment
 
 ```bash
-# ① 对账 + 加载镜像（无需外网）
+# 1) Reconcile + load the image (no internet needed)
 sha256sum -c SHA256SUMS
-docker load -i msrtc-server-<tag>.tar      # 载入 <tag> + latest 双 tag
+docker load -i msrtc-server-<tag>.tar      # loads both <tag> and latest
 
-# ② 填写 .env（四变量契约）
+# 2) Fill in .env (four-variable contract)
 cp .env.example .env
 vi .env
 ```
 
-`.env` 必填：
+Required `.env` values:
 
 ```ini
-TAG=<tag>                          # 镜像钉版（回滚=重钉旧 tag）
-MEDIASERVO_SFU_ANNOUNCED_IP=<IP>   # 见 §3.1 多网卡硬规则
-MEDIASERVO_ADMIN_PASSWORD=<密码>    # 首启 admin 引导（见 §5 交付）
-SSH_PORT=2222                      # ssh 维护宿主口
+TAG=<tag>                          # image pin (rollback = re-pin the old tag)
+MEDIASERVO_SFU_ANNOUNCED_IP=<IP>   # see §3.1 multi-NIC hard rule
+MEDIASERVO_ADMIN_PASSWORD=<pass>    # first-boot admin bootstrap (see §5)
+SSH_PORT=2222                      # host-side ssh maintenance port
 ```
 
 ```bash
-# ③ 起栈（裸 docker compose，无 CLI/pixi 依赖）
+# 3) Start the stack (bare docker compose; no CLI/pixi dependency)
 docker compose --env-file .env up -d
-docker compose --env-file .env ps        # 期望 healthy
+docker compose --env-file .env ps        # expect healthy
 ```
 
-### 3.1 多网卡硬规则
+### 3.1 Multi-NIC Hard Rule
 
-**现场必须显式填 `MEDIASERVO_SFU_ANNOUNCED_IP` 为客户端可达的 IP**（公网/
-局域网）。自动探测会把所有网卡 IP 逗号拼接，但 SFU 只取**第一个**
-（`sfu.rs:481-486`）——多网卡下首 IP 常是不可达的内部口 → **静默 ICE 失败**
-（信令通、媒体不通）。自动探测仅供开发便利，现场禁用。compose 的
-`${VAR:?}` 空值 fail-fast 是底线。
+**On site you MUST set `MEDIASERVO_SFU_ANNOUNCED_IP` explicitly to an IP that
+is reachable by clients** (public/LAN). Auto-detection joins all NIC IPs with
+commas, but the SFU only takes the **first one** — on multi-NIC hosts the
+first IP is often an unreachable internal interface → **silent ICE failure**
+(signaling works, media does not). Auto-detection is a development convenience
+only; do not rely on it on site. The compose `${VAR:?}` empty-value fail-fast
+is the bottom line.
 
-## 4. 部署验证
+## 4. Deployment Verification
 
 ```bash
-# 健康（8080 复合探针：网关+路由+服务）
+# Health (composite probe on 8080: gateway + routing + service)
 curl --noproxy '*' -f http://<IP>:8080/health
-# admin / voice 内容判别（经 8080）
+# admin / voice content check (via 8080)
 curl --noproxy '*' -s http://<IP>:8080/admin  | grep -o '<title>[^<]*</title>'   # MediaServo Admin
 curl --noproxy '*' -s http://<IP>:8080/voice/ | grep -o '<title>[^<]*</title>'   # MediaServo Voice
-# host-agent 直面
+# host-agent direct face
 curl --noproxy '*' -f http://<IP>:9800/health
-# admin 首登
+# admin first login
 curl --noproxy '*' -s -X POST http://<IP>:8080/api/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"<密码>"}'    # 期望返回 token
+  -d '{"username":"admin","password":"<pass>"}'    # expect a token back
 ```
 
-> 宿主 curl 打 localhost 可能被 `http_proxy` 劫持返 502 —— 一律 `--noproxy '*'`。
+> curl from the host to localhost can be hijacked by `http_proxy` (502) —
+  always pass `--noproxy '*'`.
 
-浏览器：`http://<IP>:8080/admin` 登录（admin/密码），`http://<IP>:8080/voice/`
-对讲页。媒体推送验证见 §7 演练。
+Browser: `http://<IP>:8080/admin` to log in (admin/password), and
+`http://<IP>:8080/voice/` for the intercom page. Media publish verification:
+see the drill in §7.
 
-## 5. 凭据交付
+## 5. Credential Handover
 
-- **admin 密码**：`.env` 的 `MEDIASERVO_ADMIN_PASSWORD` 仅首启引导（init 写入
-  `etc/accounts.yaml`，持久化在命名卷）。**交付后通过 admin API 轮换**
-  （`POST /api/admin/accounts*` 热生效，C33）；轮换后 `.env` 里的旧密码不再
-  影响已存在账户（首启唯一写者，之后改密以账户表为准）。密码不出现在容器进程 env（entrypoint
-  init 后 unset）。
-- **ssh key**：key-only（密码登录禁用），mediaservo 用户（uid 1000，禁 root）。
-  host key + `authorized_keys` 持久化在 etc 卷（`etc/ssh/`，**绝不烤进镜像**）。
-  交付公钥：
+- **admin password**: `MEDIASERVO_ADMIN_PASSWORD` in `.env` only bootstraps the
+  first boot (init writes it into `etc/accounts.yaml`, persisted in the named
+  volume). **Rotate after handover via the admin API**
+  (`POST /api/admin/accounts*`, hot-effective). After rotation the old value in
+  `.env` no longer affects existing accounts (init is the sole first-boot
+  writer; later password changes are owned by the account table). The password
+  never appears in the container process env (the entrypoint unsets it after
+  init).
+- **ssh key**: key-only (password login disabled), user `mediaservo` (uid 1000,
+  root login disabled). Host keys + `authorized_keys` persist in the etc volume
+  (`etc/ssh/`, **never baked into the image**). Deliver the public key:
 
   ```bash
-  # 现场把运维公钥写入 etc 卷（容器内路径 /opt/msrtc/etc/ssh/authorized_keys）
+  # Append the ops public key into the etc volume (container path
+  # /opt/msrtc/etc/ssh/authorized_keys)
   docker compose --env-file .env exec server sh -c \
     'cat >> /opt/msrtc/etc/ssh/authorized_keys' < ops_id_ed25519.pub
   docker compose --env-file .env exec server sh -c \
     'chown mediaservo:mediaservo /opt/msrtc/etc/ssh/authorized_keys; chmod 600 /opt/msrtc/etc/ssh/authorized_keys'
-  ssh -p 2222 mediaservo@<IP>    # key 登录验证
+  ssh -p 2222 mediaservo@<IP>    # verify key login
   ```
 
-  > 账户 shadow 字段为 `*`（禁密码但账户可用）——`useradd` 的 `!` 锁定态会被
-  > UsePAM no 的 sshd 拒绝 pubkey，镜像已修正账户阴影字段（`usermod -p '*'`）。
+  > The account shadow field is `*` (password disabled but account usable) —
+    the `!` locked state left by `useradd` makes sshd with `UsePAM no` reject
+    pubkey auth; the image fixes the shadow field (`usermod -p '*'`).
 
-## 6. 运维
+## 6. Operations
 
 ```bash
-# 备份（用交付镜像自身的 tar，无外网依赖；卷按 compose project 标签发现）
-mediaservo data backup ./backup        # 需 CLI 环境；裸 docker 见下
-# 裸 docker 等价（无 CLI 现场）：
+# Backup (uses the delivered image's own tar; no internet dependency; volumes
+# are discovered by the compose project label)
+mediaservo data backup ./backup        # needs the CLI env; bare-docker below
+# Bare-docker equivalent (no CLI on site):
 docker run --rm --entrypoint sh -v msrtc_msrtc-data:/data:ro \
   -v "$PWD/backup:/backup" msrtc-server:<tag> \
   -c 'tar czf /backup/msrtc_msrtc-data.tar.gz -C /data .'
 
-# 日志（oxmgr 文件面，run/logs/*.out.log；非 docker logs）
+# Logs (oxmgr file face, run/logs/*.out.log; NOT docker logs)
 docker compose --env-file .env exec server sh -c 'tail -50 /opt/msrtc/run/logs/*.out.log'
 
-# 优雅停机（镜像 STOPSIGNAL SIGINT；oxmgr SIGINT=优雅停 app，SIGTERM 带 app 会挂起）
-docker compose --env-file .env stop      # 走 SIGINT，~1s exit 0
+# Graceful stop (image STOPSIGNAL is SIGINT; oxmgr on SIGINT stops apps
+# gracefully, while SIGTERM would hang with apps attached)
+docker compose --env-file .env stop      # takes the SIGINT path, ~1s exit 0
 ```
 
-资源：仅设 `mem_limit`（CPU 不限，供 RTP 突发）；默认值由标准档（10 房/20 人 720p）压测测定
-（峰值×1.3 向上取整 512MB），写回 compose 默认 + `29-operations.md`。
+Resources: only `mem_limit` is set (CPU unlimited for RTP bursts); the default
+comes from a standard-tier (10 rooms / 20 peers at 720p) load measurement
+(peak × 1.3 rounded up to 512MB), written back into the compose default and
+`29-operations.md`.
 
-## 7. 回滚演练（镜像 + 配置级）
+## 7. Rollback Drill (image + configuration level)
 
 ```bash
-# 旧版本 tar 仍在现场（交付保留上一版）
-docker load -i msrtc-server-<旧tag>.tar
-sed -i 's/^TAG=.*/TAG=<旧tag>/' .env       # 重钉旧 tag
-docker compose --env-file .env up -d       #  recreate 到旧镜像；数据卷不动
+# The previous release's tar stays on site (delivery keeps one version back)
+docker load -i msrtc-server-<old-tag>.tar
+sed -i 's/^TAG=.*/TAG=<old-tag>/' .env       # re-pin the old tag
+docker compose --env-file .env up -d         # recreates onto the old image; volumes untouched
 curl --noproxy '*' -f http://<IP>:8080/health
-# 回滚后 admin 登录仍可用（accounts.yaml 在命名卷持久化，跨版本 survives）
+# admin login still works after rollback (accounts.yaml persists in the named
+# volume and survives version changes)
 ```
 
-## 8. 附录：完整离线演练记录（验收）
+## 8. Appendix: Full Offline Drill Record (Acceptance)
 
-> 验收 = 一次完整离线演练记录。以下为 2026-11-18 在本开发机（Ubuntu 20.04
-> 宿主，模拟受限现场：仅用产物集 tar，不拉任何外网镜像）执行的演练。
+> Acceptance = one complete offline drill record. The table below is the drill
+> run on 2026-11-18 on the dev host (Ubuntu 20.04, simulating a restricted
+> site: only the delivery tar, no external image pulls).
 
-| 步 | 动作 | 结果 |
+| # | Action | Result |
 |---|---|---|
 | 1 | `sha256sum -c SHA256SUMS` | `msrtc-server-0.1.3.tar: OK` |
-| 2 | `docker load -i msrtc-server-0.1.3.tar` | 载入 `msrtc-server:0.1.3` + `:latest` 双 tag |
-| 3 | `cp .env.example .env` 填 TAG/ANNOUNCED_IP=127.0.0.1/ADMIN_PASSWORD/SSH_PORT | 四变量就绪 |
-| 4 | `docker compose --env-file .env up -d`（偏移端口隔离） | `msrtc-server-1 Up (healthy)` |
+| 2 | `docker load -i msrtc-server-0.1.3.tar` | loaded dual tags `msrtc-server:0.1.3` + `:latest` |
+| 3 | `cp .env.example .env`, fill TAG/ANNOUNCED_IP=127.0.0.1/ADMIN_PASSWORD/SSH_PORT | four variables ready |
+| 4 | `docker compose --env-file .env up -d` (offset ports for isolation) | `msrtc-server-1 Up (healthy)` |
 | 5 | `curl --noproxy '*' :18080/health` | 200 |
-| 6 | /admin vs /voice 标题判别 | MediaServo Admin / MediaServo Voice（判别✓） |
-| 7 | admin 首登 POST /api/auth/login | JWT token✓ |
-| 8 | ssh key 注入 + `ssh -p 12222 mediaservo@127.0.0.1` | SSH_OK uid=1000✓ |
-| 9 | `data backup`（prod 镜像 tar） | 两卷 tar.gz，含 server.yaml/accounts/Caddyfile，**无 alpine 拉取**✓ |
-| 10 | down→up（同卷） | admin 登录 survives，PSK 不重生成✓ |
-| 11 | `docker compose stop`（STOPSIGNAL SIGINT） | exit 0 ~1s✓ |
-| 12 | 回滚：重 load tar + TAG 重钉 + up | healthy，登录 survives✓ |
+| 6 | /admin vs /voice title check | MediaServo Admin / MediaServo Voice (distinct ✓) |
+| 7 | admin first login POST /api/auth/login | JWT token ✓ |
+| 8 | ssh key injection + `ssh -p 12222 mediaservo@127.0.0.1` | SSH_OK uid=1000 ✓ |
+| 9 | `data backup` (prod image tar) | two volume tar.gz files incl. server.yaml/accounts/Caddyfile, **no alpine pull** ✓ |
+| 10 | down → up (same volumes) | admin login survives, PSK not regenerated ✓ |
+| 11 | `docker compose stop` (STOPSIGNAL SIGINT) | exit 0 in ~1s ✓ |
+| 12 | Rollback: re-load tar + re-pin TAG + up | healthy, login survives ✓ |
 
-**结论**：离线 load→up→浏览器→登录→备份→持久化→优雅停机→回滚全链路绿；
-多网卡 ANNOUNCED_IP 显式填规则与 admin/ssh 凭据交付流程已验证。
+**Conclusion**: the full offline chain (load → up → browser → login → backup →
+persistence → graceful stop → rollback) is green; the explicit multi-NIC
+ANNOUNCED_IP rule and the admin/ssh credential handover flows are verified.

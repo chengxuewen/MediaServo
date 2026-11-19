@@ -10,7 +10,7 @@
 |---|---|---|---|
 | **Product** | submodule `3rdparty/MediaServo` | **English** | CLI output/help, code comments, commit messages, product docs (docs/modules), error messages |
 | **Shell** | parent `ms_rtc` (release shell) | **Chinese** | `msrtc.sh` internal comments/prompts, parent commits, shell docs, plan ledgers (docs/plans) |
-| **Runbook** | site delivery | **Chinese** | site deployment runbook (`34-site-deployment.md`), ops runbooks |
+| **Runbook / manuals** | site delivery | **English** | site deployment manual (`34-site-deployment.md` → `DEPLOY-MANUAL.md`), ops manual (`35-container-ops-manual.md` → `OPS-MANUAL.md`) |
 
 ## Rules
 
@@ -21,18 +21,25 @@
    its comments/prompts and parent commits are Chinese. When the parent shell
    **forwards** a submodule command, the submodule's own output stays English
    (product face).
-3. **Site runbooks Chinese**: delivery docs for domestic site ops (deployment
-   runbook / ops runbook) are Chinese (R22 explicitly rules the runbook face ZH).
+3. **Site manuals English** (supersedes the original R22=C runbook-ZH carve-out;
+   re-ruled 2026-11-19 by the delivery owner): the product face was already
+   English (code/CLI/logs/docs), making the manuals the only Chinese island;
+   one English source serves every brand (msrtc / upstream mediaservo) with
+   zero dual maintenance, and the audience (deployment engineers / site ops)
+   reads command-dominant technical English fine. Chinese-language support
+   happens in the support channel, not in deliverables.
 4. **Boundary criterion = repo ownership**: a file in the submodule → product
-   face EN; in the parent shell → shell face ZH; a site delivery runbook →
-   runbook face ZH. Cross-face references each follow their own face's language.
+   face EN; in the parent shell → shell face ZH; site delivery manuals are
+   submodule files → EN. Cross-face references each follow their own face's
+   language.
 
 ## Existing-fact anchors
 
 - Submodule `mediaservo.sh` comments/output English (english-only);
-  `docker/server/entrypoint.sh` comments English.
+  `docker/server/entrypoint.sh` + `docker/builder/entrypoint.sh` comments English.
 - Parent `msrtc.sh` comments Chinese (e.g. "③b 发布根注入", "④ 品牌注入").
-- `docs/modules/34-site-deployment.md` Chinese (B3.7 site runbook).
+- `docs/modules/34-site-deployment.md` + `35-container-ops-manual.md` English
+  (translated 2026-11-19; shipped as DEPLOY-MANUAL.md / OPS-MANUAL.md).
 - Plan ledgers `docs/plans/**/PLAN.md` Chinese (shell face).
 
 ## Severity vocabulary note (R21④)
