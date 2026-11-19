@@ -373,6 +373,239 @@ const CASES = [
     var resetIcon=!!b.querySelector('svg use[href="#i-chevron-left"]');
     var aria=b.getAttribute('aria-label')==='Collapse navigation';
     return {initSvg,collapsedIcon,collapsedState,expandedIcon,railIcon,resetIcon,aria};`],
+  ['meet-lobby', `goto('meeting');
+    var cards=document.querySelectorAll('#meetGrid .card').length===2;
+    var typeChips=[...document.querySelectorAll('#meetGrid .chip')].map(x=>x.textContent);
+    var typeOk=typeChips.includes('Video')&&typeChips.includes('Voice');
+    goto('rooms');var noObject=!document.getElementById('roomBody').textContent.includes('[object Object]');goto('meeting');
+    document.getElementById('newMeet').click();
+    var createForm=document.getElementById('meetScrim').classList.contains('show')&&document.activeElement.id==='meetName';
+    var seg=document.getElementById('meetTypeSeg');
+    var videoRadio=seg.getAttribute('role')==='radiogroup'&&seg.querySelector('[data-mt=video]').getAttribute('aria-checked')==='true';
+    seg.querySelector('[data-mt=video]').focus();
+    seg.querySelector('[data-mt=video]').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft',bubbles:true,cancelable:true}));
+    var roving=seg.querySelector('[data-mt=voice]').getAttribute('aria-checked')==='true'&&seg.querySelector('[data-mt=voice]').tabIndex===0;
+    document.getElementById('meetName').value='Test meet';
+    document.getElementById('meetOk').click();
+    var created=ROOMS.some(r=>r.name==='Test meet'&&r.video===false&&r.host===CUR_USER&&r.state==='idle')&&AUDIT[0].action==='meet.create';
+    var focusBack=document.activeElement.id==='newMeet';
+    document.querySelector('.meet-invite').click();
+    var inviteHint=document.getElementById('meetCopyHint').textContent.length>0;
+    var j0=document.querySelector('.meet-join');j0.focus();j0.click();
+    var joinOpensPrejoin=document.getElementById('prejoinScrim').classList.contains('show');
+    document.getElementById('pjCancel').click();
+    var RV=ROOMS.find(r=>r.id==='meet-review');RV.host=CUR_USER;renderMeeting();
+    var reopenBtn=!!document.querySelector('.meet-reopen[data-id=meet-review]');
+    document.querySelector('.meet-reopen[data-id=meet-review]').click();
+    var reopened=RV.state==='idle'&&RV.endReason===null&&AUDIT[0].action==='meet.reopen';
+    return {cards,typeOk,noObject,createForm,videoRadio,roving,created,focusBack,inviteHint,joinOpensPrejoin,reopenBtn,reopened};`],
+  ['meet-prejoin', [
+    `goto('meeting');
+     document.getElementById('newMeet').click();document.getElementById('meetName').value='Voice test';
+     document.querySelector('#meetTypeSeg [data-mt=voice]').click();document.getElementById('meetOk').click();
+     var VT=ROOMS.find(r=>r.name==='Voice test');
+     var jb=document.querySelector('.meet-join[data-id="'+VT.id+'"]');jb.focus();jb.click();
+     var nameFocus=document.activeElement.id==='pjName';
+     var voiceCamGuard=document.getElementById('pjCamPreview').textContent.includes('no camera')&&document.getElementById('pjJoin').getAttribute('aria-disabled')!=='true';
+     document.getElementById('pjCancel').click();
+     var cancelRestores=document.activeElement.classList.contains('meet-join');
+     document.querySelector('.meet-join[data-id="'+VT.id+'"]').click();
+     document.getElementById('pjName').dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+     var escCancel=!document.getElementById('prejoinScrim').classList.contains('show');
+     var ST=ROOMS.find(r=>r.id==='meet-standup');ST.locked=true;renderMeeting();
+     var lockedGuard=document.querySelector('.meet-join[data-id=meet-standup]').getAttribute('aria-disabled')==='true';
+     openPrejoin('meet-standup');
+     var lockedJoinGuard=document.getElementById('pjJoin').getAttribute('aria-disabled')==='true';
+     document.getElementById('pjCancel').click();ST.locked=false;renderMeeting();
+     return {nameFocus,voiceCamGuard,cancelRestores,escCancel,lockedGuard,lockedJoinGuard};`,
+    `openPrejoin('meet-standup');document.getElementById('pjJoin').click();
+     var connectingShellKept=meetPhase==='connecting'&&getComputedStyle(document.getElementById('sidebar')).display!=='none';
+     return {connectingShellKept};`,
+    `var hostLive=meetPhase==='live'&&meetLive==='meet-standup'&&AUDIT.some(a=>a.action==='meet.join');
+     meetLeave();var ST=ROOMS.find(r=>r.id==='meet-standup');ST.host='admin.x';
+     openPrejoin('meet-standup');document.getElementById('pjJoin').click();
+     return {hostLive};`,
+    `var waitingGuestScreen=meetPhase==='waiting'&&document.getElementById('meetPhaseCard').textContent.includes('Waiting for host');
+     admitWaiting('meet-standup',CUR_USER);
+     var guestAdmit=meetPhase==='live'&&AUDIT.some(a=>a.action==='meet.admit');
+     meetLeave();openPrejoin('meet-standup');document.getElementById('pjJoin').click();
+     return {waitingGuestScreen,guestAdmit};`,
+    `denyWaiting('meet-standup',CUR_USER);
+     var denyFeedback=meetPhase==='lobby'&&AUDIT.some(a=>a.action==='meet.deny');
+     var ST=ROOMS.find(r=>r.id==='meet-standup');ST.host='dispatch.x';renderMeeting();
+     return {denyFeedback};`
+  ]],
+  ['meet-live', `goto('meeting');meetLive='meet-standup';meetPhase='live';renderMeetPhase();
+    var shellHidden=getComputedStyle(document.getElementById('sidebar')).display==='none'&&getComputedStyle(document.getElementById('topbar')).display==='none';
+    var tilesAdaptive=document.getElementById('meetTiles').className==='g3';
+    var av=[...document.querySelectorAll('.mtile')].find(t=>!t.querySelector('.tile-scan'));
+    var avatarNotBlack=!!av&&getComputedStyle(av).backgroundColor!=='rgb(0, 0, 0)';
+    var t0=document.querySelector('.mtile');var pn0=t0.dataset.pn;var bg0=getComputedStyle(t0).backgroundColor;
+    speakerTick();
+    var t1=document.querySelector('.mtile[data-pn="'+pn0+'"]');
+    var speakingBorderFillUnchanged=!!t1&&getComputedStyle(t1).backgroundColor===bg0&&!!document.querySelector('.mtile.speaking');
+    var pip=document.getElementById('meetPip');var pr=pip.getBoundingClientRect();var cr=document.getElementById('meetCanvas').getBoundingClientRect();
+    var selfPipMirroredWidthPos=getComputedStyle(pip).transform.includes('-1')&&Math.abs(pr.width-cr.width/6)<3&&pr.bottom<cr.bottom-50;
+    toast('probe');
+    var muteChipIndependentOfToast=document.getElementById('muteChip').closest('#toast')===null&&getComputedStyle(document.getElementById('muteChip')).display!=='none';
+    var R=meetRoom();while(R.parts.length<10)R.parts.push({n:'x'+R.parts.length,host:false,muted:true,cam:false,hand:false});
+    meetPage=1;renderMeetTiles();
+    var pager=document.getElementById('meetPager').textContent.includes('Page 2 / 2');
+    document.getElementById('mkLayout').click();
+    var layoutSwitchKeepsState=meetPage===1&&meetLayout==='speaker'&&document.getElementById('meetTiles').className==='speaker'&&!!document.querySelector('#meetTiles .mtile.main');
+    document.getElementById('mkLayout').click();
+    var estopSlotEmpty=document.querySelector('#meetCanvas [data-estop]')===null;
+    document.body.classList.add('meet-hideov');
+    var hideExemptions=getComputedStyle(document.getElementById('muteChip')).display!=='none'&&getComputedStyle(document.getElementById('mkLeave')).display!=='none'&&getComputedStyle(document.getElementById('meetSimChip')).display!=='none'&&getComputedStyle(document.querySelector('.mtile .osd')).display==='none';
+    document.body.classList.remove('meet-hideov');
+    var coarseRule=[...document.querySelectorAll('style')].some(st=>st.textContent.includes('(pointer:coarse){#meetBar .btn{height:44px'));
+    holdStart('leave');for(var i=0;i<20;i++)holdTick();
+    var leaveHold1s=meetPhase==='lobby';
+    meetLive='meet-standup';meetPhase='live';renderMeetPhase();
+    escHoldStart();for(var j=0;j<20;j++)escHoldTick();
+    var escHold1s=meetPhase==='lobby';
+    meetLive='meet-standup';meetPhase='live';renderMeetPhase();
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    document.body.dispatchEvent(new KeyboardEvent('keyup',{key:'Escape',bubbles:true,cancelable:true}));
+    var shortEscHint=getComputedStyle(document.getElementById('escHint')).display==='block'&&meetPhase==='live';
+    meetLive='meet-review';meetPhase='live';renderMeetPhase();
+    var voiceCamGuardLive=document.getElementById('mkCam').getAttribute('aria-disabled')==='true';
+    meetLeave();
+    return {shellHidden,tilesAdaptive,avatarNotBlack,speakingBorderFillUnchanged,selfPipMirroredWidthPos,muteChipIndependentOfToast,pager,layoutSwitchKeepsState,estopSlotEmpty,hideExemptions,coarseRule,leaveHold1s,escHold1s,shortEscHint,voiceCamGuardLive};`],
+  ['meet-host', `goto('meeting');meetLive='meet-standup';meetPhase='live';renderMeetPhase();
+    var R=meetRoom();
+    var mr=document.getElementById('mkRoster');mr.focus();mr.click();
+    var panelOpen=document.getElementById('meetPanel').classList.contains('open');
+    var hostBadge=document.getElementById('mpBody').textContent.includes('host');
+    R.waiting.push({n:'guest1',at:Date.now()});renderRoster();syncMpBadge();
+    var badge=document.getElementById('mpBadge').hidden===false&&document.getElementById('mpBadge').textContent==='1';
+    document.querySelector('.mp-admit[data-n=guest1]').click();
+    var waitingAdmit=R.parts.some(p=>p.n==='guest1')&&R.waiting.length===0&&AUDIT.some(a=>a.action==='meet.admit');
+    R.waiting.push({n:'guest2',at:Date.now()});renderRoster();
+    document.querySelector('.mp-deny[data-n=guest2]').click();
+    var waitingDeny=R.waiting.length===0&&AUDIT.some(a=>a.action==='meet.deny');
+    document.getElementById('mpMuteAll').click();
+    var muteAllExcludesSelf=R.parts.filter(p=>p.n!==CUR_USER).every(p=>p.muted)&&!R.parts.find(p=>p.n===CUR_USER).muted;
+    document.getElementById('mpLock').click();
+    var lockGuardsJoin=R.locked===true;renderMeeting();
+    var lobbyLocked=document.querySelector('.meet-join[data-id=meet-standup]').getAttribute('aria-disabled')==='true';
+    document.getElementById('mpLock').click();
+    var unlockOk=R.locked===false;
+    document.querySelector('.mp-remove[data-n=guest1]').click();
+    var removeConfirm=document.getElementById('cfmScrim').classList.contains('show');
+    document.getElementById('cfmOk').click();
+    var removed=!R.parts.some(p=>p.n==='guest1')&&AUDIT.some(a=>a.action==='meet.remove');
+    var noSelfRemove=!document.querySelector('.mp-remove[data-n="'+CUR_USER+'"]');
+    R.host='admin.x';renderRoster();
+    var nonHostGuard=document.getElementById('mpMuteAll').getAttribute('aria-disabled')==='true';
+    R.host='dispatch.x';renderRoster();
+    document.getElementById('mpTabChat').click();
+    var chatEmptyState=document.getElementById('mpChatList').textContent.includes('No messages yet');
+    document.getElementById('mpChatSend').click();
+    var chatEmptyInputGuard=R.chat.length===0;
+    document.getElementById('mpChatIn').value='hello ops';document.getElementById('mpChatSend').click();
+    var chatSend=R.chat.some(m=>m.txt==='hello ops'&&m.n===CUR_USER);
+    var handBtn=document.getElementById('mkHand');handBtn.click();
+    var handRaise=R.parts.find(p=>p.n===CUR_USER).hand===true;
+    handBtn.click();
+    var handLower=R.parts.find(p=>p.n===CUR_USER).hand===false;
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    var panelEscKeepsMeeting=!document.getElementById('meetPanel').classList.contains('open')&&meetPhase==='live';
+    meetLeave();
+    return {panelOpen,hostBadge,badge,waitingAdmit,waitingDeny,muteAllExcludesSelf,lockGuardsJoin,lobbyLocked,unlockOk,removeConfirm,removed,noSelfRemove,nonHostGuard,chatEmptyState,chatEmptyInputGuard,chatSend,handRaise,handLower,panelEscKeepsMeeting};`],
+  ['meet-state', [
+    `goto('meeting');meetLive='meet-standup';meetPhase='live';renderMeetPhase();
+     applyProto('sim','meeterror');
+     var errState=meetPhase==='error'&&document.getElementById('meetPhaseCard').textContent.includes('connection failed');
+     var shellRestored=getComputedStyle(document.getElementById('sidebar')).display!=='none';
+     document.getElementById('meetBack').click();
+     var backLobby=meetPhase==='lobby'&&document.activeElement.id==='newMeet';
+     meetLive='meet-standup';meetPhase='live';renderMeetPhase();applyProto('sim','meeterror');
+     document.getElementById('meetRetry').click();
+     var retryConnecting=meetPhase==='connecting';
+     return {errState,shellRestored,retryConnecting};`,
+    `var retryLive=meetPhase==='live'&&meetError===false;
+     meetLeave();
+     var RV=ROOMS.find(r=>r.id==='meet-review');
+     document.querySelector('.meet-trans[data-id=meet-review]').click();
+     var transcript=document.getElementById('meetTransScrim').classList.contains('show')&&document.getElementById('mtList').textContent.includes('Review notes attached');
+     var readOnly=!document.querySelector('#mtList input');
+     document.getElementById('mtClose').click();
+     var hostSimLabel=(function(){meetLive='meet-standup';meetPhase='live';renderMeetPhase();openMeetPanel('roster',document.getElementById('mkRoster'));var ok=document.getElementById('mpBody').textContent.includes('Host controls (simulated)');closeMeetPanel();meetLeave();return ok;})();
+     return {retryLive,transcript,readOnly,hostSimLabel};`
+  ]],
+  ['meet-exit', [
+    `goto('meeting');var j=document.querySelector('.meet-join');j.focus();j.click();document.getElementById('pjJoin').click();return {joined:meetPhase==='connecting'};`,
+    `var live=meetPhase==='live';var lv=document.getElementById('mkLeave');lv.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));lv.dispatchEvent(new PointerEvent('pointerleave',{bubbles:true}));
+     var cancelFeedback=holdState===null&&document.getElementById('toast').textContent.includes('Hold cancelled');
+     var guidance=getComputedStyle(document.getElementById('meetExitHint')).display!=='none';
+     lv.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));
+     var barVisible=getComputedStyle(document.getElementById('holdBar')).display==='block';
+     return {live,cancelFeedback,guidance,barVisible};`,
+    `return {p1:!!holdState&&holdState.prog>0.3&&holdState.prog<0.7};`,
+    `return {p2:!!holdState&&holdState.prog>0.7&&holdState.prog<1};`,
+    `var holdCompletes=meetPhase==='lobby'&&document.body.className.indexOf('meet-live')<0;return {holdCompletes};`,
+    `var ro=document.querySelector('.meet-reopen');if(ro)ro.click();var j2=document.querySelector('.meet-join');j2.focus();j2.click();document.getElementById('pjJoin').click();return {rejoined:meetPhase==='connecting'};`,
+    `document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+     var escBar=getComputedStyle(document.getElementById('holdBar')).display==='block'&&!!escHold;return {escBar};`,
+    `return {e1:!!escHold&&escHold.prog>0.3&&escHold.prog<0.7};`,
+    `return {e2:!!escHold&&escHold.prog>0.7&&escHold.prog<1};`,
+    `var escCompletes=meetPhase==='lobby';var barHidden=getComputedStyle(document.getElementById('holdBar')).display==='none';
+     document.body.classList.add('meet-live');document.body.classList.add('meet-hideov');
+     var hintExempt=getComputedStyle(document.getElementById('meetExitHint')).display!=='none';
+     document.body.classList.remove('meet-hideov');document.body.classList.remove('meet-live');
+     return {escCompletes,barHidden,hintExempt};`
+  ]],
+  ['meet-polish', `goto('meeting');meetLive='meet-standup';meetPhase='live';renderMeetPhase();
+    document.getElementById('mkLayout').click();
+    var speakerRender=document.getElementById('meetTiles').className==='speaker'&&!!document.querySelector('#meetTiles .mtile.main')&&document.querySelectorAll('#meetRail .mtile').length>0;
+    var RP=meetRoom();while(RP.parts.length<10)RP.parts.push({n:'x'+RP.parts.length,host:false,muted:true,cam:false,hand:false,conn:'ok'});
+    meetPage=1;renderMeetTiles();
+    var offPageIndicator=document.getElementById('meetPager').textContent.includes('speaker on another page');
+    meetPage=0;renderMeetTiles();
+    var pipCam=document.getElementById('meetPip').innerHTML.includes('linear-gradient');
+    document.getElementById('mkCam').click();
+    var pipAvatar=document.getElementById('meetPip').innerHTML.includes('avatar-big');
+    document.getElementById('mkCam').click();
+    var tileOverlays=!!document.querySelector('.mtile .conn.lost .ring')&&document.getElementById('meetTiles').textContent.includes('no signal')&&!!document.querySelector('.mtile .conn.weak .bar3');
+    var contextInfo=document.getElementById('meetNameChip').textContent.includes('Ops standup')&&document.getElementById('meetCount').textContent.includes('in room')&&/[0-9][0-9]:[0-9][0-9]/.test(document.getElementById('meetClock').textContent);
+    var mr=document.getElementById('mkRoster');mr.focus();mr.click();
+    var panelTabsAria=document.getElementById('mpTabs').getAttribute('role')==='tablist'&&document.getElementById('mpTabRoster').getAttribute('aria-selected')==='true';
+    document.getElementById('mpTabRoster').dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true,cancelable:true}));
+    var tabRoving=document.getElementById('mpTabChat').getAttribute('aria-selected')==='true';
+    var tilesAria=document.querySelector('.mtile').getAttribute('role')==='group'&&(document.querySelector('.mtile').getAttribute('aria-label')||'').includes('connection');
+    var pipShift=getComputedStyle(document.getElementById('meetPip')).right==='312px';
+    closeMeetPanel();
+    window.meetChatIncoming('ops1','ping');
+    var chatUnread=document.getElementById('mpChatBadge').hidden===false;
+    document.getElementById('mkChat').click();
+    var unreadCleared=document.getElementById('mpChatBadge').hidden===true;
+    closeMeetPanel();
+    holdStart('leave');escHoldStart();
+    var holdArbitration=holdState===null&&!!escHold;escHoldCancel();
+    var RV=ROOMS.find(r=>r.id==='meet-review');RV.state='live';meetLive=RV.id;meetPhase='live';renderMeetPhase();
+    RV.parts.push({n:'v2',host:false,muted:false,cam:false,hand:false,conn:'ok'});renderMeetTiles();
+    var spBefore=document.querySelector('.mtile.speaking').dataset.pn;speakerTick();
+    var voiceSpeaking=document.querySelector('.mtile.speaking').dataset.pn!==spBefore;
+    meetLive='meet-standup';meetPhase='live';renderMeetPhase();
+    var RR=meetRoom();RR.state='ended';renderMeetPhase();
+    var guestEnded=document.getElementById('meetPhaseCard').textContent.includes('ended by host');
+    document.getElementById('meetEndBack').click();
+    var ro=document.querySelector('.meet-reopen');if(ro)ro.click();
+    var reopenResets=RR.parts.length===1&&RR.chat.length===0&&(RR.transcript||[]).length>=0;
+    location.hash='#meet-standup';consumeMeetHash();
+    var deepLink=document.getElementById('prejoinScrim').classList.contains('show');
+    document.getElementById('pjCancel').click();
+    return {speakerRender,offPageIndicator,pipCam,pipAvatar,tileOverlays,contextInfo,panelTabsAria,tabRoving,tilesAria,pipShift,chatUnread,unreadCleared,holdArbitration,voiceSpeaking,guestEnded,reopenResets,deepLink};`],
+  ['meet-polish-narrow', `goto('meeting');meetLive='meet-standup';meetPhase='live';renderMeetPhase();
+    var mr=document.getElementById('mkRoster');mr.focus();mr.click();
+    var lv=document.getElementById('mkLeave');var r=lv.getBoundingClientRect();
+    var el=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+    var leaveReachable=!!el&&(el===lv||lv.contains(el));
+    var pipHidden=getComputedStyle(document.getElementById('meetPip')).display==='none';
+    var noOv=document.documentElement.scrollWidth<=innerWidth;
+    closeMeetPanel();meetLeave();
+    return {leaveReachable,pipHidden,noOv};`, 600],
   ['accounts-narrow', `myRole='admin';goto('accounts');
     var noOv=document.documentElement.scrollWidth<=innerWidth;
     var card=getComputedStyle(document.querySelector('#accBody td:nth-child(2)')).display==='flex';
@@ -401,7 +634,7 @@ const CASES = [
 
 /* C65 negative self-check: sabotage that MUST turn the case red (run with --negative). */
 const NEG = {
-  floor: `GROUPS.find(g=>g.id==='talk-bravo').q=[];`,
+  floor: `autoGrant=function(){return false;};`,
   queue: `FLOOR_CFG.queueMax=99;`,
   'board-1100': `var st=document.createElement('style');st.textContent='.row-actions{display:flex;flex-wrap:wrap;width:120px}';document.head.appendChild(st);`,
   evidence: `evPurge=function(){};`,
@@ -414,6 +647,14 @@ const NEG = {
   fleet: `renderFleetStrip=function(){};`,
   'monitor-link': `renderAvail=function(){};`,
   'audit-ring': `renderAudit=function(){};`,
+  'meet-lobby': `renderMeeting=function(){};`,
+  'meet-prejoin': `openPrejoin=function(){};`,
+  'meet-live': `holdTick=function(){};`,
+  'meet-host': `renderRoster=function(){};`,
+  'meet-state': `renderMeetPhase=function(){};`,
+  'meet-exit': `holdTick=function(){};`,
+  'meet-polish': `speakerTick=function(){};`,
+  'meet-polish-narrow': `openMeetPanel=function(){};`,
   'nav-collapse': `syncNavCollapse=function(){};`,
   'accounts-narrow': `renderAccounts=function(){};`,
   notif: `renderNotif=function(){};`,
@@ -446,6 +687,7 @@ async function main() {
   const srv = await serve();
   const prof = fs.mkdtempSync(path.join(os.tmpdir(), 'harness-prof-'));
   const ff = spawn('firefox', ['--headless', '--marionette', '--profile', prof, '--no-remote', 'about:blank'], { stdio: 'ignore' });
+  process.on('exit', () => { try { ff.kill(); } catch (e) {} });
   await new Promise(r => setTimeout(r, 4000));
   const sock = await new Promise((res, rej) => { const s = net.connect(2828, '127.0.0.1', () => res(s)); s.on('error', rej); });
   await new Promise(r => sock.once('data', r)); // handshake

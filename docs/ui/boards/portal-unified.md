@@ -1,6 +1,6 @@
 # Unified baseline — MediaServo Portal (single page)
 
-> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.68 见 sidecar)**
+> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.85 见 sidecar)**
 > Carrier: `../prototypes/portal-unified.html` · Supersedes the fragmented boards for iteration.
 
 ## Why this exists (user directive 11-13)
@@ -16,9 +16,9 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.77
+version: v1.85
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
-e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"]
+e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"], #meetGrid, #meetScrim, #prejoinScrim, #meetCanvas, #meetTiles, #meetRail, #meetPip, #muteChip, #meetBar, #mkLeave, #holdRing, #holdBar, #meetExitHint, #meetPanel, #mpBody, #mpTabs, #mpBadge, #mpChatBadge, #meetInfo, #meetTransScrim
 ```
 
 ## Unified navigation taxonomy (reconciles new-design groups + workbudy features)
@@ -419,6 +419,32 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   for right-edge collapse); now region-collapse + i-chevron (right), aria-label/title synced in
   renderDrawer. Precedent: region-collapse chevrons point toward collapse edge; modal dismiss = X.
   harness device-drawer += ddIcon assertion; 27 cases + NEG green.
+- v1.85 (M-6 polish, panel-driven): speaker REAL render+rail+off-page indicator; panel lifecycle
+  (leave closes/PiP shift/narrow bar z); PiP content linkage; tile conn overlays (dot/3-bar/ring+slash);
+  context never-hide row (name/clock/count); guest ended card; Reopen resets+transcript archive;
+  speaking scheduled+voice pool; chat unread badge; panel tabs a11y; hold arbitration; #meet-<id> deep
+  link. 35 cases + NEG green. Region annotations: workbudy 03 §5.3/§6 + 01 §7 overlays, W03:87 identity
+  never-hide, C54/C69, PIT-269, §2i independence note.
+- v1.84: fix meet exit perceived-stuck — visible hold progress bar (pointer/Esc/keyboard), cancel
+  feedback (pointerleave/pointercancel toast), persistent exit-guidance chip (H-exempt); meet-exit
+  10-part real-timer case; harness exit-hook kills firefox (stale accumulation root). 33 cases + NEG.
+- v1.83: fix direct-content modal zero padding (.modal.pad on acc/psk/key/cred/meet/prejoin/
+  meetTrans/secret); user-reported prejoin edge-to-edge anomaly at 844x682 resolved.
+- v1.82 (Meeting M-5 delivered; B-M1 ROUND COMPLETE pending final review): error+Retry/Back with shell
+  restore, ended read-only transcript, honesty sweep (host controls simulated / consume-only note),
+  regression 32 cases + NEG green. Open items logged in CHANGELOG v1.82.
+- v1.81 (Meeting M-4 delivered, PENDING REVIEW): roster/chat side panel, waiting admit/deny + cue +
+  badge, mute-all(excl self)/lock/unlock/remove(confirm, excl host/self), non-host guards, hand
+  raise/lower, panel focus + Esc-closes-panel contract. harness 31 cases + NEG green.
+- v1.80 (Meeting M-3 delivered, PENDING REVIEW): zero-nav live canvas (1/2/4/9+avatar non-black+
+  speaking 2px fill-unchanged+self-PiP mirrored narrow-top-right+mute persistent chip+control bar+
+  hold-1s leave/Esc chain+H exemptions+coarse44+estop empty). harness 30 cases + NEG green.
+- v1.79 (Meeting M-2 delivered, PENDING REVIEW): prejoin (name focus/simulated check/voice cam guard),
+  connecting shell-kept, host live/guest waiting + guest screen/cancel, admit/deny logic (UI=M-4),
+  locked guards, Esc cancel, interim live card + Leave (canvas=M-3). harness 29 cases + NEG green.
+- v1.78 (Meeting M-1 delivered, PENDING REVIEW): lobby type chips/partsCount/host/ended+Reopen;
+  create modal (name+Voice/Video radiogroup); invite real copy w/ parameterized fallback hint;
+  Join/Start honest interim gate until M-2 prejoin. harness 28 cases + NEG green.
 - v1.77: topbar convergence A — right cluster 3 (bell+badge / status chip→statusPop / user menu→
   userPop with role+theme+mute+about+signout); crumb path-only; brand PORTAL removed; popover
   focus/Esc/outside-click contract; narrow converges (name hidden). Verified page-side (overlay

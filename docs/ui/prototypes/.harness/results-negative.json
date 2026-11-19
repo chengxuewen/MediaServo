@@ -1,5 +1,5 @@
 {
-  "when": "2026-11-19T01:11:10.070Z",
+  "when": "2026-11-19T05:57:38.612Z",
   "mode": "negative",
   "fail": 0,
   "results": {
@@ -7,8 +7,8 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "idleGrant": true,
-        "noJump": false
+        "idleGrant": false,
+        "noJump": true
       },
       "error": null
     },
@@ -171,6 +171,130 @@
         "railIcon": false,
         "resetIcon": true,
         "aria": true
+      },
+      "error": null
+    },
+    "meet-lobby": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:17:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:26:132\n@http://127.0.0.1:8201/portal-unified.html:2:2427\n@http:/"
+      },
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:17:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:26:132\n@http://127.0.0.1:8201/portal-unified.html:2:2427\n@http:/"
+    },
+    "meet-prejoin": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "nameFocus": false,
+        "voiceCamGuard": false,
+        "cancelRestores": true,
+        "escCancel": true,
+        "lockedGuard": true,
+        "lockedJoinGuard": false,
+        "connectingShellKept": false,
+        "hostLive": false,
+        "waitingGuestScreen": false,
+        "guestAdmit": false,
+        "denyFeedback": false
+      },
+      "error": null
+    },
+    "meet-live": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "shellHidden": true,
+        "tilesAdaptive": true,
+        "avatarNotBlack": true,
+        "speakingBorderFillUnchanged": true,
+        "selfPipMirroredWidthPos": true,
+        "muteChipIndependentOfToast": true,
+        "pager": true,
+        "layoutSwitchKeepsState": true,
+        "estopSlotEmpty": true,
+        "hideExemptions": true,
+        "coarseRule": true,
+        "leaveHold1s": false,
+        "escHold1s": true,
+        "shortEscHint": true,
+        "voiceCamGuardLive": true
+      },
+      "error": null
+    },
+    "meet-host": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:41:256\n@http://127.0.0.1:8201/portal-unified.html:2:3348\n@http://"
+      },
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:41:256\n@http://127.0.0.1:8201/portal-unified.html:2:3348\n@http://"
+    },
+    "meet-state": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:15\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:56\n@http://127.0.0.1:8201/portal-unified.html:2:954\n@http://12",
+        "retryLive": false,
+        "transcript": true,
+        "readOnly": true,
+        "hostSimLabel": true
+      },
+      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:15\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:56\n@http://127.0.0.1:8201/portal-unified.html:2:954\n@http://12"
+    },
+    "meet-exit": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "joined": true,
+        "live": true,
+        "cancelFeedback": true,
+        "guidance": true,
+        "barVisible": true,
+        "p1": false,
+        "p2": false,
+        "holdCompletes": false,
+        "rejoined": true,
+        "escBar": true,
+        "e1": true,
+        "e2": true,
+        "escCompletes": true,
+        "barHidden": true,
+        "hintExempt": true
+      },
+      "error": null
+    },
+    "meet-polish": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "speakerRender": true,
+        "offPageIndicator": true,
+        "pipCam": true,
+        "pipAvatar": true,
+        "tileOverlays": true,
+        "contextInfo": true,
+        "panelTabsAria": true,
+        "tabRoving": true,
+        "tilesAria": true,
+        "pipShift": true,
+        "chatUnread": true,
+        "unreadCleared": true,
+        "holdArbitration": true,
+        "voiceSpeaking": false,
+        "guestEnded": true,
+        "reopenResets": true,
+        "deepLink": true
+      },
+      "error": null
+    },
+    "meet-polish-narrow": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "leaveReachable": true,
+        "pipHidden": false,
+        "noOv": true
       },
       "error": null
     },

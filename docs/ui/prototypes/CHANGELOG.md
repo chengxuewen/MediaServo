@@ -1,5 +1,177 @@
 # Prototypes CHANGELOG
 
+## v1.85 — 2026-11-19 (portal-unified) — M-6 polish: meeting live-surface gaps closed (4-seat panel + isolated UX self-pass)
+Panel verdicts: correctness NOT READY / evidence FAIL / consistency REJECT; UX seat quota-failed →
+isolated sequential self-pass substituted (disclosed). Objective fixes (no new product rulings):
+- **Speaker layout REAL render** (was variable+toast fake): main speaking tile + right rail (cap 4 +
+  "+N more"), off-page speaker indicator in pager; grid/speaker naming de-collided with monitor §2i
+  (titles/aria "Grid / Speaker"); §3k note: meet canvas layout family independent of §2i wall layouts.
+- **Panel lifecycle**: meetLeave closes panel (cross-room stale-roster closure hazard removed);
+  join re-renders open panel; body.meet-panel-open shifts PiP left (wide) / hides PiP + raises control
+  bar z-index (narrow) so Leave stays reachable under full-width panel.
+- **self-PiP content linkage**: cam-on simulated feed + mirrored name; cam-off avatar initials;
+  mute badge; narrow position asserted.
+- **Tile overlays per workbudy 03 §6 / 01 §7**: conn ok dot / weak 3-seg bar / lost hollow-ring+slash
+  "no signal" (shape+text, not hue alone); OSD mute glyph + hand chip; tiles role=group + aria-label.
+- **Meeting context never-hide row**: name+type chip, elapsed clock, in-room count (W03:87 identity).
+- **Guest ended perception**: live-phase detects room ended → "Meeting ended by host" card + Back;
+  host-leave toast audience fixed (single broadcast, not per-waiting toast on host screen).
+- **Reopen resets** parts=[host self] + chat archived to transcript (transcript modal reads archive).
+- **Speaking**: speakerTick scheduled (1.5s while live) + pool = unmuted & not-lost (voice meetings
+  get speaking indication); sp compared by name (object-compare bug fixed).
+- **Chat unread badge** on mkChat when panel closed/other tab; cleared on open-chat.
+- **Panel tabs a11y**: role=tablist/tab/aria-selected/aria-controls + ArrowLeft/Right roving.
+- **Hold arbitration**: starting Esc-hold cancels pointer-hold and vice versa (single progress owner).
+- **Deep link**: #meet-<id> hash consumed on load → lobby + prejoin (invite link now functional).
+- Control-bar titles added; narrow bar wrap + top chips wrap.
+- Harness: meet-polish (17 assertions) + meet-polish-narrow (leave reachable under panel/PiP hidden/
+  no overflow); meet-live layout assertion upgraded to REAL speaker render; NEG targets registered
+  renderMeetLive→speakerTick(rotation assertion makes noop red)/openMeetPanel(narrow); 35 cases ALL
+  GREEN + NEG all red; node --check + lint clean; stamps x5; screenshots m6-speaker/m6-narrow-panel.
+- Process defects disclosed & fixed: M-6 edit span deleted panel five functions (restored);
+  mpTab/mpTrigger declarations lost with them (restored); rail null guard; sp object-vs-name;
+  mainP object; off-page interval formula; template-literal \d eaten (clock regex); badge refresh.
+
+## v1.84 — 2026-11-19 (portal-unified) — fix: meet exit perceived-stuck (user report "cannot leave room")
+Analysis first (evidence): both exit chains verified working under REAL timers (harness multi-part
+450ms probes: pointer-hold prog 0.45→0.9→complete→lobby; Esc-hold same). Not a logic dead-end —
+four perception gaps fixed:
+1. **Esc/keyboard hold had no visible progress** → new #holdBar (top-center "Hold… N%" + fill track)
+   shown by holdStart/escHoldStart, updated by holdTick/escHoldTick, hidden on cancel/complete.
+2. **Silent cancels** → pointerleave AND new pointercancel handler now toast "Hold cancelled —
+   keep pressed 1s" (touch/system-gesture interrupts no longer feel broken).
+3. **No persistent exit guidance in zero-nav canvas** → #meetExitHint chip top-right
+   "Exit: hold button 1s · hold Esc 1s", added to H-hide exemption list.
+4. Keyboard hold shares the same visible bar (unified hold progress UI).
+- Harness: probe promoted to `meet-exit` 10-part real-timer case (join/cancelFeedback/guidance/
+  barVisible/hold progress booleans/holdCompletes/rejoin-via-Reopen/escBar/esc progress/escCompletes/
+  barHidden/hintExempt); NEG holdTick noop red. Rejoin path fixed (host leave → ended → Reopen first).
+- Infra: harness process.on('exit') kills spawned firefox (stale-test-firefox accumulation after
+  failed runs was the recurring ECONNREFUSED 2828 root; two precise kills approved this session).
+- Verified: 33 cases ALL GREEN + NEG all red + zero stale firefox; node --check + lint clean;
+  stamps x5; screenshot mx-bar shows Hold…45% bar + exit guidance chip + leave ring.
+
+## v1.83 — 2026-11-19 (portal-unified) — fix: direct-content modals had zero padding (user-reported prejoin anomaly)
+User report: Meeting join dialog content edge-to-edge / clipped look at 844x682.
+- Root cause: `.modal` base rule carries NO padding (padding lives in `.modal-head/.modal-body`
+  wrappers used by older modals); the eight direct-content modals (acc/psk/key/cred/meet/prejoin/
+  meetTrans/secret) placed .card-title/.dd-row/preview blocks directly → zero inset, rows touching
+  edges, overflow:hidden clipping risk at short viewports.
+- Fix: `.modal.pad{padding:var(--sp16);gap:var(--sp8);overflow:auto}` + class applied to the eight
+  direct-content modals; wrapper-based modals (grp/picker/cfm) untouched.
+- Verified: 844x682 prejoin screenshot shows proper inset + centered + no clipping; 1440 create
+  modal re-shot; harness 32 cases ALL GREEN + NEG all red; node --check + lint clean; stamps x5.
+
+## v1.82 — 2026-11-19 (portal-unified) — Meeting round M-5 delivered: B-M1 round COMPLETE (pending final review)
+Implements web-portal-ui §3k B-M1 task M-5 (three states + honesty sweep + regression + closure).
+- **Error state**: devtools "Meeting conn · Simulate error" leg; live/connecting → error phase card
+  "Meeting connection failed (simulated)" + Retry (→connecting→live/waiting) + Back to lobby
+  (shell restored + focus to New meeting); connecting timer honors meetError.
+- **Ended transcript**: ended cards get Transcript button → read-only modal (chat list or
+  "No messages were sent."), dlgKey Esc/focus contract; no input (read-only asserted).
+- **Shell/focus restore**: meetLeave and error-Back restore shell + focus New meeting.
+- **Honesty sweep**: host controls labelled "(simulated)"; prejoin video note states backend
+  consume-only for video meet → self media simulated (implementation alignment open item).
+- **Regression**: nav 8 / hub 10 / admin cases unchanged; meet four cases (lobby/prejoin/live/host)
+  + meet-state = 32 cases ALL GREEN + NEG all red; W1 zero-nav / mute chip / avatar non-black /
+  partsCount assertions retained.
+- Verified: node --check + lint clean; stamps x5 (C68); screenshots error/transcript (+ prior
+  lobby/create/prejoin/voice/waiting/live/speaker/roster/chat/narrow set).
+- **Round B-M1 complete**: M-1 v1.78 / M-2 v1.79 / M-3 v1.80 / M-4 v1.81 / M-5 v1.82.
+  Open items (not swallowed): backend meeting-host field, host handover, rec/share/captions/breakout/
+  reactions (recording-recon), waiting backendization, real getUserMedia prejoin, consume-only video
+  alignment, meet implementation vehicle (admin-embedded vs standalone app), hand auto-lower timeout,
+  invite link form, speaker rail cap / >9 paging vs scroll / off-page speaker indicator.
+
+## v1.81 — 2026-11-19 (portal-unified) — Meeting round M-4 delivered (pending review): roster + chat + host controls
+Implements web-portal-ui §3k B-M1 task M-4.
+- **Side panel** (right, full-width @760): Participants/Chat tabs + close; roster = self row top +
+  host badge + mute/cam/hand icons + Remove (host only, excludes host/self rows, confirmDlg
+  consequence + audit meet.remove); waiting rows Admit/Deny (audit meet.admit/deny);
+  host controls Mute all (excludes self, self can unmute) + Lock/Unlock (lobby Join/Start + prejoin
+  Join guarded while locked, audit meet.lock/unlock).
+- **Non-host**: all host controls setGuard + reason "Host only." (keyboard discoverable).
+- **Waiting arrival**: cue + toast announcer + roster-key red badge count (syncMpBadge).
+- **Chat**: local simulated list + empty "No messages yet." + empty-input guard toast + Enter/send +
+  focus kept on input after send.
+- **Hand**: guest control-bar key raise/lower with toast feedback (auto-lower timeout = open micro).
+- **Panel focus/Esc contract**: initial focus (roster first button / chat input), restore trigger on
+  close; Esc closes panel NOT meeting (Esc chain: modal → tb-pop → meet panel → hold-Esc → cascade).
+- Verified: harness 31 cases ALL GREEN (meet-host 19 assertions: panelOpen/hostBadge/badge/
+  waitingAdmit/waitingDeny/muteAllExcludesSelf/lockGuardsJoin/lobbyLocked/unlockOk/removeConfirm/
+  removed/noSelfRemove/nonHostGuard/chatEmptyState/chatEmptyInputGuard/chatSend/handRaise/handLower/
+  panelEscKeepsMeeting) + NEG all red (renderRoster noop); node --check + lint clean; stamps x5;
+  screenshots roster/chat/narrow.
+
+## v1.80 — 2026-11-19 (portal-unified) — Meeting round M-3 delivered (pending review): zero-nav live canvas
+Implements web-portal-ui §3k B-M1 task M-3 (workbudy 03-client-ia §5.3 hard requirements).
+- **Zero-nav canvas**: body.meet-live hides sidebar/topbar/deg-banner/devtools; #meetCanvas fixed
+  full-screen; shell hidden ONLY in live phase (connecting keeps shell).
+- **Adaptive tiles 1/2/4/9** (g1/g2/g3 by count, >9 paging + pager); audio-only/cam-off = neutral
+  avatar tile + name (never black frame); cam-on = simulated feed + name OSD.
+- **Speaking = 2px accent border, fill unchanged**; speakerTick() direct-callable for deterministic
+  assertions (simulated rotation).
+- **Self-PiP 1/6 width bottom-right mirrored** (label counter-mirrored); narrow @760 moves top-right;
+  never covers leave (bottom:64 above bar).
+- **Mute persistent chip** (icon+text Muted/Live mic) independent of #toast (single announcer kept).
+- **Control bar**: mic / cam (voice guarded) / layout gallery↔speaker (page+panel state kept) /
+  roster+chat (honest interim gate → M-4) / hand (guest only, raise/lower toast) / **Hold to leave**
+  (1s progress ring, short-press toast, pointerleave cancel, keyboard Space/Enter hold + keyup cancel).
+- **Esc chain meet layer**: short Esc = transient "Hold Esc 1s to leave" hint; Esc hold 1s = leave
+  (e.repeat ignored, keyup cancels); inserted after modal/tb-pop, before drawer cascade.
+- **H hides overlays** with exemption list: mute chip + leave + simulated chip never hide.
+- **pointer:coarse → 44px** control-bar registration (no 30px-family exemption).
+- **estop slot empty** in meet canvas (workbudy M2 collision-legal precondition).
+- Fixes en route: v1.77 repair residue `id="statusPop class=` missing quote + secretScrim missing
+  closing </div> nested canvas inside hidden modal (rect 0); chip svg.ic unsized giant-icon recurrence
+  (#meetTop .ic 12px); leave label nowrap; PiP label counter-mirror; devtools hidden in live.
+- Verified: harness 30 cases ALL GREEN (meet-live 15 assertions incl holdTick/escHoldTick direct-call,
+  speaking fill-unchanged re-query, coarse via style-text) + NEG all red (holdTick noop = completion-path sole tick); node --check + lint clean; stamps x5; screenshots live/speaker/narrow.
+
+## v1.79 — 2026-11-19 (portal-unified) — Meeting round M-2 delivered (pending review): prejoin + waiting guest side
+Implements web-portal-ui §3k B-M1 task M-2 (plan v2; state machine v2 no-dead-end).
+- **Prejoin modal**: name (default CUR_USER, explicit initial focus), simulated device check
+  (mic ok / camera ok or n/a·voice / network warn·simulated, non-blocking), mic+cam preview blocks;
+  voice rooms replace cam preview with "Voice conference — no camera" + honesty note (M2=A).
+- **Join path**: locked → Join guarded both lobby and prejoin ("Meeting locked by host");
+  join → connecting 300ms simulated WITH SHELL KEPT → host direct live / guest waiting;
+  waiting guest screen "Waiting for host to admit you…" + Cancel (removes self from queue);
+  admitWaiting/denyWaiting logic functions (host UI wiring = M-4); deny → guest back to lobby +
+  feedback toast; audits meet.join / meet.join.request / meet.admit / meet.deny / meet.leave.
+- **Interim live surface**: phase card "In meeting (simulated). Full canvas lands in M-3" + Leave
+  (host leave → ended + endReason + waiting cleared; guest leave → parts removal); shell hide +
+  canvas = M-3 per approved sequence (explicit interim, not fake).
+- Esc = cancel prejoin (dlgKey); focus restore to trigger (dlgClose stack); detached-trigger safe.
+- Verified: harness 29 cases ALL GREEN (meet-prejoin 5-part 11 assertions: nameFocus/voiceCamGuard/
+  cancelRestores/escCancel/lockedGuard/lockedJoinGuard/connectingShellKept/hostLive/
+  waitingGuestScreen/guestAdmit/denyFeedback) + NEG all red; meet-lobby joinGate assertion upgraded
+  to joinOpensPrejoin (M-1 interim gate retired); floor NEG retargeted autoGrant (state-prep target
+  was flaky: floorTick queue simulation refilled cleared queue); node --check + lint clean;
+  stamps x5; screenshots prejoin/voice/waiting/narrow.
+- Harness flake notes: PIT-265 focus-before-click for cancelRestores; stale test firefox reaped
+  (approved precise kill) to free Marionette 2828; EADDRINUSE from detached watch-run resolved by
+  waiting for completion.
+
+## v1.78 — 2026-11-19 (portal-unified) — Meeting round M-1 delivered (pending review): lobby + create
+Implements web-portal-ui §3k B-M1 task M-1 (M1=B/M2=A/M3=A/M4=B adjudicated; plan v2 post 4-seat review).
+- **Lobby cards**: type chip Voice/Video (backend video flag surfaced per M2), partsCount, state,
+  host line; ended rooms show endReason; host sees Reopen (→idle + audit meet.reopen), guests see
+  Ended chip; empty state "No meetings yet — create one."
+- **Create modal**: name required + Voice/Video radiogroup (roving tabindex + arrows) + honesty hint;
+  create → room {video, host=CUR_USER, parts[self], waiting[], locked, chat[], state idle} + audit
+  meet.create; focus initial=name, restore=newMeet after repaint.
+- **Invite = real copy**: copyWithFallback(v,hintEl,onOk) with done-dedupe; fallbackCopy hint target
+  parameterized (fixes hardcoded #secCopyHint + double-toast defect); lobby #meetCopyHint shows
+  copied/manual-select feedback; secret flow reuses same helper.
+- **partsCount()** unifies meet object-parts vs talk/view numeric parts (Rooms page no [object Object]).
+- **Join/Start honest interim gate**: setGuard + reason "Prejoin surface lands in M-2" (no fake toast);
+  prejoin/waiting/canvas land in M-2/M-3 per approved sequence.
+- Seeds: meet-standup (video, live, host dispatch.x, 5 parts), meet-review (voice, ended, host admin.x,
+  endReason "Host left the meeting", chat transcript seed).
+- Verified: harness 28 cases ALL GREEN (meet-lobby 12 assertions) + NEG all red (renderMeeting noop);
+  node --check + lint clean; stamps x5 (C68: About toast carries version since v1.77); screenshots
+  lobby/create/narrow.
+
 ## v1.77 — 2026-11-18 (portal-unified) — topbar convergence (option A, user-adjudicated after research)
 Research: B-end topbar doctrine = left global info / right global actions; excess elements collapse
 into menus/popovers (DSM taskbar status cluster; ENVY mobile hides account name into menu).
