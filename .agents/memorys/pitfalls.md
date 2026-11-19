@@ -1133,6 +1133,7 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 - **教训**: C10 复发——检查条件必须精确（定义特征），勿用模糊子串
 
 ## PIT-110: 生产 compose 含 dev 凭证豁免 — I2 守卫部署语义削弱（2026-08-20）
+> 2026-11-19 追记：已有 `gate-prod-compose-safety.sh` 门守护（生产 compose 禁 ALLOW_DEV* / 禁引用 dev 凭证文件），此事故形态可机检；启动守卫 guard_dev_credentials 放行时亦发 WARN（不再静默）。
 - **症状**: 部署语义审查发现 docker-compose.yml（生产）也设 MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 + 挂载 dev 账号文件——生产开箱即带 admin123
 - **根因**: I2 fix 时"两个 compose 都设豁免"——dev 豁免逻辑被复制到生产（未区分环境语义）
 - **解法**: 生产 compose 移除豁免 + 挂载 accounts.production.yaml（空模板）；带 dev 账号启动 = fail-fast 拒绝（强制真实账号）

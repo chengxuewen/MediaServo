@@ -767,3 +767,10 @@ Checks:
 **约束**: MediaServo 子仓是品牌中立的上游产品，不得携带客户品牌 `msrtc` 作为品牌字段；品牌由父工作区注入（`MEDIASERVO_BRAND` env / build-args），中立产品默认 = `mediaservo`。门 `scripts/gate-brand-neutrality.sh`（并入 all-gates）禁 msrtc，豁免功能/历史域：品牌识别（host/server 的 KNOWN_BRANDS/SERVER_NAMES，须认出 msrtc 部署，PIT-155/D252）、品牌回归测试、父壳集成脚本、历史叙述（CHANGELOG/archive/research）、agent 资产、msrtc 交付手册 34/35（容器内 OS 用户固定 mediaservo）。渲染分流：compose/.env（mediaservo 源）`s/mediaservo/<brand>/g`；手册（msrtc 源）`s/msrtc/<brand>/g`；均保 title-case MediaServo 与 OS 用户。
 
 **验证**: `bash scripts/gate-brand-neutrality.sh` == ✓。裁决存 PLAN container-build-rework「Brand-neutrality ruling」（五项均 A）。
+
+
+## C60: dev 开关纪律——告警对称/命名带前缀/生产 compose 禁 ALLOW_DEV(2026-11-19)
+
+**约束**: ① dev 放行开关（allow_dev_credentials）放行占位账号时必须发 WARN 并列账号名（guard_dev_credentials，禁静默）；② 开关 env 一律 `MEDIASERVO_` 前缀（canonical），无前缀旧名仅作弃用窗别名+deprecation WARN（窗末移除，挂账 O1）；③ 生产 docker-compose.yml 禁设任何 ALLOW_DEV* 开关、禁引用 accounts.yaml/devices.yaml（gate-prod-compose-safety 门，仅查代码行豁免注释）；启动守卫=主网、镜像剥离=二层、门=三层。
+
+**验证**: `bash scripts/gate-prod-compose-safety.sh` == ✓；`cargo test -p mediaservo-server --lib accounts`（guard 三态+WARN）与 `-p mediaservo-common --lib config`（resolver 五态）绿。

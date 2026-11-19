@@ -165,3 +165,28 @@ MediaServo maintains its own permission strings; the host platform's RBAC does s
 | `Conference.Record` | Record a meeting |
 | `Surveillance.View` | View surveillance feeds |
 | `Admin.Manage` | Backend administration permission |
+
+
+## 7. Dev Switches (dev-only; production MUST leave them unset)
+
+Two explicit dev-convenience switches relax production safety defaults. Both are
+**config-first** (`server.yaml` fields survive tree rebuilds) with an **env
+override that wins**. Production keeps both absent; the image also strips dev
+placeholder accounts at build time and the startup guard refuses to run with
+them unless explicitly allowed.
+
+| Switch | Config field | Env (canonical) | OFF (default = production) | ON (dev) |
+|---|---|---|---|---|
+| Dev credentials | `allow_dev_credentials` | `MEDIASERVO_ALLOW_DEV_CREDENTIALS=1` | Startup guard PANICS on the known placeholder accounts (`admin123`/`dispatch123`/`operator123`) — the instance refuses to boot until they are replaced | Placeholders are accepted; a startup WARN lists them by name (never silent) |
+| Device auto-enroll | `allow_dev_enroll` | `MEDIASERVO_ALLOW_DEV_ENROLL=1` | Unknown devices land in the manual approval queue (web UI) | Unknown devices auto-register after public-key verification passes; startup WARN notes the relaxed policy |
+
+Notes:
+- `ALLOW_DEV_ENROLL` (unprefixed) is a **deprecated alias** during the migration
+  window; using it still works but logs a deprecation WARN. It is removed after
+  one CLI-face cycle.
+- Defense in depth for the delivery artifact: `gate-prod-compose-safety` fails if
+  the production `docker-compose.yml` sets any `ALLOW_DEV*` toggle or references
+  dev credential files. The startup guard remains the PRIMARY net (covers every
+  launch path, not just compose).
+- The placeholder detection matches **password hashes**, not usernames (a real
+  account named `admin` with a strong password is not flagged).
