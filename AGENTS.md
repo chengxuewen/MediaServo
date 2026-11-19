@@ -17,6 +17,7 @@ MediaServo/
 ├── .opencode/  # OpenCode configuration (plugins, MCP, LSP, instructions)
 ├── .pixi-cache/
 ├── .qoder/
+├── .serena/
 ├── .vscode/
 ├── PolyOrch/  # product-surface submodule (orchestration UI)
 ├── bindings/  # FFI bindings (python / c)
@@ -35,6 +36,7 @@ MediaServo/
 ├── docker/  # container build + compose
 ├── docs/  # design docs (architecture + modules + reference + research)
 ├── examples/  # example programs (cxx / rs / py)
+├── out/
 ├── scripts/  # engineering scripts (gates / agent toolchain / book)
 │   └── agents/  # agent toolchain (generator, MCP launcher, guards, lints)
 ├── tools/  # build/host tools (mediaservo-gates)
@@ -165,6 +167,7 @@ _Project has entered the code implementation phase. Current state:_
 | `context-engineering` | Feed MediaServo agents the right context for a 7-crate polyglot workspace. |
 | `debugging-and-error-recovery` | Systematic debugging for MediaServo: reproduce, capture evidence, localize the layer, narrow with bisect or a minimal input, fix minimally,  |
 | `deprecation-and-migration` | Deprecate and migrate MediaServo surfaces safely: mark the old surface, publish a migration path, keep an alias until consumers move, then r |
+| `design-library` | Design intelligence library (ported from ui-ux-pro-max, MIT). |
 | `design-system` | Govern the MediaServo design-token layer (@mediaservo/ui). |
 | `doc-audit` | MediaServo document & architecture audit. |
 | `documentation-and-adrs` | Record MediaServo decisions and keep docs consistent: D-series entries, architecture and protocol updates, book chapters, changelog, and lin |

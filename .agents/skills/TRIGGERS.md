@@ -17,10 +17,11 @@
 | Semantic impact before editing a symbol | `lsp-code-analysis` | Layer map -> `repo-triage`; contract -> `api-interface-design` |
 | Build vs borrow before writing a new mechanism | `reuse-first` | Approval to act -> `think-before-act`; upstream/external docs -> `source-driven-development` |
 | Multi-role review of one plan/verdict/decision | `expert-panel-review` | Whole doc corpus -> `doc-audit`; act/convene gate -> `think-before-act`; item-by-item verdicts -> `adjudication-walkthrough` |
-| Convert a book/document into a skill | `book-to-skill` | Skill-crafting quality gate -> `create-skill`; registration -> a TRIGGERS row here |
+| Convert a book/document into a skill | `book-to-skill` | Registration -> a TRIGGERS row here (the old `create-skill` handoff is retired -- no such skill ships in this repo) |
 | Verify a browser-facing feature | `browser-testing` | Network-impairment angle -> `weaknet-testing`; UI code changes -> `incremental-implementation` |
 | Review interface quality / a11y / three states | `ui-ux-review` | Functional verification -> `browser-testing`; token mechanics -> `design-system` |
 | Consume/extend design tokens, style a component | `design-system` | Visual-quality verdict -> `ui-ux-review`; implementation -> `web-frontend` role |
+| Design exploration / style selection / palette candidates / industry anti-patterns | `design-library` | Token/theme landing -> `design-system`; acceptance -> `ui-ux-review`; quality floor -> design-quality.md |
 | Pick the right context for a polyglot task | `context-engineering` | Which layer/files -> `repo-triage`; symbol impact -> `lsp-code-analysis` |
 | Audit .agents/ or scan the community for adoptables | `repo-audit` | Internal doc consistency -> `doc-audit`; whether to adopt -> `think-before-act` |
 | Execute a ruled mechanism adoption/port | `mechanism-porting` | Discovery -> `repo-audit`; whether to adopt -> `think-before-act` (user ruling required) |
@@ -45,7 +46,7 @@
 - `lsp-code-analysis` owns the symbol impact map; `repo-triage` owns the layer/file map.
 - `reuse-first` owns "build vs borrow" for in-repo faces (C60 ladder); `source-driven-development` owns upstream/external docs; `think-before-act` owns the act gate that follows both.
 - `expert-panel-review` owns running one multi-role review (execution engine); `doc-audit` owns whole-corpus audits; `think-before-act` owns the convene-or-not gate; `adjudication-walkthrough` owns presenting disagreements for user verdicts.
-- `book-to-skill` owns document-to-skill conversion; `create-skill` owns the skill-crafting gate itself.
+- `book-to-skill` owns document-to-skill conversion (the retired `create-skill` reference is dropped -- no such skill ships).
 - `browser-testing` owns browser-facing verification; `weaknet-testing` owns network-impairment measurement (tc netem + the weaknet agent).
 - `context-engineering` owns task-context routing; `repo-triage` owns the layer/file map.
 - `repo-audit` owns the external community scan; `doc-audit` owns internal consistency.
