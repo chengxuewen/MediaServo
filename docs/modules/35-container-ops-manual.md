@@ -202,7 +202,9 @@ docker compose --env-file .env up -d
 | **Signaling fine, black screen / no media** | SFU media path broken: ① is `MEDIASERVO_SFU_ANNOUNCED_IP` client-reachable (mandatory on multi-NIC)? ② is 20000/udp allowed and mapped 1:1 (§4.1)? ③ firewall 20000/udp |
 | admin login fails | was `MEDIASERVO_ADMIN_PASSWORD` set on first boot? container logs have the setup-token fallback |
 | ssh unreachable | was a public key delivered to `etc/ssh/authorized_keys` (WARN in logs)? is `SSH_PORT` right? |
+| **After a volume re-init, the UI shows 401s and admin WS closes** | expected: a fresh etc volume re-runs init and rotates the JWT secret — the browser's old token is invalid. Clear site data (or log out) and sign in again with MEDIASERVO_ADMIN_PASSWORD |
 | Container won't start | `docker compose ... logs`; port conflicts (8080/9800/2222); disk full |
+| Console shows `/weaknet/v1/capabilities 502` | expected in production: the image ships no weaknet app; the Caddyfile route is a known no-op (console noise only, no impact) |
 | startup log shows **"dev placeholder accounts active"** | a dev-only toggle is enabled (`MEDIASERVO_ALLOW_DEV_CREDENTIALS`) or dev accounts were mounted into the etc volume — production MUST unset it and use the admin bootstrap instead (DEPLOY-MANUAL §5) |
 | Data lost / secrets changed | are the `etc`/`recordings`/`run/logs` volumes mounted (§4)? no volumes = regenerated on every recreate |
 
