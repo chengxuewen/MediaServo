@@ -129,6 +129,12 @@ COPY --from=treebuild /opt/${BRAND} /opt/${BRAND}
 # the package artifact set also ships them as DEPLOY-MANUAL.md / OPS-MANUAL.md).
 COPY --from=treebuild /workspace/docs/modules/34-site-deployment.md /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md
 COPY --from=treebuild /workspace/docs/modules/35-container-ops-manual.md /usr/local/share/doc/${BRAND}/OPS-MANUAL.md
+# Brand-render the baked manuals to match this image's brand (the source docs
+# are msrtc-authored and every msrtc token is brand-related). Identity for msrtc.
+RUN if [ "${BRAND}" != msrtc ]; then \
+        sed -i "s/msrtc/${BRAND}/g" /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md \
+                                   /usr/local/share/doc/${BRAND}/OPS-MANUAL.md; \
+    fi
 COPY docker/server/entrypoint.sh /usr/local/bin/server-entrypoint.sh
 # Named-volume copy-up preserves image ownership: pre-create + chown the tree
 # so the mediaservo daemon can write etc/run after the entrypoint drops privs.

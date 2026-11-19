@@ -1122,7 +1122,7 @@ PIEOF
     (cd "$abs" && sha256sum "$tar" > SHA256SUMS) || return $?
     cp "$ROOT/docker-compose.yml" "$abs/docker-compose.yml"
     cp "$ROOT/.env.example" "$abs/.env.example"
-    # Two role-facing manuals ship with the set (R22 runbook face ZH):
+    # Two role-facing manuals ship with the set (English; brand-rendered below):
     # DEPLOY-MANUAL = deployment engineer (install/tuning/firewall/offline drill);
     # OPS-MANUAL = day-2 operations (load/up/verify/logs/backup/troubleshoot/rollback).
     local _miss=""
@@ -1133,6 +1133,17 @@ PIEOF
         cp "$ROOT/docs/modules/35-container-ops-manual.md" "$abs/OPS-MANUAL.md"
     else _miss="$_miss 35-container-ops-manual.md"; fi
     [ -z "$_miss" ] || echo "WARN: manual(s) absent — artifact set incomplete:$_miss" >&2
+    # Brand-render the delivery text artifacts so the set is self-consistent with
+    # the packaged image's brand. The source files are msrtc-authored and every
+    # 'msrtc' token in them is brand-related (volume names, /opt paths, image
+    # names, :-defaults, prose) — so a global substitution is safe. Identity for
+    # msrtc; e.g. a standalone mediaservo set gets mediaservo throughout.
+    if [ "$brand" != msrtc ]; then
+        local _f
+        for _f in docker-compose.yml .env.example DEPLOY-MANUAL.md OPS-MANUAL.md; do
+            [ -f "$abs/$_f" ] && sed -i "s/msrtc/${brand}/g" "$abs/$_f"
+        done
+    fi
     echo "✓ packaged image artifact set: $abs"
     echo "  image:    $image (+ latest), $(( $(stat -c%s "$abs/$tar") / 1024 / 1024 )) MiB tar"
     echo "  manifest: SHA256SUMS"
