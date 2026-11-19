@@ -1044,7 +1044,9 @@ Offline site artifact set (container-build-rework B3.6):
   .env.example               four-var contract template (fill -> .env)
   DEPLOY-MANUAL.md           deployment engineer manual (install/tuning/drill)
   OPS-MANUAL.md              ops manual (load/up/verify/day-2/troubleshoot/rollback)
-  --dist DIR   output directory (default dist/)
+  --dist DIR   parent output directory (default dist/); the set lands in
+               <dist>/<brand>-server-image-<tag>/ (one folder per tag — hand
+               that folder to the site as-is)
   --tag TAG    image tag (default: running container tag, else crate version)
   --brand NAME image brand (default MEDIASERVO_BRAND or msrtc)
 Site: docker load -i <tar> && cp .env.example .env (fill) && docker compose --env-file .env up -d
@@ -1060,7 +1062,13 @@ PIEOF
     [ -n "$tag" ] || tag=$(_ms_crate_version mediaservo-server)
     local image="${brand}-server:${tag}"
     docker image inspect "$image" >/dev/null 2>&1 || { echo "Error: image $image absent — build it first (Dockerfile.tree / build image prod)" >&2; return 1; }
-    mkdir -p "$dist"; local abs; abs=$(cd "$dist" && pwd)
+    mkdir -p "$dist"
+    # One wrapper dir per artifact set: the multi-file image set isolates inside
+    # --dist — no mixing with the native release tarballs (host/server/sdk land
+    # flat in the same out/packages) and no cross-tag collisions (SHA256SUMS
+    # always matches its own set; re-runs of the same tag refresh in place).
+    local abs; abs="$(cd "$dist" && pwd)/${brand}-server-image-${tag}"
+    mkdir -p "$abs"
     local tar="${brand}-server-${tag}.tar"
     # dual tag (version pin + latest floating; rollback = re-pin the old tag)
     docker tag "$image" "${brand}-server:latest"

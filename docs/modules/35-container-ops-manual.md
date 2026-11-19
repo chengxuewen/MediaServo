@@ -7,6 +7,8 @@
 
 ## 0. 包里有什么
 
+交付物 = **一个整目录**（目录名 `msrtc-server-image-<tag>/`，含下列 6 件）：
+
 | 文件 | 说明 |
 |---|---|
 | `msrtc-server-<tag>.tar` | 镜像包（`docker save`；含 `<tag>` + `latest` 双 tag） |

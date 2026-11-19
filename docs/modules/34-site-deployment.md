@@ -10,7 +10,9 @@
 
 ## 0. 产物集与边界
 
-`mediaservo package image --dist <DIR>` 产出（B3.6）：
+`package image --dist <DIR>` 产出整目录 `<DIR>/msrtc-server-image-<tag>/`（每 tag
+一目录，与同目录下的原生 tarball 隔离；父壳 `./msrtc.sh package image` 默认落
+`out/packages/`）：
 
 | 文件 | 用途 |
 |---|---|
