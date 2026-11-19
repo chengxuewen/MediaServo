@@ -24,8 +24,8 @@
 
   /* ---- color: text ---- */
   --ms-color-text: #1a1a2e;           /* primary text / dark header bg */
-  --ms-color-text-secondary: #555;    /* body secondary */
-  --ms-color-text-tertiary: #333;     /* headings on light */
+  --ms-color-text-secondary: #555;    /* body secondary text (mid tone) */
+  --ms-color-text-tertiary: #333;     /* headings on light (name is historical: usage is heading tone, darker by design -- B3a audit) */
   --ms-color-text-muted: #888;        /* hints, placeholders, meta */
   --ms-color-text-faint: #aaa;        /* disabled / faint */
   --ms-color-text-inverse: #fff;      /* on dark/primary surfaces */
@@ -71,4 +71,30 @@
 
   /* ---- motion ---- */
   --ms-transition-fast: all 0.15s;
+
+/* Style-system dimensions (design-multi-style B3a; additive-only). Reserved
+   for themes/ (B3b/c) -- this note stands in lieu of a base consumer. */
+  --ms-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08);
+  --ms-shadow-2: 0 2px 8px rgba(0, 0, 0, 0.12);
+  --ms-shadow-3: 0 8px 24px rgba(0, 0, 0, 0.16);
+  --ms-focus-ring-color: var(--ms-color-primary);
+  --ms-focus-ring-width: 2px;
+  --ms-motion-duration-fast: 0.15s;
+  --ms-motion-duration-base: 0.25s;
+  --ms-motion-easing: cubic-bezier(0.2, 0, 0, 1);
+  --ms-control-h-sm: 28px;
+  --ms-control-h-md: 34px;
+  --ms-icon-size-sm: 16px;
+  --ms-icon-size-md: 18px;
+  --ms-state-layer-hover: rgba(0, 0, 0, 0.08);
+  --ms-state-layer-pressed: rgba(0, 0, 0, 0.12);
+  --ms-scrim: rgba(0, 0, 0, 0.4);
+  --ms-layer-01: var(--ms-color-surface);
+  --ms-layer-02: var(--ms-color-surface-subtle);
+  --ms-layer-03: var(--ms-color-surface-muted);
+  --ms-color-border-strong: #ccc;
+  --ms-color-border-interactive: var(--ms-color-primary);
+  --ms-font-leading-tight: 1.25;
+  --ms-font-leading-normal: 1.45;
+  --ms-radius-xl: 16px;
 }

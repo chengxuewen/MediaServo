@@ -65,7 +65,7 @@
 .video-toolbar .vt-btn.active {
   border-color: var(--ms-color-primary); background: var(--ms-color-primary); color: var(--ms-color-text-inverse);
 }
-.video-toolbar .vt-hint { margin-left: auto; color: #b45309; font-size: 0.75rem; }
+.video-toolbar .vt-hint { margin-left: auto; color: var(--ms-color-warning); font-size: 0.75rem; }
 .stream-dot {
   display: inline-block;
   width: 8px; height: 8px;
