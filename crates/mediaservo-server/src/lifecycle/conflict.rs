@@ -132,27 +132,6 @@ fn report_of_pid(pid: u32) -> Option<ConflictReport> {
     Some(ConflictReport { pid, exe, cmd, deleted, parent })
 }
 
-/// stop self-verification (T4): have the family processes for app name gone to zero.
-/// Going through oxmgr ps semantics is too heavy -- lightweight form: a process counts as remaining if its cmdline contains
-/// `msrtc-<app>` or `<app>` and its exe is not this test process. None found = zero.
-/// (Since global-reap T2 the stop main path uses B2 ownership-attribution self-verification; no other caller today --
-/// keep `#[allow(dead_code)]` for one observation cycle, then delete.)
-#[allow(dead_code)]
-pub fn diagnose_app_gone(app: &str) -> bool {
-    let needles = [format!("msrtc-{app}"), format!("mediaservo-{app}"), app.to_string()];
-    for pid in proc_pids() {
-        if pid == std::process::id() {
-            continue;
-        }
-        let Ok(cmd) = std::fs::read_to_string(format!("/proc/{pid}/cmdline")) else { continue };
-        let first = cmd.split('\0').next().unwrap_or("");
-        if needles.iter().any(|n| first.contains(n.as_str())) {
-            return false; // remaining processes
-        }
-    }
-    true
-}
-
 /// Plain-language report output (eprintln; offers handling advice when an occupant carries upgrade residue, F1 attribute-don't-kill).
 pub fn print_report(reports: &[ConflictReport], port: u16) {
     if reports.is_empty() {

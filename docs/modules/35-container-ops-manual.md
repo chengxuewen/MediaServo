@@ -9,12 +9,12 @@
 
 ## 0. What Is in the Package
 
-The deliverable is **one directory** (named `mediaservo-server-image-<tag>/`,
+The deliverable is **one directory** (named `msrtc-server-image-<tag>/`,
 containing these 6 items):
 
 | File | Description |
 |---|---|
-| `mediaservo-server-<tag>.tar` | image archive (`docker save`; dual tags `<tag>` + `latest`) |
+| `msrtc-server-<tag>.tar` | image archive (`docker save`; dual tags `<tag>` + `latest`) |
 | `SHA256SUMS` | sha256 manifest of the tar (handover reconciliation) |
 | `docker-compose.yml` | production compose (single container: server + caddy + oxmgr) |
 | `.env.example` | configuration template (copy to `.env` and fill) |
@@ -22,7 +22,7 @@ containing these 6 items):
 | `OPS-MANUAL.md` | this manual (**day-2 operations**) |
 
 **Single-container topology**: one container runs the whole tree —
-`mediaservo-server` (signaling + admin + SFU) + `caddy` (8080 web/reverse proxy) +
+`msrtc-server` (signaling + admin + SFU) + `caddy` (8080 web/reverse proxy) +
 `oxmgr` (process manager, container PID1). No separate proxy container.
 
 ## 1. Preflight
@@ -44,7 +44,7 @@ docker compose version                # needs the compose v2 plugin
 sha256sum -c SHA256SUMS
 
 # 2) Load the image (no internet needed)
-docker load -i mediaservo-server-<tag>.tar
+docker load -i msrtc-server-<tag>.tar
 
 # 3) Prepare the configuration
 cp .env.example .env
@@ -72,7 +72,7 @@ docker compose --env-file .env ps
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `MEDIASERVO_BRAND` | `mediaservo` | tree prefix `/opt/<brand>` + volume paths; changing it requires a matching image |
+| `MEDIASERVO_BRAND` | `msrtc` | tree prefix `/opt/<brand>` + volume paths; changing it requires a matching image |
 | `MEM_LIMIT` | `512m` | container memory limit (memory only; CPU unlimited); raise per §4 for larger loads |
 | `RUST_LOG` | `info` | log level |
 | `WEB_PORT`/`AGENT_PORT`/`SFU_PORT` | 8080/9800/20000 | shift the **host-side** ports only; container targets are fixed |
@@ -95,8 +95,8 @@ docker compose --env-file .env ps
 
 | Container path | Contents |
 |---|---|
-| `/opt/mediaservo/etc` | secrets (PSK/JWT), account/device tables, ssh host keys, Caddyfile (generated on first boot) |
-| `/opt/mediaservo/recordings` | recordings |
+| `/opt/msrtc/etc` | secrets (PSK/JWT), account/device tables, ssh host keys, Caddyfile (generated on first boot) |
+| `/opt/msrtc/recordings` | recordings |
 
 No volumes = data lost and secrets regenerated on every recreate.
 
@@ -147,13 +147,13 @@ docker compose --env-file .env ps
 docker inspect <container> --format '{{.State.Health.Status}}'
 
 # Logs (service logs are the oxmgr file face run/logs/*.out.log, NOT docker logs)
-docker compose --env-file .env exec server sh -c 'tail -100 /opt/mediaservo/run/logs/*.out.log'
+docker compose --env-file .env exec server sh -c 'tail -100 /opt/msrtc/run/logs/*.out.log'
 
 # Backup (pack the two volumes; uses the image's own tar, no internet needed)
 docker run --rm --entrypoint sh \
-  -v <project>_mediaservo-data:/data:ro \
-  -v "$PWD/backup:/backup" mediaservo-server:<tag> \
-  -c 'tar czf /backup/mediaservo-data.tar.gz -C /data .'
+  -v <project>_msrtc-data:/data:ro \
+  -v "$PWD/backup:/backup" msrtc-server:<tag> \
+  -c 'tar czf /backup/msrtc-data.tar.gz -C /data .'
 # same for the recordings volume
 
 # Graceful stop (image STOPSIGNAL SIGINT; ~1s, exit 0)
@@ -170,13 +170,13 @@ docker compose --env-file .env up -d        # recreate after a config change
 
 ```bash
 # Upgrade: load the new tar -> bump TAG in .env -> recreate
-docker load -i mediaservo-server-<new-tag>.tar
+docker load -i msrtc-server-<new-tag>.tar
 sed -i 's/^TAG=.*/TAG=<new-tag>/' .env
 docker compose --env-file .env up -d
 curl --noproxy '*' -f http://<IP>:8080/health
 
 # Rollback: keep the previous tar -> re-pin the old TAG -> recreate (volumes untouched)
-docker load -i mediaservo-server-<old-tag>.tar
+docker load -i msrtc-server-<old-tag>.tar
 sed -i 's/^TAG=.*/TAG=<old-tag>/' .env
 docker compose --env-file .env up -d
 # admin login still works after rollback (the account table persists in the
@@ -201,7 +201,7 @@ docker compose --env-file .env up -d
   first, then install `docker-ce docker-ce-cli containerd.io
   docker-compose-plugin`.
 - **UDP kernel params**: `net.core.rmem_max=16777216`,
-  `net.core.netdev_max_backlog=5000` (`/etc/sysctl.d/99-mediaservo.conf` +
+  `net.core.netdev_max_backlog=5000` (`/etc/sysctl.d/99-msrtc.conf` +
   `sysctl --system`).
 - **Firewall** (firewalld): allow 8080/tcp, 9800/tcp, 20000/udp, 2222/tcp.
 - **SELinux**: named volumes usually run fine under enforcing; on denials
@@ -219,9 +219,9 @@ docker compose --env-file .env up -d
 
   ```bash
   docker compose --env-file .env exec -T server sh -c \
-    'cat >> /opt/mediaservo/etc/ssh/authorized_keys' < ops_id_ed25519.pub
+    'cat >> /opt/msrtc/etc/ssh/authorized_keys' < ops_id_ed25519.pub
   docker compose --env-file .env exec server sh -c \
-    'chown mediaservo:mediaservo /opt/mediaservo/etc/ssh/authorized_keys; chmod 600 /opt/mediaservo/etc/ssh/authorized_keys'
+    'chown mediaservo:mediaservo /opt/msrtc/etc/ssh/authorized_keys; chmod 600 /opt/msrtc/etc/ssh/authorized_keys'
   ssh -p 2222 mediaservo@<IP>
   ```
 
@@ -229,12 +229,12 @@ docker compose --env-file .env up -d
 
 ```bash
 sha256sum -c SHA256SUMS                          # reconcile
-docker load -i mediaservo-server-<tag>.tar            # load
+docker load -i msrtc-server-<tag>.tar            # load
 cp .env.example .env && vi .env                  # configure
 docker compose --env-file .env up -d             # start
 docker compose --env-file .env ps                # status
 curl --noproxy '*' -f http://<IP>:8080/health    # health
-docker compose --env-file .env exec server sh -c 'tail -50 /opt/mediaservo/run/logs/*.out.log'  # logs
+docker compose --env-file .env exec server sh -c 'tail -50 /opt/msrtc/run/logs/*.out.log'  # logs
 docker compose --env-file .env stop              # graceful stop
 docker compose --env-file .env up -d             # recreate after upgrade/rollback (bump TAG first)
 ```

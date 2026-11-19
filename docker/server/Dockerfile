@@ -129,11 +129,11 @@ COPY --from=treebuild /opt/${BRAND} /opt/${BRAND}
 # the package artifact set also ships them as DEPLOY-MANUAL.md / OPS-MANUAL.md).
 COPY --from=treebuild /workspace/docs/modules/34-site-deployment.md /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md
 COPY --from=treebuild /workspace/docs/modules/35-container-ops-manual.md /usr/local/share/doc/${BRAND}/OPS-MANUAL.md
-# Brand-render the baked manuals to match this image's brand (the source docs
-# are mediaservo-authored and every lowercase mediaservo token is brand-related;
-# the title-case MediaServo product name is preserved). Identity for mediaservo.
-RUN if [ "${BRAND}" != mediaservo ]; then \
-        sed -i "s/mediaservo/${BRAND}/g" /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md \
+# Brand-render the baked manuals to match this image's brand. The manuals are
+# msrtc-authored delivery docs (the in-container OS user stays mediaservo);
+# title-case MediaServo is preserved (case-sensitive). Identity for msrtc.
+RUN if [ "${BRAND}" != msrtc ]; then \
+        sed -i "s/msrtc/${BRAND}/g" /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md \
                                    /usr/local/share/doc/${BRAND}/OPS-MANUAL.md; \
     fi
 COPY docker/server/entrypoint.sh /usr/local/bin/server-entrypoint.sh

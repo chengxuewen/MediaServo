@@ -1133,15 +1133,21 @@ PIEOF
         cp "$ROOT/docs/modules/35-container-ops-manual.md" "$abs/OPS-MANUAL.md"
     else _miss="$_miss 35-container-ops-manual.md"; fi
     [ -z "$_miss" ] || echo "WARN: manual(s) absent — artifact set incomplete:$_miss" >&2
-    # Brand-render the delivery text artifacts so the set is self-consistent with
-    # the packaged image's brand. The source files are mediaservo-authored and
-    # every lowercase 'mediaservo' token is brand-related (volume names, /opt
-    # paths, image names, :-defaults, prose); title-case MediaServo is preserved.
-    # Identity for mediaservo; a branded parent set gets <brand> throughout.
+    # Brand-render the delivery text artifacts so the set matches the packaged
+    # image's brand. Two source authorings, two render directions:
+    #  - compose/.env are mediaservo-authored (neutral machinery): s/mediaservo/<brand>/g.
+    #  - the delivery manuals are msrtc-authored (msrtc site delivery docs; the
+    #    in-container OS user stays mediaservo): s/msrtc/<brand>/g.
+    # Title-case MediaServo (product name) is preserved by both (case-sensitive).
+    local _f
     if [ "$brand" != mediaservo ]; then
-        local _f
-        for _f in docker-compose.yml .env.example DEPLOY-MANUAL.md OPS-MANUAL.md; do
+        for _f in docker-compose.yml .env.example; do
             [ -f "$abs/$_f" ] && sed -i "s/mediaservo/${brand}/g" "$abs/$_f"
+        done
+    fi
+    if [ "$brand" != msrtc ]; then
+        for _f in DEPLOY-MANUAL.md OPS-MANUAL.md; do
+            [ -f "$abs/$_f" ] && sed -i "s/msrtc/${brand}/g" "$abs/$_f"
         done
     fi
     echo "✓ packaged image artifact set: $abs"

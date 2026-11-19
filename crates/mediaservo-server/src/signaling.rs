@@ -1405,7 +1405,7 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
                     let _ = dead.try_send(());
                     return;
                 }
-                if ptx.lock().await.send(Message::Ping("msrtc-hb".into())).await.is_err() {
+                if ptx.lock().await.send(Message::Ping("mediaservo-hb".into())).await.is_err() {
                     return; // the write side is broken: the main loop's read end finishes the cleanup first
                 }
             }

@@ -752,7 +752,7 @@ async fn session_task(
                     fire_disconnect(&on_disconnect);
                     break;
                 }
-                if ws_tx.send(Message::Ping("msrtc-hb".into())).await.is_err() {
+                if ws_tx.send(Message::Ping("mediaservo-hb".into())).await.is_err() {
                     fire_disconnect(&on_disconnect);
                     break;
                 }

@@ -11,18 +11,18 @@
 
 ## 0. Delivery Set and Boundaries
 
-The deliverable is one directory `mediaservo-server-image-<tag>/` (one folder per
+The deliverable is one directory `msrtc-server-image-<tag>/` (one folder per
 release; copying that folder IS the handover):
 
 | File | Purpose |
 |---|---|
-| `mediaservo-server-<tag>.tar` | `docker save` image archive (dual tags: `<tag>` + `latest`) |
+| `msrtc-server-<tag>.tar` | `docker save` image archive (dual tags: `<tag>` + `latest`) |
 | `SHA256SUMS` | sha256 manifest of the tar (handover reconciliation) |
 | `docker-compose.yml` | production compose (single container: service + gateway + process manager) |
 | `.env.example` | four-variable contract template (copy to `.env` and fill) |
 | `DEPLOY-MANUAL.md` | this manual |
 
-**Single-container topology**: `mediaservo-server` (server + caddy + oxmgr as PID1).
+**Single-container topology**: `msrtc-server` (server + caddy + oxmgr as PID1).
 oxmgr shepherds the server/web processes; caddy serves browsers on 8080, while
 9800 is the direct host-agent face. **No separate proxy container.** Runtime
 base: debian:bookworm-slim.
@@ -56,7 +56,7 @@ docker compose version   # confirm the compose v2 plugin
 ### 2.1 UDP sysctl (SFU RTP receive path)
 
 ```bash
-cat > /etc/sysctl.d/99-mediaservo.conf <<'EOF'
+cat > /etc/sysctl.d/99-msrtc.conf <<'EOF'
 net.core.rmem_max = 16777216
 net.core.netdev_max_backlog = 5000
 EOF
@@ -94,7 +94,7 @@ policy from the audit log.
 ```bash
 # 1) Reconcile + load the image (no internet needed)
 sha256sum -c SHA256SUMS
-docker load -i mediaservo-server-<tag>.tar      # loads both <tag> and latest
+docker load -i msrtc-server-<tag>.tar      # loads both <tag> and latest
 
 # 2) Fill in .env (four-variable contract)
 cp .env.example .env
@@ -165,11 +165,11 @@ see the drill in §7.
 
   ```bash
   # Append the ops public key into the etc volume (container path
-  # /opt/mediaservo/etc/ssh/authorized_keys)
+  # /opt/msrtc/etc/ssh/authorized_keys)
   docker compose --env-file .env exec server sh -c \
-    'cat >> /opt/mediaservo/etc/ssh/authorized_keys' < ops_id_ed25519.pub
+    'cat >> /opt/msrtc/etc/ssh/authorized_keys' < ops_id_ed25519.pub
   docker compose --env-file .env exec server sh -c \
-    'chown mediaservo:mediaservo /opt/mediaservo/etc/ssh/authorized_keys; chmod 600 /opt/mediaservo/etc/ssh/authorized_keys'
+    'chown mediaservo:mediaservo /opt/msrtc/etc/ssh/authorized_keys; chmod 600 /opt/msrtc/etc/ssh/authorized_keys'
   ssh -p 2222 mediaservo@<IP>    # verify key login
   ```
 
@@ -184,12 +184,12 @@ see the drill in §7.
 # are discovered by the compose project label)
 mediaservo data backup ./backup        # needs the CLI env; bare-docker below
 # Bare-docker equivalent (no CLI on site):
-docker run --rm --entrypoint sh -v mediaservo_mediaservo-data:/data:ro \
-  -v "$PWD/backup:/backup" mediaservo-server:<tag> \
-  -c 'tar czf /backup/mediaservo_mediaservo-data.tar.gz -C /data .'
+docker run --rm --entrypoint sh -v msrtc_msrtc-data:/data:ro \
+  -v "$PWD/backup:/backup" msrtc-server:<tag> \
+  -c 'tar czf /backup/msrtc_msrtc-data.tar.gz -C /data .'
 
 # Logs (oxmgr file face, run/logs/*.out.log; NOT docker logs)
-docker compose --env-file .env exec server sh -c 'tail -50 /opt/mediaservo/run/logs/*.out.log'
+docker compose --env-file .env exec server sh -c 'tail -50 /opt/msrtc/run/logs/*.out.log'
 
 # Graceful stop (image STOPSIGNAL is SIGINT; oxmgr on SIGINT stops apps
 # gracefully, while SIGTERM would hang with apps attached)
@@ -205,7 +205,7 @@ comes from a standard-tier (10 rooms / 20 peers at 720p) load measurement
 
 ```bash
 # The previous release's tar stays on site (delivery keeps one version back)
-docker load -i mediaservo-server-<old-tag>.tar
+docker load -i msrtc-server-<old-tag>.tar
 sed -i 's/^TAG=.*/TAG=<old-tag>/' .env       # re-pin the old tag
 docker compose --env-file .env up -d         # recreates onto the old image; volumes untouched
 curl --noproxy '*' -f http://<IP>:8080/health
@@ -221,10 +221,10 @@ curl --noproxy '*' -f http://<IP>:8080/health
 
 | # | Action | Result |
 |---|---|---|
-| 1 | `sha256sum -c SHA256SUMS` | `mediaservo-server-0.1.3.tar: OK` |
-| 2 | `docker load -i mediaservo-server-0.1.3.tar` | loaded dual tags `mediaservo-server:0.1.3` + `:latest` |
+| 1 | `sha256sum -c SHA256SUMS` | `msrtc-server-0.1.3.tar: OK` |
+| 2 | `docker load -i msrtc-server-0.1.3.tar` | loaded dual tags `msrtc-server:0.1.3` + `:latest` |
 | 3 | `cp .env.example .env`, fill TAG/ANNOUNCED_IP=127.0.0.1/ADMIN_PASSWORD/SSH_PORT | four variables ready |
-| 4 | `docker compose --env-file .env up -d` (offset ports for isolation) | `mediaservo-server-1 Up (healthy)` |
+| 4 | `docker compose --env-file .env up -d` (offset ports for isolation) | `msrtc-server-1 Up (healthy)` |
 | 5 | `curl --noproxy '*' :18080/health` | 200 |
 | 6 | /admin vs /voice title check | MediaServo Admin / MediaServo Voice (distinct ✓) |
 | 7 | admin first login POST /api/auth/login | JWT token ✓ |
