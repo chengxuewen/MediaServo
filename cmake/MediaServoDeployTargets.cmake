@@ -31,8 +31,8 @@
 #
 # DESTINATION & BRAND RULES (R2, user-facing — mirrored in the deployment doc):
 #   mediaservo-deploy-* (submodule view)  -> <submodule>/out/<t>, upstream names
-#   msrtc-deploy-* (parent view, R5)      -> <parent>/out/<t>, msrtc names
-#   msrtc.sh / mediaservo.sh deploy       -> shell env injection decides
+#   parent deploy-* (parent view, R5)      -> <parent>/out/<t>, brand names
+#   the parent shell / mediaservo.sh deploy       -> shell env injection decides
 #   judges/tests                          -> explicit /tmp prefixes ONLY
 # R3: libraries NEVER carry the brand (libmediaservo_*.so stands; brand =
 # deployment face = binary/unit names only — D269/C47).
@@ -40,7 +40,7 @@
 # over later env injection (cache persists across re-configures); the guards
 # fail closed on brand conflicts; remedy = delete build/deploy-*.
 # Parent-context semantics (C1): mediaservo-* buttons keep upstream semantics
-# in EVERY view — the name is the promise. msrtc-deploy-bindings is a symmetry
+# in EVERY view — the name is the promise. parent deploy-bindings is a symmetry
 # button (prefix-only, no brand). "bindings" and "bindings/c|node" render as
 # SIBLING tree nodes (shared prefix, not parent/child). Since plan
 # ide-folder-hierarchy P6 the web lanes join the mediaservo/web family (setup-
@@ -101,19 +101,19 @@ if(NOT MEDIASERVO_OXMGR_BIN)
     # EMPTY cache entry; find_program treats any pre-existing cache value --
     # empty included -- as already resolved and skips the search (measured).
     # Drop the empty seed so the PATH hunt actually runs (the parent shell
-    # injects its .cache/oxmgr/<pkg> dir into PATH via msrtc.sh).
+    # injects its .cache/oxmgr/<pkg> dir into PATH via the parent shell).
     unset(MEDIASERVO_OXMGR_BIN CACHE)
     find_program(MEDIASERVO_OXMGR_BIN oxmgr)
 endif()
 if(NOT MEDIASERVO_OXMGR_BIN)
     # The parent shell unpacks oxmgr into the WORKSPACE .cache/oxmgr/<pkg>/
-    # and injects that dir into PATH (msrtc.sh) -- a CLI-only leg. An IDE
-    # configure runs cmake directly (no msrtc.sh env), so also hunt the
+    # and injects that dir into PATH (the parent shell) -- a CLI-only leg. An IDE
+    # configure runs cmake directly (no the parent shell env), so also hunt the
     # workspace cache structurally: CMAKE_SOURCE_DIR is the parent workspace
     # root in superbuild mode. The MEDIASERVO_REPO_ROOT anchor covers the
     # DEDICATED deploy trees: those are standalone configures where
     # CMAKE_SOURCE_DIR is this repo root itself, so the workspace cache
-    # sits two levels above it (msrtc-deploy-bindings first-click FATAL,
+    # sits two levels above it (parent deploy-bindings first-click FATAL,
     # 2026-11-12).
     file(GLOB _msdt_oxmgr_candidates
          "$ENV{HOME}/.local/bin/oxmgr"
@@ -124,7 +124,7 @@ if(NOT MEDIASERVO_OXMGR_BIN)
     if(_n GREATER 0)
         # CACHE, not a plain set(): this include runs in the submodule's
         # directory scope under a superbuild, while the parent-brand deploy
-        # callsites (msrtc-deploy-*) read the variable from the TOP scope
+        # callsites (parent deploy-*) read the variable from the TOP scope
         # and bake it into the dedicated-tree -D leg -- a scope-local value
         # left them NOTFOUND (measured). FORCE overrides the NOTFOUND seed
         # find_program just wrote.
@@ -247,7 +247,7 @@ function(_mediaservo_add_deploy_target)
     endif()
     set(_t "${MDT_TREE}")
     # target name: mediaservo-deploy-<tree> by default; the parent brand
-    # buttons pass NAME msrtc-deploy-<tree> (CMP0002 — the submodule
+    # buttons pass NAME parent deploy-<tree> (CMP0002 — the submodule
     # registration already owns the mediaservo-* names)
     set(_name "mediaservo-deploy-${_t}")
     if(MDT_NAME)
@@ -362,7 +362,7 @@ include(\"${CMAKE_BINARY_DIR}/deploy-${_name}-init-server-body.cmake\")
             # build-assembly staging skips the root entry links by contract;
             # this face is a DEPLOY (assembly + landing in one button), so it
             # opts in — the IDE button lands <prefix>/{brand}-server like the
-            # CLI deploy landing does (msrtc-deploy-server parity gap,
+            # CLI deploy landing does (parent deploy-server parity gap,
             # 2026-11-05).
             set(_extra_defs ${_extra_defs} -DMEDIASERVO_APP_ENTRY_LINKS=ON)
         endif()

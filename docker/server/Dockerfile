@@ -1,6 +1,6 @@
 # docker/server/Dockerfile — tree-packaged production image (container-build-rework B3.3)
 #
-# Single artifact chain (R3/R11): the msrtc-builder toolchain (B2) runs the SAME
+# Single artifact chain (R3/R11): the mediaservo-builder toolchain (B2) runs the SAME
 # native CLI/cmake path as the host IDE; `deploy server --release --prefix` assembles
 # the deploy tree (bin + web + etc scaffolding + oxmgr); this image packages that
 # tree. Runtime = debian:bookworm-slim (R20: glibc 2.36 >= the 2.31 build floor,
@@ -8,7 +8,7 @@
 # caddy lives in-container under oxmgr (R12, compose proxy retires).
 #
 # Build (context = this submodule root; dual build-contexts from the parent workspace):
-#   docker build -f docker/server/Dockerfile -t msrtc-server:0.1.3 \
+#   docker build -f docker/server/Dockerfile -t mediaservo-server:0.1.3 \
 #     --build-arg GIT_REV="$(git rev-parse HEAD)" \
 #     --build-context wrapcache=../../3rdparty/mediasoup-worker \
 #     --build-context oxmgrpkg=../../3rdparty/oxmgr .
@@ -21,11 +21,11 @@
 # Brand + builder image are CLI-injected (R15 dual-mode: `build image` passes
 # --build-arg BRAND=<resolved brand> + BUILDER_IMAGE=<brand>-builder:v1 — env
 # from the parent shell > out-tree derivation > upstream mediaservo). Defaults
-# keep the msrtc workspace's bare `docker build -f docker/server/Dockerfile .` working.
+# keep a bare `docker build -f docker/server/Dockerfile .` working.
 # NOTE: must precede the FIRST FROM — FROM-line interpolation only sees args
 # declared above the first FROM (measured: after a scratch-FROM -> blank base).
-ARG BUILDER_IMAGE=msrtc-builder:v1
-ARG BRAND=msrtc
+ARG BUILDER_IMAGE=mediaservo-builder:v1
+ARG BRAND=mediaservo
 
 # ---- build-context sentinels (overridden by --build-context; empty otherwise) ----
 FROM scratch AS wrapcache
@@ -40,7 +40,7 @@ ARG BRAND
 WORKDIR /workspace
 COPY . /workspace
 
-# oxmgr unpack leg (msrtc.sh:209-232 precedent, self-contained here): select the
+# oxmgr unpack leg (the parent shell's oxmgr-unpack precedent, self-contained here): select the
 # musl-static tarball -> sha256 verify (corrupt archive = refuse, never silent) ->
 # untar onto PATH. The deploy face resolves oxmgr via find_program(PATH) and the
 # R14 server-legs row copies it into the tree bin/.
@@ -99,10 +99,10 @@ ARG GIT_REV=unknown
 # (deb.debian.org throttles mainland pulls to a stall, measured); upstream
 # leaves stock (CI posture). bookworm uses deb822 debian.sources.
 ARG MIRROR=cn
-LABEL org.opencontainers.image.title="msrtc-server" \
+LABEL org.opencontainers.image.title="mediaservo-server" \
       org.opencontainers.image.version="0.1.3" \
       org.opencontainers.image.revision="${GIT_REV}" \
-      org.opencontainers.image.description="MediaServo msrtc deploy-tree production image (server + caddy + oxmgr PID1)"
+      org.opencontainers.image.description="MediaServo deploy-tree production image (server + caddy + oxmgr PID1)"
 ENV DEBIAN_FRONTEND=noninteractive
 # Runtime lib face: the server binary links only glibc-family libs (ldd-verified;
 # the mediasoup worker is a STATIC lib thread, vendored openssl/libuv static).
@@ -130,9 +130,10 @@ COPY --from=treebuild /opt/${BRAND} /opt/${BRAND}
 COPY --from=treebuild /workspace/docs/modules/34-site-deployment.md /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md
 COPY --from=treebuild /workspace/docs/modules/35-container-ops-manual.md /usr/local/share/doc/${BRAND}/OPS-MANUAL.md
 # Brand-render the baked manuals to match this image's brand (the source docs
-# are msrtc-authored and every msrtc token is brand-related). Identity for msrtc.
-RUN if [ "${BRAND}" != msrtc ]; then \
-        sed -i "s/msrtc/${BRAND}/g" /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md \
+# are mediaservo-authored and every lowercase mediaservo token is brand-related;
+# the title-case MediaServo product name is preserved). Identity for mediaservo.
+RUN if [ "${BRAND}" != mediaservo ]; then \
+        sed -i "s/mediaservo/${BRAND}/g" /usr/local/share/doc/${BRAND}/DEPLOY-MANUAL.md \
                                    /usr/local/share/doc/${BRAND}/OPS-MANUAL.md; \
     fi
 COPY docker/server/entrypoint.sh /usr/local/bin/server-entrypoint.sh

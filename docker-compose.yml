@@ -1,6 +1,6 @@
 # Production docker-compose — tree-packaged single container (container-build-rework B3.4)
 #
-# ONE image runs the whole deploy tree: msrtc-server + caddy + oxmgr (PID1).
+# ONE image runs the whole deploy tree: mediaservo-server + caddy + oxmgr (PID1).
 # The standalone compose `proxy` service retires (R12=A): caddy lives in-container
 # under oxmgr and serves the browser on 8080; the root Caddyfile is superseded by
 # the tree-rendered etc/Caddyfile.
@@ -12,14 +12,14 @@
 # the `${VAR:?}` fail-fast below is the site-side floor (R6=B).
 #
 # .env contract (four vars, all pass-through): TAG + MEDIASERVO_SFU_ANNOUNCED_IP
-#   + MEDIASERVO_ADMIN_PASSWORD + SSH_PORT. MEDIASERVO_BRAND defaults to msrtc
-#   (this workspace's image is msrtc-branded; the volume paths interpolate the
+#   + MEDIASERVO_ADMIN_PASSWORD + SSH_PORT. MEDIASERVO_BRAND defaults to mediaservo
+#   (the upstream product brand; a parent workspace injects its own; volume paths interpolate the
 #   SAME brand so the mount never goes dead — R15 / P2-C2). MEM_LIMIT is an
 #   optional tuning knob (R18 load test sets the measured default).
-name: ${MEDIASERVO_BRAND:-msrtc}
+name: ${MEDIASERVO_BRAND:-mediaservo}
 services:
   server:
-    image: ${MEDIASERVO_BRAND:-msrtc}-server:${TAG:?set TAG in .env — explicit image pin for rollback}
+    image: ${MEDIASERVO_BRAND:-mediaservo}-server:${TAG:?set TAG in .env — explicit image pin for rollback}
     ports:
       # Host-side ports interpolate (defaults = the R16 surface, site unchanged);
       # the R8 smoke shifts them via env for project isolation. Container targets
@@ -32,8 +32,8 @@ services:
     environment:
       RUST_LOG: info
       # brand-derived path single source (R15): entrypoint ETC + volume mount point
-      # resolve the SAME value; default msrtc matches the msrtc-branded image.
-      MEDIASERVO_BRAND: ${MEDIASERVO_BRAND:-msrtc}
+      # resolve the SAME value; default mediaservo matches the upstream image.
+      MEDIASERVO_BRAND: ${MEDIASERVO_BRAND:-mediaservo}
       # R6=B fail-fast on empty: multi-NIC sites MUST explicit-fill (auto-detect
       # concatenates all IPs but the SFU takes the first only — sfu.rs:481-486 —
       # silent ICE failure). Auto-detect is dev-only convenience.
@@ -50,12 +50,12 @@ services:
     # Named volumes at the brand-derived tree paths (R15). copy-up preserves the
     # image ownership (mediaservo); the entrypoint init is the first-boot writer.
     volumes:
-      - msrtc-data:/opt/${MEDIASERVO_BRAND:-msrtc}/etc
-      - msrtc-recordings:/opt/${MEDIASERVO_BRAND:-msrtc}/recordings
+      - mediaservo-data:/opt/${MEDIASERVO_BRAND:-mediaservo}/etc
+      - mediaservo-recordings:/opt/${MEDIASERVO_BRAND:-mediaservo}/recordings
     # healthcheck inherited from the image (R17=B: curl -f localhost:8080/health,
     # interval 30s / timeout 5s / start_period 60s / retries 3). oxmgr liveness =
     # PID1-death semantics (R13). STOPSIGNAL SIGINT baked in the image (graceful stop).
 
 volumes:
-  msrtc-data:
-  msrtc-recordings:
+  mediaservo-data:
+  mediaservo-recordings:

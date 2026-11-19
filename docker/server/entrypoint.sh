@@ -18,7 +18,7 @@
 #   4. OXMGR_* 4-key env parity with lifecycle::oxmgr_env(dir) — HOME=DATA_DIR=
 #      <tree>/run/oxmgr, daemon port = 18500 + byte_sum(home) % 400, API = +1000
 #      (templates.rs instance_daemon_port). Explicit ADDR pins the daemon to the
-#      port the in-tree CLI (msrtc-server start/stop/status) derives.
+#      port the in-tree CLI (mediaservo-server start/stop/status) derives.
 #   5. background apply helper: `oxmgr daemon run` boots with ZERO apps on a
 #      fresh container (run/ is writable-layer state, not a persisted volume),
 #      so wait for the daemon event socket then `oxmgr apply run/oxfile.toml`.

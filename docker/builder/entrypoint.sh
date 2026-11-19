@@ -1,5 +1,5 @@
 #!/bin/bash
-# builder-entrypoint.sh (docker/builder/) — msrtc-builder container entry (container-build-rework B2)
+# builder-entrypoint.sh (docker/builder/) — mediaservo-builder container entry (container-build-rework B2)
 #
 # root side: ssh host keys (fresh containers; persist via mounting a volume at
 # /etc/ssh for stable host identity), privilege-separation dir; then exec the

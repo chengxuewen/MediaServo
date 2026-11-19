@@ -97,12 +97,12 @@ fi
 _msvc_run() { echo "$ $*"; if [ "${MEDIASERVO_DRY_RUN:-0}" = 1 ]; then return 0; fi; "$@"; }
 _ms_image_brand() {
     # Image-brand resolution (container-build-rework, R15 dual-mode): parent-shell
-    # env (msrtc.sh injects MEDIASERVO_BRAND) > derived from the assembled
+    # env (the parent shell injects MEDIASERVO_BRAND) > derived from the assembled
     # out/server/bin tree (the deploy face's _ms_derive_brand_server hunt,
     # inlined here because that function is defined below the early compose/dev
     # case block which runs before the parser reaches it) > upstream mediaservo.
     # Consequence: standalone MediaServo emits mediaservo-* images; a branded
-    # parent workspace (msrtc, ...) emits <brand>-* — same literal either way.
+    # parent workspace (a branded parent) emits <brand>-* — same literal either way.
     if [ -n "${MEDIASERVO_BRAND:-}" ]; then echo "$MEDIASERVO_BRAND"; return 0; fi
     local d="${MSRTC_OUT_ROOT:-$ROOT/out}/server/bin" f
     for f in $(ls -1 "$d" 2>/dev/null | sort); do
@@ -228,7 +228,7 @@ case "${1:-}" in
         # via the PROD IMAGE itself (--entrypoint sh) — the alpine pull is gone
         # (unreachable on restricted offline sites; the prod image is already
         # loaded there). data restore stays deferred (rollback = image+config).
-        _ms_data_brand="${MEDIASERVO_BRAND:-msrtc}"
+        _ms_data_brand="${MEDIASERVO_BRAND:-mediaservo}"
         _ms_data_vols() { docker volume ls -q --filter "label=com.docker.compose.project=${_ms_data_brand}"; }
         case "$sub" in
             inspect) _msvc_run docker volume ls --format '{{.Name}} {{.Mountpoint}}' --filter "label=com.docker.compose.project=${_ms_data_brand}" ;;
@@ -317,7 +317,7 @@ DVEOF
         ;;
 esac
 
-# oxmgr provisioning is single-sourced in the parent shell (msrtc.sh; B6, O-1
+# oxmgr provisioning is single-sourced in the parent shell (B6, O-1
 # adjudicated revision) — this shell no longer injects anything. Standalone
 # (S-mode) runs rely on PATH self-install: the deploy face resolves via the
 # cmake find_program chain (DeployTargets: PATH -> ~/.local/bin ->
@@ -394,7 +394,7 @@ _ms_deploy_via_target() {
     # copies (measured: e2e shell without pixi on PATH -> cp-branded byte-copy
     # at target/debug/mediaservo-host). Fail with the activation hint instead.
     if [ ! -x "$cmake_bin" ]; then
-        echo "Error: deploy target face needs the pixi cmake ($cmake_bin not found — run via msrtc.sh/mediaservo.sh which activate pixi, or export CMAKE_BIN)" >&2
+        echo "Error: deploy target face needs the pixi cmake ($cmake_bin not found — run via the parent shell / mediaservo.sh which activate pixi, or export CMAKE_BIN)" >&2
         return 2
     fi
     local -a extra=()
@@ -592,11 +592,11 @@ auto-wire as build contexts when present.
          three-point contract (docker/server/Dockerfile FROM / dev up / here); manual
          bump v1->v2 on semantic toolchain changes, --tag is prod-only.
   <brand> resolution: env MEDIASERVO_BRAND (the parent shell injects it —
-         ./msrtc.sh build image ... is the branded entry) > derived from
+         the parent shell build image ... is the branded entry) > derived from
          out/server/bin (first *-server) > upstream mediaservo (standalone).
   --mirror cn|upstream   apt/cargo/pip mirror posture (default cn; upstream=CI)
 Examples:
-  mediaservo build image prod                 # msrtc-server:0.1.3
+  mediaservo build image prod                 # mediaservo-server:0.1.3
   mediaservo build image prod --tag 0.1.4     # explicit tag
   mediaservo build image dev && mediaservo dev up
 BIEOF
@@ -616,7 +616,7 @@ BIEOF
         [ -d "$wrap" ] && bctx+=(--build-context "wrapcache=$(cd "$wrap" && pwd -P)") \
             || echo "WARN: pinned wrap layer $wrap absent — the worker's meson wraps resolve online (CI posture; mainland stalls likely)" >&2
         if [ ! -d "$ox" ]; then
-            echo "ERROR: build image prod needs the pinned parent layer $ox (the oxmgrpkg COPY hard-fails without it) — the tree-packaged image is a PARENT-workspace deliverable (R2: materials ride the parent git tree); run it from the parent shell (./msrtc.sh build image prod). Standalone MediaServo builds native trees (build/deploy server), not the container image." >&2
+            echo "ERROR: build image prod needs the pinned parent layer $ox (the oxmgrpkg COPY hard-fails without it) — the tree-packaged image is a PARENT-workspace deliverable (R2: materials ride the parent git tree); run it from the parent shell (build image prod). Standalone MediaServo builds native trees (build/deploy server), not the container image." >&2
             return 1
         fi
         bctx+=(--build-context "oxmgrpkg=$(cd "$ox" && pwd -P)")
@@ -630,7 +630,7 @@ BIEOF
         docker tag "$image" "${brand}-server:latest"
     else
         # Toolchain-generation tag: v1 is a THREE-POINT CONTRACT — docker/server/Dockerfile
-        # stage1 `FROM msrtc-builder:v1`, this build, and the `dev up` default.
+        # stage1 `FROM mediaservo-builder:v1`, this build, and the `dev up` default.
         # Bump v1->v2 ONLY on semantic toolchain changes (compiler / cmake pin /
         # node / mirror posture), never per product release (the product axis is
         # the prod image tag). Manual bump, all points together (oxmgr-archive
@@ -1093,7 +1093,7 @@ Offline site artifact set (container-build-rework B3.6):
                <dist>/<brand>-server-image-<tag>/ (one folder per tag — hand
                that folder to the site as-is)
   --tag TAG    image tag (default: running container tag, else crate version)
-  --brand NAME image brand (default MEDIASERVO_BRAND or msrtc)
+  --brand NAME image brand (default MEDIASERVO_BRAND or mediaservo)
 Site: docker load -i <tar> && cp .env.example .env (fill) && docker compose --env-file .env up -d
 PIEOF
                 return 0 ;;
@@ -1134,14 +1134,14 @@ PIEOF
     else _miss="$_miss 35-container-ops-manual.md"; fi
     [ -z "$_miss" ] || echo "WARN: manual(s) absent — artifact set incomplete:$_miss" >&2
     # Brand-render the delivery text artifacts so the set is self-consistent with
-    # the packaged image's brand. The source files are msrtc-authored and every
-    # 'msrtc' token in them is brand-related (volume names, /opt paths, image
-    # names, :-defaults, prose) — so a global substitution is safe. Identity for
-    # msrtc; e.g. a standalone mediaservo set gets mediaservo throughout.
-    if [ "$brand" != msrtc ]; then
+    # the packaged image's brand. The source files are mediaservo-authored and
+    # every lowercase 'mediaservo' token is brand-related (volume names, /opt
+    # paths, image names, :-defaults, prose); title-case MediaServo is preserved.
+    # Identity for mediaservo; a branded parent set gets <brand> throughout.
+    if [ "$brand" != mediaservo ]; then
         local _f
         for _f in docker-compose.yml .env.example DEPLOY-MANUAL.md OPS-MANUAL.md; do
-            [ -f "$abs/$_f" ] && sed -i "s/msrtc/${brand}/g" "$abs/$_f"
+            [ -f "$abs/$_f" ] && sed -i "s/mediaservo/${brand}/g" "$abs/$_f"
         done
     fi
     echo "✓ packaged image artifact set: $abs"
@@ -1407,7 +1407,7 @@ BHEOF
             esac
         done
         tgt="${tgt:-all}"
-        case "$tgt" in all|web|host|server|client|bindings|example|gui-deps|image) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example', 'gui-deps', 'image')" >&2; [ "$tgt" = weaknet ] && echo "build: weaknet is not a submodule build target — 'msrtc.sh build weaknet' in the parent shell drives cargo build -p mediaservo-weaknet directly; the app-tree staging leg rides build server" >&2; exit 2 ;; esac
+        case "$tgt" in all|web|host|server|client|bindings|example|gui-deps|image) ;; *) echo "build: argument target: invalid choice: '$tgt' (choose from 'all', 'web', 'host', 'server', 'client', 'bindings', 'example', 'gui-deps', 'image')" >&2; [ "$tgt" = weaknet ] && echo "build: weaknet is not a submodule build target — 'build weaknet' in the parent shell drives cargo build -p mediaservo-weaknet directly; the app-tree staging leg rides build server" >&2; exit 2 ;; esac
         if [ -n "$gd_profile" ] && [ "$tgt" != gui-deps ]; then echo "build --profile only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$gd_provider" ] && [ "$tgt" != gui-deps ]; then echo "build --provider only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
         if [ -n "$gd_pixi_env" ] && [ "$tgt" != gui-deps ]; then echo "build --pixi-env only supports build gui-deps (current target=$tgt)" >&2; exit 2; fi
@@ -1573,7 +1573,7 @@ LIEOF
             t=(tail -n 100); [ "$follow" = 1 ] && t+=(-f); t+=(/tmp/mediaservo-host.log)
             _msvc_run "${t[@]}" || exit $?
         fi
-        echo "host log directory: $HOME/.local/share/oxmgr/logs (instance logs: OXMGR_DATA_DIR/run/logs/msrtc-streamer-*.err.log)" >&2
+        echo "host log directory: $HOME/.local/share/oxmgr/logs (instance logs: OXMGR_DATA_DIR/run/logs/mediaservo-streamer-*.err.log)" >&2
         exit 0
         ;;
     status)
@@ -1627,7 +1627,7 @@ LIEOF
         any=0; probe_failed=0
         for role in agent streamer capturer oxmgr; do
             pids=""
-            if [ "$role" = oxmgr ]; then cands=(oxmgr); else cands=("msrtc-$role" "host-$role"); fi
+            if [ "$role" = oxmgr ]; then cands=(oxmgr); else cands=("mediaservo-$role" "host-$role"); fi
             for cname in "${cands[@]}"; do
                 o=$(pgrep -x "$cname" 2>/dev/null | tr '\n' ' ')
                 if [ -n "$o" ]; then pids="${o% }"; break; fi
@@ -1639,7 +1639,7 @@ LIEOF
         else probe_failed=1; echo "  gateway 17980: undecidable"; fi
         inst="${OXMGR_DATA_DIR:-}"
         if [ -n "$inst" ]; then log_hint="$(dirname "$inst")/run/logs"; else log_hint="${ROOT%/*}/out/host/run/logs"; fi
-        echo "  logs: $log_hint/msrtc-streamer-<stream>.err.log (C38 layer-2: grep subscription/acl denied/OpenH264)"
+        echo "  logs: $log_hint/mediaservo-streamer-<stream>.err.log (C38 layer-2: grep subscription/acl denied/OpenH264)"
         if [ $any = 0 ]; then
             echo "  → host not running — manual: target/debug/mediaservo-host init . && token issue --all . && start . (development) or systemctl --user start oxmgr-<brand>-host.service (deployed)" >&2
         fi
@@ -1880,7 +1880,7 @@ DHEOF
             done
             [ -n "$prefix" ] || { echo "Error: deploy requires --prefix (no default — prevents polluting out/ stateless delivery; vehicles use /opt/mediaservo-host)" >&2; exit 2; }
             bin_dir="$prefix/bin"
-            # brand: env (msrtc.sh injects MEDIASERVO_BRAND) first, falling back to
+            # brand: env (the parent shell injects MEDIASERVO_BRAND) first, falling back to
             # derivation from the installed instance (python _derive_brand parity:
             # first *-agent hit, host-* legacy names skipped; the multi-brand
             # first-match limit is carried knowingly). Explicit default "mediaservo"
@@ -1897,7 +1897,7 @@ DHEOF
             brand=$brand_in; [ "$brand" = mediaservo ] && brand=""
             rust_brand=${brand:-mediaservo}
             case "$prefix" in
-                /opt*) [ "$(id -u)" = 0 ] || { echo "Error: /opt deployment needs root (sudo msrtc.sh deploy host --prefix /opt/mediaservo-host)" >&2; exit 1; } ;;
+                /opt*) [ "$(id -u)" = 0 ] || { echo "Error: /opt deployment needs root (sudo mediaservo.sh deploy host --prefix /opt/mediaservo-host)" >&2; exit 1; } ;;
             esac
             host_cli=${brand:+${brand}-host}; host_cli=${host_cli:-mediaservo-host}
             # B4 (cli-cmake-single-source, user-adjudicated A): the staging body —
@@ -1969,10 +1969,10 @@ DHEOF
         ;;
 esac
 
-# build:deploy composite (2026-09-29: verb surface aligned with the parent-repo msrtc.sh — the submodule shell
+# build:deploy composite (2026-09-29: verb surface aligned with the parent-repo shell — the submodule shell
 # works standalone without returning to the parent repo. Default prefix=<out>/<target> (the _out_root resolution
 # lives in the CLI layer — bindings default there; host/server composite forms still pass --prefix out/<target> explicitly for symmetry).
-# host/server deploy runtime data is written under out/<target> — same semantics as msrtc.sh.
+# host/server deploy runtime data is written under out/<target> — same semantics as the parent shell.
 # B2 single-source (cli-cmake-single-source adjudication 1=A): the composite is now parent-agnostic —
 # OUT_ROOT honors the parent-shell MSRTC_OUT_ROOT injection when colocated, else caller env, else repo out/;
 # --brand rides the deploy leg only (the build face has no brand arg — bare pass-through used to make build die

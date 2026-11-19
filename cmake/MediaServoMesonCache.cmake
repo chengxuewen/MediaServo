@@ -5,7 +5,7 @@
 # fetch sources AND wrapdb patches at build time. The wrapdb patch URLs
 # 301-redirect to GitHub releases (measured: an IDE deploy-server build
 # without the CLI proxy env died on the redirect's TLS handshake -- the IDE
-# face never rides msrtc.sh). The parent shell pins the full archive set in
+# face never rides the parent shell). The parent shell pins the full archive set in
 # 3rdparty/mediasoup-worker/ (per-file .sha256 ledger; the hashes are the
 # crate's own .wrap pins), and meson consumes it through
 # MESON_PACKAGE_CACHE_DIR: sources AND patches resolve from the cache dir by

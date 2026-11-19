@@ -1,11 +1,11 @@
-# docker/builder/Dockerfile — msrtc-builder toolchain face (container-build-rework B2/R2)
+# docker/builder/Dockerfile — mediaservo-builder toolchain face (container-build-rework B2/R2)
 #
 # Pure toolchain: NO project source, NO wrap archives — materials ride the git
 # tree (R2). Ubuntu 20.04 = the artifact glibc floor (2.31, host parity, R4).
 # Mirrors switchable via --build-arg MIRROR=cn|upstream (P2-H7): cn bakes
 # tuna/rsproxy/npmmirror/PIP-tuna; upstream leaves stock (CI posture).
 #
-# Build:  docker build -f docker/builder/Dockerfile -t msrtc-builder:v1 \
+# Build:  docker build -f docker/builder/Dockerfile -t mediaservo-builder:v1 \
 #           --build-arg MIRROR=cn [--build-arg HTTPS_PROXY=http://...] .
 # Use:    ssh-resident dev  -> docker run -d -p 2222:22 ... (CMD sshd -D)
 #         CI / one-shot     -> docker run --rm ... <command> (entrypoint exec)
@@ -120,12 +120,12 @@ RUN chmod 755 /usr/local/bin/builder-entrypoint
 # Toolchain-generation provenance (trailing on purpose: one label layer keeps
 # the cached toolchain layers hot). BUILDER_TAG/GIT_REV arrive from
 # `build image dev`. The tag is a THREE-POINT CONTRACT — this image,
-# docker/server/Dockerfile stage1 `FROM msrtc-builder:v1`, and the `dev up` default;
+# docker/server/Dockerfile stage1 `FROM mediaservo-builder:v1`, and the `dev up` default;
 # bump v1->v2 ONLY on semantic toolchain changes (compiler / cmake pin / node /
 # mirror posture), never per product release. Manual bump, all points together
 # (oxmgr-archive precedent: the literal IS the version source).
 ARG BUILDER_TAG=v1
-ARG BUILDER_NAME=msrtc-builder
+ARG BUILDER_NAME=mediaservo-builder
 ARG GIT_REV=unknown
 LABEL org.opencontainers.image.title="${BUILDER_NAME}" \
       org.opencontainers.image.version="${BUILDER_TAG}" \

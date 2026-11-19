@@ -73,7 +73,7 @@ endif()
 # condition 2 (ops-F1 brandless-reclaim): an EMPTY brand makes AppTree reclaim
 # legs treat brand-suffixed binaries as non-kept — a brandless deploy onto a
 # stopped-but-branded tree DESTROYS the delivery. bash can never hit this
-# (msrtc.sh:105 always injects the brand); the target face carries the guard.
+# (the parent shell:105 always injects the brand); the target face carries the guard.
 # Refuses in BOTH modes (teardown cannot resurrect ops-F1).
 if(NOT _is_branded)
     # threat face = ANY brand-suffixed artifact (agent family AND the branded
