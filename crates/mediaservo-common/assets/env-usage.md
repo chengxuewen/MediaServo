@@ -3,7 +3,7 @@ Environment variables (deployment env master table - the release shell and the s
   [B] server-cluster manual lines - persisted in the [apps.env] section of each [[apps]] entry in run/oxfile.toml.
       WARNING: full-tree rebuilds or render-from-scratch (init / start fallback) drop manual lines - re-add them per this table (the migration re-absorption only fills gaps, never overwrites):
       MEDIASERVO_ALLOW_DEV_CREDENTIALS=1   allow dev placeholder accounts (unset in production)
-      ALLOW_DEV_ENROLL=1                   auto-enroll unknown devices by public-key fingerprint (D283; private-network/dev profile, unset in production)
+      MEDIASERVO_ALLOW_DEV_ENROLL=1        auto-enroll unknown devices by public-key fingerprint (D283; private-network/dev profile, unset in production; legacy ALLOW_DEV_ENROLL is a deprecated alias)
       RUST_LOG=mediaservo_server=info      log level
       WEAKNET_ADMIN_PASS=...                 weaknet panel write credential (credential never templated, PIT-160 channel)
   [C] process-start env (injected via systemd/oxmgr/shell, any of them):

@@ -100,9 +100,10 @@ pub struct ServerConfig {
     #[serde(default)]
     pub allow_dev_credentials: bool,
 
-    /// Device auto-enroll (device-enroll S7 config-first equivalent of env ALLOW_DEV_ENROLL=1):
-    /// unknown devices auto-register after pubkey verify passes (controlled private networks only).
-    /// Config-first, env override wins (same precedence as allow_dev_credentials).
+    /// Device auto-enroll (device-enroll S7 config-first equivalent of env
+    /// MEDIASERVO_ALLOW_DEV_ENROLL=1): unknown devices auto-register after pubkey verify
+    /// passes (controlled private networks only). Config-first, env override wins (same
+    /// precedence as allow_dev_credentials).
     #[serde(default)]
     pub allow_dev_enroll: bool,
 
@@ -122,6 +123,27 @@ pub struct ServerConfig {
     /// secret = disabled (the admin ICE endpoint answers empty uris).
     #[serde(default)]
     pub turn: TurnConfig,
+}
+
+/// Env-override resolver for `allow_dev_enroll` (dev-credentials-hardening D1):
+/// config-first; env wins. The prefixed MEDIASERVO_ALLOW_DEV_ENROLL name is
+/// canonical; the unprefixed legacy ALLOW_DEV_ENROLL stays as a compatibility
+/// alias for one CLI-face cycle (deprecation window O1) and is reported back so
+/// the caller can emit a deprecation WARN. Pure (lookup injected) -> unit-testable.
+pub fn resolve_allow_dev_enroll(
+    config: bool,
+    lookup: impl Fn(&str) -> Option<String>,
+) -> (bool, bool) {
+    if config {
+        return (true, false);
+    }
+    if lookup("MEDIASERVO_ALLOW_DEV_ENROLL").as_deref() == Some("1") {
+        return (true, false);
+    }
+    if lookup("ALLOW_DEV_ENROLL").as_deref() == Some("1") {
+        return (true, true); // legacy name used -> caller warns (deprecated)
+    }
+    (false, false)
 }
 
 /// TURN short-term credential issuance config (P4-5; coturn `use-auth-secret`,
@@ -486,8 +508,22 @@ jwt_secret: "jwt-secret-256bit-min"
     }
 
     #[test]
+    fn resolve_allow_dev_enroll_aliases() {
+        let none = |_: &str| None;
+        let new = |k: &str| (k == "MEDIASERVO_ALLOW_DEV_ENROLL").then(|| "1".to_string());
+        let old = |k: &str| (k == "ALLOW_DEV_ENROLL").then(|| "1".to_string());
+        assert_eq!(resolve_allow_dev_enroll(false, none), (false, false));
+        assert_eq!(resolve_allow_dev_enroll(true, none), (true, false));
+        assert_eq!(resolve_allow_dev_enroll(false, new), (true, false));
+        // Legacy alias still enables AND reports legacy=true so the caller warns.
+        assert_eq!(resolve_allow_dev_enroll(false, old), (true, true));
+        // Config short-circuits — no legacy WARN when config is already on.
+        assert_eq!(resolve_allow_dev_enroll(true, old), (true, false));
+    }
+
+    #[test]
     fn server_config_dev_exemption_fields() {
-        // config-first form of MEDIASERVO_ALLOW_DEV_CREDENTIALS / ALLOW_DEV_ENROLL envs —
+        // config-first form of MEDIASERVO_ALLOW_DEV_CREDENTIALS / MEDIASERVO_ALLOW_DEV_ENROLL envs —
         // survives tree rebuilds (etc/ never overwritten by deploy), env still overrides.
         let yaml = r#"
 listen:

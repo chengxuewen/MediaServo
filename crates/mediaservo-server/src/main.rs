@@ -248,11 +248,19 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     };
     let api_registry = std::sync::Arc::new(api_registry);
 
-    // device-enroll S7: allow_dev_enroll (config-first, env ALLOW_DEV_ENROLL=1 override wins;
+    // device-enroll S7: allow_dev_enroll (config-first, env MEDIASERVO_ALLOW_DEV_ENROLL=1
+    // override wins; legacy ALLOW_DEV_ENROLL is a deprecated alias for one CLI-face cycle).
     // default false = production manual pending queue; true = controlled network/dev
-    // auto-registers on verify success, zero manual steps). Env parsing: literal "1" only.
-    let allow_dev_enroll =
-        config.allow_dev_enroll || std::env::var("ALLOW_DEV_ENROLL").as_deref() == Ok("1");
+    // auto-registers on verify success, zero manual steps. Env parsing: literal "1" only.
+    let (allow_dev_enroll, enroll_legacy_env) = mediaservo_common::config::resolve_allow_dev_enroll(
+        config.allow_dev_enroll,
+        |k| std::env::var(k).ok(),
+    );
+    if enroll_legacy_env {
+        tracing::warn!(
+            "ALLOW_DEV_ENROLL is deprecated and will be removed; use MEDIASERVO_ALLOW_DEV_ENROLL"
+        );
+    }
     if allow_dev_enroll {
         tracing::warn!(
             "allow_dev_enroll: unknown devices auto-register after pubkey verify passes (controlled private network/dev environments only)"

@@ -59,7 +59,8 @@ consumer_limit_per_stream: 50
 # ------------------------------------------------- dev-only exemptions -----
 # Config-first form of the dev env vars (PIT-160 root fix): written here they
 # survive oxfile re-renders and tree rebuilds. Env vars still override
-# (MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 / ALLOW_DEV_ENROLL=1) for compose forms.
+# (MEDIASERVO_ALLOW_DEV_CREDENTIALS=1 / MEDIASERVO_ALLOW_DEV_ENROLL=1) for compose
+# forms (legacy ALLOW_DEV_ENROLL is a deprecated alias, removed after one CLI-face cycle).
 # DEV TREES ONLY — production keeps both absent (fail-closed defaults).
 #
 # allow_dev_credentials: startup guard accepts the known dev placeholder
