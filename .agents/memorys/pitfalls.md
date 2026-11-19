@@ -2088,3 +2088,13 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 **解法**: 演练一律 `docker compose -p <隔离名> --env-file .env up -d`，且先 `cp .env.example .env` 并填值（在**沙目录**做，勿污染交付目录）；临时备份/日志写工作区 `.cache/`，不写 `/tmp`。
 
 **验证**: `docker ps` 见 `<隔离名>-server-1`；`docker inspect` 挂载/健康符合预期；脚本备份路径在 `.cache/`。
+
+## PIT-251: 停原生实例遇 upgrade residue 时停“守护”而非“app” (2026-11-19)
+
+**症状**: `msrtc-server stop` 报 `pid … (deleted) [!] upgrade residue (exe deleted)` 且 `stopped 0 processes`；手动 kill app 后 oxmgr 的 restart=always 秒拉新 app（PID 变化），端口不释。
+
+**根因**: 二进制被重建覆盖后运行中 exe 为 deleted，实例 CLI 的归因纪律拒杀认不准的进程；app 由 oxmgr 守护托管，杀 app 必然被重启拉起。
+
+**解法**: 找到持有该实例的守护（`tr '\0' '\n' < /proc/<daemon>/environ | grep OXMGR_HOME` 对齐实例树），对它 `kill -INT`（守护优雅停 app 后退出）；再核对 `ss -ltnup` 端口释放。空转无端口旧守护可另清。
+
+**验证**: `ss -ltnup | grep -E ':(8080|9800|20000)\b'` 为空；`pgrep -af "oxmgr daemon|caddy run|msrtc-server run"` 无该实例残留。
