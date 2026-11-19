@@ -54,6 +54,7 @@ gate "book structure"              python3 scripts/book/book-check.py --structur
 gate "english gate self-test"      bash scripts/check-english-only.sh --self-test
 gate "english only"               bash scripts/check-english-only.sh
 gate "brand neutrality"           bash scripts/gate-brand-neutrality.sh
+gate "prod compose safety"        bash scripts/gate-prod-compose-safety.sh
 gate "docs link self-test"        python3 scripts/agents/check_docs_links.py --self-test
 gate "docs links"                 python3 scripts/agents/check_docs_links.py
 gate "docs numbering"             python3 scripts/agents/check_docs_numbers.py
