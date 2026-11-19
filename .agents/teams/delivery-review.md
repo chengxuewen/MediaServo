@@ -17,7 +17,7 @@ boundary), `build-ci` (gates not weakened), `deploy-ops` (rollback / single-inst
 performance stay lenses on code-reviewer (no standalone roles, per the roster rule).
 
 ## Product
-A severity-tagged adjudication report (ready / not-ready) with reproducible evidence.
+A severity-tagged adjudication report on the shared three-tier (Approve / Request Changes / Needs Discussion -- Needs Discussion is passed through, never folded into not-ready) with reproducible evidence.
 
 ## Flow (scope -> independent review -> challenge -> adjudicate)
 1. Scope: the lead announces the lineup (core + chosen mounts) and the change under review.

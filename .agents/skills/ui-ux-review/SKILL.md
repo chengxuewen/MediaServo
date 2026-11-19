@@ -44,7 +44,9 @@ description: Structured interface-quality review method. Use when evaluating a U
    (single source): swap a sibling product's name in; if the surface still
    works unchanged, flag the direction and name the generic elements.
 7. **Verdict.** Reflect (re-open every cited location; all CRITICAL/HIGH,
-   sample the rest), then emit a verdict (pass / needs-work) plus a findings
+   sample the rest), then emit a verdict on the shared three-tier (Approve / Request
+   Changes / Needs Discussion -- name the open question for the third; the old
+   pass / needs-work pair maps onto the first two) plus a findings
    table: `check | evidence (screenshot / file:line) | rule or token violated |
    severity`. Precision over recall: three verified findings beat ten with
    seven speculative ones -- deliberately accepting misses is authorised.

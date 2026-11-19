@@ -24,7 +24,11 @@ A diff or a set of files, plus the intent of the change.
 5. Confirm the relevant gates are green; if a gate is red, the verdict is "not ready".
 
 ## Output contract
-A verdict (ready / not ready) plus a findings table: axis, file:line, reproducible command, severity.
+A verdict (ready / not ready) plus a findings table: axis, file:line,
+reproducible command, severity. Verdict tiers map to the shared three-tier:
+ready -> Approve; not ready -> Request Changes; genuine direction uncertainty
+-> Needs Discussion (name the open question in one line and hand off to
+think-before-act).
 
 Precision over recall: three verified findings beat ten with seven
 speculative ones -- deliberately accepting misses is authorised.

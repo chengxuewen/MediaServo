@@ -71,7 +71,7 @@ When facing these scenarios, use the `skill` tool to load the corresponding skil
 | **Writing tests** | `test-driven-development` (built-in) | Before any new feature or bug fix |
 | **Testing browser UI** | `browser-testing` | Admin Dashboard changes, Playwright |
 | **Security audit** | `security-hardening` | Secret management, auth code, mediasoup transport security |
-| **Code review** | `code-review` (rules) | After completing any code modification |
+| **Code review** | `code-review-and-quality` (skill) | After completing any code modification |
 | **Performance analysis** | `performance-optimization` | WebRTC latency, React rendering, cargo bench |
 | **Architecture/API design** | `api-interface-design` | Rust trait design, WS protocol, REST contracts |
 | **Context switching** | `context-engineering` | Switching tasks across Rust/TS/DevOps |

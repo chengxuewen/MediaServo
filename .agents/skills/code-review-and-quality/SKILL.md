@@ -20,6 +20,24 @@ description: "Review MediaServo changes on five axes (correctness, security, mai
 - Complexity cleanup: use `code-simplification`.
 - A one-line typo: inspect and merge; no ceremony.
 
+## Change-type -> lens routing
+
+Route by WHAT the change touches; the five axes stay the core, lens skills add
+depth. Pure-Rust backend changes need no extra lens unless they hit a
+sensitive surface. Mixed or unclear changes run EVERY matching lens (the
+fallback row is mandatory, not optional).
+
+| Change touches | Lens (depth) |
+|---|---|
+| `crates/**` pure Rust backend | Five axes only; mount a lens only on sensitive surfaces |
+| `docs/**` prose/docs | doc-audit (semantic consistency); links/numbering are gates |
+| `.agents/**` skills/rules | repo-audit (mechanical) + doc-audit (semantic) |
+| `www/**` frontend/UI | ui-ux-review (token changes mount design-system) |
+| Security-sensitive (auth/PSK/JWT/crypto/security rules) | security-hardening |
+| Performance-sensitive (media pipeline/latency) | performance-optimization |
+| Network/transport (webrtc/signaling/ws) | weaknet-testing (when measuring) |
+| **Mixed / unclear** | **All lenses, one pass each (fallback)** |
+
 ## Five Axes
 
 1. **Correctness**: does it do what it claims, including error paths and concurrency?
@@ -65,15 +83,31 @@ Do not inflate nits into blockers; do not bury a blocker among nits.
 ## Output Template
 
 ```text
-Verdict: approve | approve-with-optional | request-changes
-Scope: <what was reviewed>
-Blocking:
-- <file:line> <scenario> -> <impact>; <fix direction>
-Optional:
-- ...
+Summary: <one line: what was reviewed and the scope>
+Critical (Blocking):
+| # | Axis | File:line | Scenario | Impact | Fix direction |
+Suggestions:
+| # | Axis | Severity (Optional/Nit/FYI) | File:line | Suggestion |
+What Looks Good:
+- <at least one concrete strength; a report with zero positives is not a verdict>
+Uncovered:
+- <what was NOT reviewed and why; name the lenses actually run> (write "none" only if truly nothing)
+Verdict: Approve | Request Changes | Needs Discussion
 Tests/gates: <what ran, what did not>
 Residual risk: <one sentence>
 ```
+
+Evidence discipline: every table row cites file:line and a reproducible
+command; re-open every citation before shipping (nothing survives on a stale
+anchor). Micro-fix exemption: <=20 lines, single file, no interface/contract
+change -> a bare Verdict plus one evidence line is enough. Verdict semantics:
+**Approve** (mergeable; optional notes are advisory), **Request Changes**
+(blocking findings present), **Needs Discussion** (direction genuinely
+uncertain -- name the open question in one line and hand off to
+think-before-act; when a gate is red AND direction is uncertain, the gate
+wins and the verdict is Request Changes). User-template variant: when the
+user explicitly asks for a report template, follow theirs; keep the Verdict
+and evidence fields.
 
 ## Anti-Patterns
 
@@ -98,3 +132,5 @@ Residual risk: <one sentence>
 - `security-hardening`: deep security audit; this skill covers the security axis at review depth.
 - `code-simplification`: complexity reduction; this skill flags it.
 - `test-driven-development`: proves one behavior; this skill checks the proof.
+- Mechanical checks belong to the gate chain (37 sites): this skill judges;
+  it never runs gates in the reviewer's place and never replaces them.

@@ -1,5 +1,10 @@
 # Code Review Standards
 
+> Projection notice: the review-verdict authority is the `code-review-and-quality`
+> skill (Blocking/Optional/Nit/FYI; Approve / Request Changes / Needs Discussion).
+> This file is a checklist projection -- its ladder and three-value approval are
+> mapped views, not a second entry point (review-convergence T7).
+
 ## Purpose
 
 Code review ensures quality, security, and maintainability before code is merged. This rule defines when and how to conduct code reviews.
@@ -65,10 +70,7 @@ Use these agents for code review:
 |-------|---------|
 | **code-reviewer** | General code quality, patterns, best practices |
 | **security-hardening** skill | Security vulnerabilities, OWASP Top 10 |
-| **typescript-reviewer** | TypeScript/JavaScript specific issues |
-| **python-reviewer** | Python specific issues |
-| **go-reviewer** | Go specific issues |
-| **rust-reviewer** | Rust specific issues |
+Language-specific findings route through the five axes above, executed by the real `code-reviewer` role -- the four former `*-reviewer` rows referenced roles that do not exist (fixed, review-convergence T7).
 
 ## Review Workflow
 
@@ -121,4 +123,4 @@ This rule works with:
 - [testing.md](testing.md) - Test coverage requirements
 - [security.md](security.md) - Security checklist
 - [git-workflow.md](git-workflow.md) - Commit standards
-- [agents.md](agents.md) - Agent delegation
+- [agents.md](agents.md) - Agent delegation\n
