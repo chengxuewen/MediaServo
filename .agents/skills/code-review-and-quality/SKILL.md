@@ -20,6 +20,22 @@ description: "Review MediaServo changes on five axes (correctness, security, mai
 - Complexity cleanup: use `code-simplification`.
 - A one-line typo: inspect and merge; no ceremony.
 
+## Change-type -> lens routing
+
+Route by WHAT the change touches; the five axes stay the core, lens skills add
+depth. Mixed or unclear changes run EVERY matching lens (the fallback row is
+mandatory, not optional).
+
+| Change touches | Lens (depth) |
+|---|---|
+| `docs/**` prose/docs | doc-audit (semantic consistency); links/numbering are gates |
+| `.agents/**` skills/rules | repo-audit (mechanical) + doc-audit (semantic) |
+| `www/**` frontend/UI | ui-ux-review (token changes mount design-system) |
+| Security-sensitive (auth/PSK/JWT/crypto/security rules) | security-hardening |
+| Performance-sensitive (media pipeline/latency) | performance-optimization |
+| Network/transport (webrtc/signaling/ws) | weaknet-testing (when measuring) |
+| **Mixed / unclear** | **All lenses, one pass each (fallback)** |
+
 ## Five Axes
 
 1. **Correctness**: does it do what it claims, including error paths and concurrency?
@@ -65,15 +81,25 @@ Do not inflate nits into blockers; do not bury a blocker among nits.
 ## Output Template
 
 ```text
-Verdict: approve | approve-with-optional | request-changes
-Scope: <what was reviewed>
-Blocking:
-- <file:line> <scenario> -> <impact>; <fix direction>
-Optional:
-- ...
+Summary: <one line: what was reviewed and the scope>
+Critical (Blocking):
+| # | Axis | File:line | Scenario | Impact | Fix direction |
+Suggestions:
+| # | Axis | Severity (Optional/Nit/FYI) | File:line | Suggestion |
+What Looks Good:
+- <at least one concrete strength; a report with zero positives is not a verdict>
+Uncovered:
+- <what was NOT reviewed and why> (write "none" only if truly nothing)
+Verdict: Approve | Request Changes | Needs Discussion
 Tests/gates: <what ran, what did not>
 Residual risk: <one sentence>
 ```
+
+Verdict semantics: **Approve** (mergeable; optional notes are advisory),
+**Request Changes** (blocking findings present), **Needs Discussion**
+(direction genuinely uncertain -- name the open question in one line instead
+of forcing a side). User-template variant: when the user explicitly asks for
+a report template, follow theirs; keep the Verdict and evidence fields.
 
 ## Anti-Patterns
 
