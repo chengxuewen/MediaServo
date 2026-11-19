@@ -45,21 +45,24 @@ services:
     mem_limit: ${MEM_LIMIT:-512m}
     restart: unless-stopped
     # Named volumes at the brand-derived tree paths; the first-boot init is the
-    # single writer that seeds secrets/configs into the etc volume.
+    # single writer that seeds secrets/configs into the etc volume. Volume KEYS
+    # are role-only (data/recordings/logs): Compose prefixes them with the
+    # project name (<project>_data/...), which carries the brand and keeps
+    # `-p <drill>` stacks isolated (explicit names would defeat that).
     # run/logs is mounted as a SUBPATH only: service logs survive recreates
     # (upgrades/rollbacks), while run/oxfile.toml stays ephemeral ON PURPOSE —
     # init re-renders it from the current .env on every first boot (a persisted
     # oxfile would keep stale env settings). Watch log growth; truncate or
     # archive run/logs/*.out.log periodically.
     volumes:
-      - mediaservo-data:/opt/${MEDIASERVO_BRAND:-mediaservo}/etc
-      - mediaservo-recordings:/opt/${MEDIASERVO_BRAND:-mediaservo}/recordings
-      - mediaservo-logs:/opt/${MEDIASERVO_BRAND:-mediaservo}/run/logs
+      - data:/opt/${MEDIASERVO_BRAND:-mediaservo}/etc
+      - recordings:/opt/${MEDIASERVO_BRAND:-mediaservo}/recordings
+      - logs:/opt/${MEDIASERVO_BRAND:-mediaservo}/run/logs
     # The healthcheck is inherited from the image (curl localhost:8080/health;
     # 30s interval, 60s start period). The image's stop signal is SIGINT, so
     # `docker compose stop` shuts down gracefully (~1s, exit 0).
 
 volumes:
-  mediaservo-data:
-  mediaservo-recordings:
-  mediaservo-logs:
+  data:
+  recordings:
+  logs:

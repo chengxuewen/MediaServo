@@ -184,11 +184,11 @@ see the drill in §7.
 # are discovered by the compose project label)
 mediaservo data backup ./backup        # needs the CLI env; bare-docker below
 # Bare-docker equivalent (no CLI on site):
-docker run --rm --entrypoint sh -v msrtc_msrtc-data:/data:ro \
+docker run --rm --entrypoint sh -v msrtc_data:/data:ro \
   -v "$PWD/backup:/backup" msrtc-server:<tag> \
-  -c 'tar czf /backup/msrtc_msrtc-data.tar.gz -C /data .'
-# recordings and run/logs volumes: same pattern (msrtc_msrtc-recordings /
-# msrtc_msrtc-logs). Logs persist across recreates but grow — archive or
+  -c 'tar czf /backup/msrtc_data.tar.gz -C /data .'
+# recordings and logs volumes: same pattern (msrtc_recordings / msrtc_logs;
+# named <project>_<role>, project = the compose name, msrtc by default). Logs persist across recreates but grow — archive or
 # truncate run/logs/*.out.log periodically.
 
 # Logs (oxmgr file face, run/logs/*.out.log; NOT docker logs)

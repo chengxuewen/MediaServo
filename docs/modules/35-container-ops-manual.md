@@ -161,9 +161,9 @@ docker compose --env-file .env exec server sh -c 'tail -100 /opt/msrtc/run/logs/
 
 # Backup (pack the two volumes; uses the image's own tar, no internet needed)
 docker run --rm --entrypoint sh \
-  -v <project>_msrtc-data:/data:ro \
+  -v <project>_data:/data:ro \
   -v "$PWD/backup:/backup" msrtc-server:<tag> \
-  -c 'tar czf /backup/msrtc-data.tar.gz -C /data .'
+  -c 'tar czf /backup/msrtc_data.tar.gz -C /data .'
 # same for the recordings volume
 
 # Graceful stop (image STOPSIGNAL SIGINT; ~1s, exit 0)
