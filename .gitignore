@@ -164,3 +164,4 @@ compile_commands.json
 
 # UI harness: assertion JSON tracked, screenshots regenerated locally/CI (C61 rev 2026-11-18)
 docs/ui/prototypes/.harness/*.png
+.smoke-tmp/

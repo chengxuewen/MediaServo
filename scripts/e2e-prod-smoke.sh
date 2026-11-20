@@ -19,6 +19,11 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Scratch inside the repo: host sandboxes sometimes mount /tmp read-only and
+# mktemp would silently produce an empty path (breaking the bad-PSK sub-case).
+export TMPDIR="$(pwd)/.smoke-tmp"
+mkdir -p "$TMPDIR"
+
 BRAND="${MEDIASERVO_BRAND:-mediaservo}"
 TAG="${TAG:-0.1.3}"
 IMAGE="$BRAND-server:$TAG"
