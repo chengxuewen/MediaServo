@@ -1,5 +1,115 @@
 # Prototypes CHANGELOG
 
+## v1.97 — 2026-11-20 (portal-unified) — Remote N-6 launcher board delivered (pending review); §3q round complete
+Implements web-portal-ui §3q B-Q1 N-6a-e (D13-D16 adjudicated; plan v2 post 4-seat review; ToDesk launcher screenshot evidence todesk-12).
+- **Dual-column launcher**: left card list (online dot/holder/conn/owner + mode/lease/sim/STOPPED chips
+  kept for regression sampling) with selected state (tx1 outline); right launcher panel = meta row
+  (name/OS/conn/owner + code Copy with fallback + device-details popover) + Basic connection tiles +
+  Power row; narrow <=900px folds below cards with scroll-into-view (reduced-motion respected).
+- **Capability tiles**: 3 real (Remote control -> desk/ctrl session via connecting overlay; View mode ->
+  pure-view session; Camera -> camera-stream view session seeded from STREAMS) + 4 gated (file/terminal/
+  mirror/extend: lock glyph + dim + setGuard reason "Not available yet - in development", click AND
+  Enter/Space never launch, reason tip keyboard-discoverable via aria-describedby).
+- **Power row gated**: lock/reboot/shutdown never fire (no audit/no state change), lock reason clarifies
+  lock screen != control latch; catastrophic precondition note in plan (capability+confirm+audit+offline
+  guard+vehicle second confirm before any real implementation).
+- **Pure-view semantics (D16)**: capture guarded at ALL entries (remCaptureUI/remCapture/tile click/
+  Enter/Space) for kind=view with honest toast; tile demoted to non-interactive feed (tabindex -1 +
+  aria-label "View-only feed"); leaseTick skips view kind; safe bar view variant = VIEW-ONLY badge +
+  lat/jit/conn + "View-only - back to launcher" hint chip (Take/Release/lease/input/clock/Esc-hint hidden);
+  E-STOP stays never-hide (remote-scope); openViewSession defined (NEG real target).
+- **Three states**: unselected empty ("Select a device to see capabilities") / selected offline-or-revoked
+  error + Back to list / left list loading; stale guard asserted.
+- Verified: harness 51 cases ALL GREEN (remote-launcher 15 assertions + remote-launcher-narrow fold/noOv)
+  + NEG all red (renderLauncher noop x2); regression adaptations registered (remote-lobby opens via
+  card+tile, ctrl pairView leg sets session directly because ctrl room conn=lost correctly shows stale
+  launcher); node --check + lint clean; stamps x8; screenshots n6-dual/empty/stale/gated/view/narrow.
+- Fixes en route: harness case syntax (stray semicolon), sync-timing (routeSession 300ms not elapsed
+  within part -> remLoading reset), detached-node sel assertion re-query, [hidden] display rules for
+  view-variant chips (.chip display overrode hidden), connecting overlay made opaque (text overlap),
+  launcher meta row wrap at 400px.
+- **Round §3q complete**: N-6 v1.97. S-3 (Settings closure) retargeted v1.98 with N-6 dependency.
+
+## v1.96 — 2026-11-20 (portal-unified) — Remote N-5 window-ization delivered (pending review)
+Implements web-portal-ui §3p B-P1 N-5a-f (D8-D12 adjudicated; plan v2 post 4-seat review).
+- Safety layer extracted: #remSafeBar fixed left-bottom never-hide = single control badge + HUD5 +
+  grace mirror (grace-only) + clock + simulated + Esc hint + Take/Release + Expand details popover +
+  health/STOPPED/released rows; H-hide exemptions cover it; carrier switch never touches it.
+- View-only carrier: #remTop overlay auto-hide (translateY+opacity+inert+aria-hidden), wake via
+  outside-inert tab (12px fine / 44px coarse) or top-edge dwell 250ms (view-only only) or focus-within;
+  captured hides topbar+wake.
+- Captured carrier: #remBall 44px draggable (4px threshold), corner dock + edge dim (opacity .35,
+  focus/hover restore, badge never dims), forbidden zones (estop+ring / reqChip / safeBar) rebound via
+  global ballDockTick (NEG real target); ball menu = ToDesk IA (top icon row + quick cards OSD+Fit +
+  Display/Input/Safety/Sessions cascading + copy info + red back-to-lobby row); Display quality/
+  refresh/resolution/advanced gated "Not available yet - in development"; window-fit real two modes;
+  Esc closes deepest pop via tbPopStack; closeTbPop resets real trigger aria-expanded (infra fix).
+- Video geometry: full-bleed stage (230px constant deleted), contain default (letterbox=video-bg),
+  Original 1:1 = 1920px canvas + scrollbars + middle-drag pan (input-exempt) + view-only wheel local
+  pan, captured wheel forwards; grab cursor + one-shot pan hint; no stretch.
+- Session switch: remSessPop list (current check) switches directly, releases old control + names old
+  asset in released banner.
+- Connecting state: 300ms simulated overlay on open; capture/input/estop/leaseTick guarded;
+  leaseTick skips view-kind rooms (pure-view prep for N-6).
+- Defects fixed: badge stretch (tile chips retired), 230px constant, connecting; impl bugs: silent
+  markup-replace miss (force re-applied), remTop inline display overriding hide, card flex-shrink
+  clipping 1920 canvas, renderRemBar overwriting badge text.
+- Verified: harness 49 cases ALL GREEN (remote-window 17 assertions) + NEG all red (ballDockTick noop);
+  computed-display upgrades landed; node --check + lint clean; stamps x8 (details body carries version);
+  screenshots n5-view/ball/menu/orig/narrow.
+
+## v1.95 — 2026-11-20 (portal-unified) — Remote N-4 safety small-fix batch (pending review)
+Implements web-portal-ui §3p B-P1 task N-4 (D12=C split: safety-now, rest with N-5).
+- **Space on chrome no longer forwards to asset**: key whitelist now excludes select (range already
+  via input) and Space when focus is on button/.session-bar/#remTop/.tb-pop/#remBall (native activation
+  preserved = correct keyboard semantics; tile div[role=button] unaffected so Space-on-tile still
+  forwards). Fixes accidental Release/estop-hold double-trigger while typing.
+- **Narrow (<500px) bottom bar yields to E-STOP**: #remBar max-width calc(100vw-170px) + left:12px +
+  transform:none; estop center elementFromPoint uncovered at 400px.
+- Verified: harness 48 cases ALL GREEN (remote-safetyfix 5 assertions at 400px: spaceOnChromeNotForwarded/
+  spaceOnTileForwarded(NEG red path reads remInputCount)/arrowOnSelectExcluded(injected select leg)/
+  narrow400EstopUncovered/narrow400BarReachable) + NEG all red (remInput noop); node --check + lint clean;
+  stamps x7; screenshots n4-400/n4-chrome.
+- Defects ③badge-stretch/④connecting/230px constant remain scheduled for N-5 (D12=C boundary note).
+
+## v1.94 — 2026-11-20 (portal-unified) — Settings round S-2 delivered (pending review): Admin token partition + configuration index
+Implements web-portal-ui §3o B-S1 task S-2 (S2=B/S4=A).
+- **Keys third partition "Admin bootstrap token"**: paste startup JWT (>=20 chars validation) + Save
+  (masked first6…last4 + saved chip + audit token.save + input cleared) + Clear (confirmDlg consequence
+  + audit token.clear) + non-admin guard; renderKeyToken called at renderKeys head so guards apply on
+  every role path (viewer early-return gap fixed). Credential family aggregated per Q2=B (IA note).
+- **Settings Configuration index (U5/O3 read-only)**: six rows from server_config shape (listen_host/
+  listen_port/rate_limit/room_capacity/consumer_limit_per_stream/psk_hint), values simulated; Open
+  deep-links to the in-place page (signaling/rooms/streams/keys); Edit affordance gated with reason
+  "In-place edit face lands with implementation (manifest pending)"; registration discipline note
+  ("every new config face must register a row").
+- Verified: harness 47 cases ALL GREEN (settings-index 6 assertions: sixRows/valuesSim/deepLinkRooms/
+  gatedReason/noEditAffordance/deepLinkKeys) + NEG all red (renderConfigIndex noop); node --check +
+  lint clean; stamps x7; screenshots s2-index + s2-keys-token.
+- **Verification limitation (honest, v1.77 precedent)**: keys-token case wedges unreproducibly in
+  headless Marionette (solo AND split-part; page-side synchronous replay all-green) -> verified
+  PAGE-SIDE (overlay 8 assertions all true: partition/shortRejected/pasteSave/masked/saved+audit/
+  nonAdminGuard/clearConfirm/cleared+auditClear) and removed from the Marionette suite; limitation
+  recorded here and in boards.
+- Impl bug fixed en route: token-card markup anchor matched 7 places -> card not inserted while
+  wiring referenced null ids -> wire() aborted (mass case failures); unique anchor re-insert restored.
+
+## v1.93 — 2026-11-20 (portal-unified) — Settings round S-1 delivered (pending review): Login / About / honest signaling test
+Implements web-portal-ui §3o B-S1 task S-1 (S1=B/S2=B/S3=A/S4=A adjudicated).
+- **Account Login card**: username/password/role select + Login = simulated session switch
+  (CUR_USER + role, audit auth.login, simulated tag, "no credentials leave this page" note);
+  signed-in row (user + role chip + TTL 24 h chip); Sign out (simulated, audit auth.logout, role
+  viewer); error row via devtools "Login · Simulate error" leg; empty-submit focuses username;
+  password masked + autocomplete off. Role/session switching surfaced from devtools to the page.
+- **About card**: prototype version chip (PROTO_VER stamp) + build simulated + scenario description.
+- **Signaling Test honest fix**: was toast-only fake "OK 3 ms"; now persistent result row
+  "OK · 3 ms (simulated - prototype does not probe the live endpoint)" + simulated toast.
+- Access card title now hides together with its row in standalone mode (orphan-title fix).
+- Verified: harness 46 cases ALL GREEN (settings-login 10 assertions: formFocus/mask/
+  loginSwitchesRole/signedInCard/ttlChip/signoutRestores/errorLeg/simTag/aboutVersion/sigTestSimTag)
+  + NEG all red (renderSettings noop); node --check + lint clean; stamps x7 (About chip + PROTO_VER
+  carry version since v1.93); screenshots s1-settings/loginerr/narrow.
+
 ## v1.92 — 2026-11-20 (portal-unified) — Remote N-2 delivered: session layout + six features; §3n ROUND COMPLETE (pending final review)
 Implements web-portal-ui §3n N-2a/b/c (plan v2; D1-D7 adjudicated; N-1 v1.91 prerequisite).
 - **Zero-nav session**: body.rem-session hides sidebar/topbar/devtools AND collapses #body grid to one

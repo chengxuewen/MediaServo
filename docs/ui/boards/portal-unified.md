@@ -1,6 +1,6 @@
 # Unified baseline — MediaServo Portal (single page)
 
-> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.92 见 sidecar)**
+> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.97 见 sidecar)**
 > Carrier: `../prototypes/portal-unified.html` · Supersedes the fragmented boards for iteration.
 
 ## Why this exists (user directive 11-13)
@@ -16,9 +16,11 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.92
+version: v1.97
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
-e2e_hooks: [".nav-item", ".active", ".page", ".active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg", "#meetGrid", "#meetScrim", "#prejoinScrim", "#meetCanvas", "#meetTiles", "#meetRail", "#meetPip", "#muteChip", "#meetBar", "#mkLeave", "#holdRing", "#holdBar", "#meetExitHint", "#meetPanel", "#mpBody", "#mpTabs", "#mpBadge", "#mpChatBadge", "#meetInfo", "#meetTransScrim", "#remGrid", "#remSession", "#remTile", "#remBar", "#remTake", "#remRelease", "#remCtlState", "#remGraceMirror", "#remLive", "#remHealth", "#remEstop", "#remEstopRing", "#remReqChip", "#remHolderChip", "#remForce", "#remResumeScrim", "#remResumeName", "#remStopped", "#remPerimeter", "#remMapPanel", "#remTouch", "#remHud", "#remStateChip", "#remEscHint"]
+e2e_hooks: [".nav-item", ".active", ".page", ".active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg", "#meetGrid", "#meetScrim", "#prejoinScrim", "#meetCanvas", "#meetTiles", "#meetRail", "#meetPip", "#muteChip", "#meetBar", "#mkLeave", "#holdRing", "#holdBar", "#meetExitHint", "#meetPanel", "#mpBody", "#mpTabs", "#mpBadge", "#mpChatBadge", "#meetInfo", "#meetTransScrim", "#remGrid", "#remSession", "#remTile", "#remBar", "#remTake", "#remRelease", "#remCtlState", "#remGraceMirror", "#remLive", "#remHealth", "#remEstop", "#remEstopRing", "#remReqChip", "#remHolderChip", "#remForce", "#remResumeScrim", "#remResumeName", "#remStopped", "#remPerimeter", "#remMapPanel", "#remTouch", "#remHud", "#remStateChip", "#remEscHint", "#remTop", "#remZoom", "#remClock", "#remOsdBtn", "#remKeysBtn", "#remInfoBtn", "#remMoreBtn", "#remFs", "#remKeysPop", "#remInfoPop", "#remMorePop", "#remOsd", "#remStage", "#cfgIndex", "#ktVal", "#ktSave", "#ktClear", "#liUser", "#liPass", "#liRole", "#liBtn", "#liOut", "#liErr", "#aboutVer", "#sigResult", "#remLauncher", "#remLauncherEmpty", "#remLauncherTitle", "#lmCode", "#lmCopy", "#lmInfo", "#remDevPop", "#remTiles", ".rem-tile", ".rem-card", "#remViewHint", "#remViewBack"]
+regions: [remote-lobby-cards, remote-session-topbar, view-group, semantic-line, gamepad-map-row, feed-tile-letterbox, osd-overlay, bottom-bar-state-grace-take-release, estop-never-hide, health-banner, stopped-banner-resume, req-chip, perimeter-latched, info-popover, settings-login-card, settings-config-index, keys-admin-token, remote-launcher-panel, capability-tiles, power-row-gated, pure-view-safebar-variant]
+open_questions: [quality-codec-fps-adjust-backend, B-lease-server-batch, real-pointer-lock-fullscreen-UA-Esc-device, real-gamepad-device, special-keys-real-channel, R6-five-backendization, view-wall-fullscreen-cross-plan, PROGRAM-memorys-parallel-owned, devtools-hidden-in-session, ball-dock-dwell-micro, C-switch-carrier-phase2, launcher-breakpoint, launcher-tile-grid, launcher-code-copy-format, launcher-info-fields]
 ```
 
 ## Unified navigation taxonomy (reconciles new-design groups + workbudy features)
@@ -419,6 +421,25 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   for right-edge collapse); now region-collapse + i-chevron (right), aria-label/title synced in
   renderDrawer. Precedent: region-collapse chevrons point toward collapse edge; modal dismiss = X.
   harness device-drawer += ddIcon assertion; 27 cases + NEG green.
+- v1.97 (Remote N-6 launcher, PENDING REVIEW; §3q round complete): dual-column launcher + meta row +
+  3 real/4 gated capability tiles + gated power row + pure-view semantics (capture all-entry guard,
+  tile demoted, leaseTick skip, safe-bar view variant, estop kept) + three states + stale guard.
+  51 cases + NEG green.
+- v1.96 (Remote N-5 window-ization, PENDING REVIEW): safeBar never-hide + auto-hide overlay topbar +
+  captured ball (drag/dock/dim/forbidden rebound/ballDockTick/ToDesk menu IA/gated display) +
+  full-bleed contain/1920 1:1 scroll+middle-pan + session switch popover + connecting + defects 3/4/5.
+  49 cases + NEG green.
+- v1.95 (Remote N-4 safety small-fix, PENDING REVIEW): Space-on-chrome/select/range not forwarded to
+  asset (native activation kept; tile unaffected); <500px bottom bar yields to E-STOP (400px uncovered
+  assertion). 48 cases + NEG green. Defects 3/4/5 scheduled N-5 per D12=C.
+- v1.94 (Settings S-2 delivered, PENDING REVIEW): Keys Admin bootstrap token partition (paste/save/
+  mask/clear confirm/audits/non-admin guard incl viewer path) + Settings six-row read-only config
+  index (server_config shape, simulated values, Open deep-links, Edit gated manifest-pending,
+  registration discipline). keys-token verified page-side (Marionette wedge, v1.77 precedent).
+  47 cases + NEG green.
+- v1.93 (Settings S-1 delivered, PENDING REVIEW): Account Login card (simulated session switch +
+  signed-in/TTL/signout/error leg/focus/mask), About card (version+build simulated), Signaling Test
+  honest result row (simulated), Access orphan-title fix. harness 46 cases + NEG green.
 - v1.92 (Remote N-2 delivered; §3n ROUND COMPLETE pending final review): zero-nav session (grid single
   column fix) + hybrid layout (top bar groups / tile fill contain / shared .session-bar bottom shell
   also on meetBar / tb-pop menus anchored) + six features (fullscreen root + fullscreenchange release
@@ -489,7 +510,10 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   focus/Esc/outside-click contract; narrow converges (name hidden). Verified page-side (overlay
   assertions all true + screenshots) due to unreproducible Marionette wedge on this case;
   Marionette suite 27 cases + NEG green (run() timeout+retry added; accounts-narrow NEG retargeted).
-  placeholder copy, Force consequence copy. harness 21 ALL GREEN + NEG red; narrow docSW==600.
-  server-side provider enforcement, durable break-glass audit, revocation sync, contract-first ceiling.
+- (ledger fragment, parent entry lost in earlier edit; restored 2026-11-20): placeholder copy, Force
+  consequence copy. harness 21 ALL GREEN + NEG red; narrow docSW==600.
+- (ledger fragment, parent entry lost in earlier edit; restored 2026-11-20): server-side provider
+  enforcement, durable break-glass audit, revocation sync, contract-first ceiling.
+- Design rounds (plan-only, pending approval): §3p window-ization D8-D12 (N-4/N-5) + §3q launcher D13-D16 (N-6); evidence/todesk-01..12.
 - Architecture diagram set: web-portal-ui PLAN §3j (capability ownership / dual-mode deployment /
   authn-authz-breakglass sequence / prototype IA matrix affordance map), mermaid+ASCII, per Q1–Q19.

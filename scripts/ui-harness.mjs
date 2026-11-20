@@ -614,11 +614,12 @@ const CASES = [
      var holderBadge=txt.includes('no holder');
      var leaseState=txt.includes('lease idle');
      var simTag=txt.includes('simulated');
-     var ob=document.querySelector('.rem-open[data-id=ctrl-VH-11]');ob.focus();ob.click();
+     var ob=document.querySelector('.rem-card[data-id=desk-ops]');ob.focus();ob.click();document.querySelector('#remLauncher [data-cap=control]').click();
      var loading=document.getElementById('remGrid').textContent.includes('Loading');
      return {cards,modeChip,holderBadge,leaseState,simTag,loading};`,
     `var sessOpen=!document.getElementById('remSession').hidden&&document.getElementById('remLobby').hidden;
-     var viewOnly=document.getElementById('remViewChip').textContent.includes('VIEW-ONLY');
+     var viewOnly=document.getElementById('remStateChip').textContent.includes('VIEW-ONLY');
+     remSession='ctrl-VH-11';renderRemSession();
      var pairViewFeed=document.getElementById('remPairNote').textContent.includes('view-wall');
      var videoBg=getComputedStyle(document.getElementById('remTile')).backgroundColor!=='rgba(0, 0, 0, 0)';
      document.getElementById('remBack').click();
@@ -646,7 +647,7 @@ const CASES = [
     document.body.dispatchEvent(new KeyboardEvent('keyup',{key:'w',bubbles:true,cancelable:true}));
     leaseTick();var graceStart=r.lease.state==='grace'&&remGraceTtl===1000;
     for(var i=0;i<4;i++)leaseTick();
-    var graceCountdown=r.lease.state==='grace'&&remGraceTtl===800&&document.getElementById('hudLease').textContent.includes('800');
+    var graceCountdown=r.lease.state==='grace'&&remGraceTtl===800&&document.getElementById('hudLease').textContent.includes('800')&&getComputedStyle(document.getElementById('hudLease')).display!=='none';
     for(var j=0;j<15;j++)leaseTick();
     var warnDualChannel=document.getElementById('hudLease').classList.contains('grace-warn');
     for(var k=0;k<3;k++)leaseTick();
@@ -659,7 +660,7 @@ const CASES = [
     remCapture();document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'s',bubbles:true,cancelable:true}));
     document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
     var escRelease=remCaptured===false&&remKeys.size===0&&document.getElementById('remStateChip').textContent==='VIEW-ONLY';
-    var hudFive=['hudLat','hudJit','hudLease','hudInput','hudConn'].every(id=>document.getElementById(id).textContent.length>0);
+    var hudFive=['hudLat','hudJit','hudLease','hudInput','hudConn'].every(id=>document.getElementById(id).textContent.length>0&&getComputedStyle(document.getElementById(id)).display!=='none');
     document.body.classList.add('rem-hideov');
     var hExempt=getComputedStyle(document.getElementById('remStateChip')).display!=='none'&&getComputedStyle(document.getElementById('hudLease')).display!=='none'&&getComputedStyle(document.getElementById('hudConn')).display!=='none'&&getComputedStyle(document.getElementById('remFeedLabel')).display==='none';
     document.body.classList.remove('rem-hideov');
@@ -702,7 +703,7 @@ const CASES = [
     var hold400Latch=r.estop===true&&document.body.classList.contains('rem-latched');
     var pm=getComputedStyle(document.getElementById('remPerimeter'));
     var perimeter4px=pm.borderTopWidth==='4px'&&pm.pointerEvents==='none'&&pm.position==='fixed';
-    var stoppedBanner=getComputedStyle(document.getElementById('remStopped')).display==='block'&&document.getElementById('remStopped').textContent.includes('STOPPED');
+    var stoppedBanner=getComputedStyle(document.getElementById('remStopped')).display!=='none'&&document.getElementById('remStopped').textContent.includes('STOPPED');
     document.body.classList.add('rem-hideov');
     var neverHide=getComputedStyle(document.getElementById('remEstop')).display==='flex'&&getComputedStyle(document.getElementById('remStopped')).display==='block';
     document.body.classList.remove('rem-hideov');
@@ -727,9 +728,9 @@ const CASES = [
     document.getElementById('remBack').click();
     return {estopVisible,coarse44,kbHold,kbCancel,cancelFeedback,shortHoldNoLatch,capabilityGate,hold400Latch,perimeter4px,stoppedBanner,neverHide,inputGuardLatched,ttlExpireWhileHeld,resumeAuthViewer,resumeFocus,resumeHeld,wrongNameBlocked,typedOk,unlatched,auditBoth};`],
   ['remote-handover', `myRole='admin';goto('remote');remSession='desk-ops';renderRemSession();var r=remRoom();
-    var holderBadge=document.getElementById('remHolderChip').textContent==='no holder';
+    var holderBadge=document.getElementById('remHolderChip').textContent==='no holder'&&getComputedStyle(document.getElementById('remHolderChip')).display!=='none';
     remCapture();renderRemReq();
-    var holderBadgeCtl=document.getElementById('remHolderChip').textContent.includes('dispatch.x');
+    var holderBadgeCtl=document.getElementById('remHolderChip').textContent.includes('dispatch.x')&&getComputedStyle(document.getElementById('remHolderChip')).display!=='none';
     r.holder='admin.x';remCaptured=false;renderRemState();
     document.getElementById('remTile').click();
     var requestNoSeize=r.requests.some(q=>q.from===CUR_USER)&&r.holder==='admin.x'&&remCaptured===false;
@@ -848,7 +849,7 @@ const CASES = [
     var graceEnter=document.getElementById('remLive').textContent.includes('release in 1 second');
     for(var q=0;q<15;q++)leaseTick();
     var graceLiveTransitions=graceEnter&&document.getElementById('remLive').textContent.includes('Warning');
-    var touchReleaseHintDual=document.getElementById('remEscHint').textContent.includes('Esc or Release');
+    var touchReleaseHintDual=document.getElementById('remEscHint').textContent.includes('Esc or Release')&&getComputedStyle(document.getElementById('remEscHint')).display!=='none';
     r.holder=CUR_USER;r.requests=[{from:'admin.x',at:Date.now()}];renderRemReq();
     var reqFocus=document.activeElement.id==='remReqAccept';
     denyHandover('admin.x');
@@ -860,17 +861,18 @@ const CASES = [
     var shellHidden=getComputedStyle(document.getElementById('sidebar')).display==='none'&&getComputedStyle(document.getElementById('topbar')).display==='none';
     var stg=document.getElementById('remStage').getBoundingClientRect();var tl=document.getElementById('remTile').getBoundingClientRect();
     var tileFillViewport=stg.height>400&&tl.width>600;
+    document.getElementById('remWake').click();
     var top=document.getElementById('remTop');
     var topbarGroups=['remFs','remZoom','remOsdBtn','remKeysBtn','remInfoBtn'].every(function(id){return !!top.querySelector('#'+id);});
     document.getElementById('remMoreBtn').click();
     var overflowTbPop=document.getElementById('remMorePop').classList.contains('tb-pop')&&!document.getElementById('remMorePop').hidden;
     document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
     var overflowEsc=document.getElementById('remMorePop').hidden;
-    var rb=document.querySelector('#remBar .inner');var mb=document.getElementById('meetBar');
+    var rb=document.querySelector('#remSafeBar .inner');var mb=document.getElementById('meetBar');
     var bottomBarSharedShell=rb.classList.contains('session-bar')&&mb.classList.contains('session-bar')&&getComputedStyle(rb).borderRadius===getComputedStyle(mb).borderRadius;
-    var stateSlotLiveOff=!document.getElementById('remCtlState').getAttribute('aria-live');
+    var stateSlotLiveOff=!document.getElementById('remStateChip').getAttribute('aria-live');
     remCapture();remKeys.add('w');remInput();remKeys.clear();leaseTick();
-    var graceMirror=!document.getElementById('remGraceMirror').hidden&&document.getElementById('remGraceMirror').textContent.includes('release in');
+    var graceMirror=!document.getElementById('remGraceMirror').hidden&&document.getElementById('remGraceMirror').textContent.includes('release in')&&getComputedStyle(document.getElementById('remGraceMirror')).display!=='none';
     document.getElementById('remFs').click();
     var fullscreenRealOrStub=document.fullscreenElement===document.getElementById('remSession')||window.__fsStub===true||window.__fsPending===true;
     var er=document.getElementById('remEstop').getBoundingClientRect();
@@ -879,7 +881,7 @@ const CASES = [
     var zoomOriginal=document.getElementById('remStage').classList.contains('original')&&document.getElementById('remZoom').getAttribute('aria-pressed')==='false';
     document.getElementById('remZoom').click();
     var zoomFit=!document.getElementById('remStage').classList.contains('original');
-    var sessionTimer=/^[0-9][0-9]:[0-9][0-9]/.test(document.getElementById('remClock').textContent);
+    var sessionTimer=/^[0-9][0-9]:[0-9][0-9]/.test(document.getElementById('remClock').textContent)&&getComputedStyle(document.getElementById('remClock')).display!=='none';
     document.getElementById('remOsdBtn').click();
     var osdTogglePressed=document.body.classList.contains('rem-osd')&&document.getElementById('remOsdBtn').getAttribute('aria-pressed')==='true'&&getComputedStyle(document.getElementById('remOsd')).display==='flex';
     var c0=remInputCount;document.getElementById('remKeysBtn').click();
@@ -901,9 +903,150 @@ const CASES = [
     var moreWorks=!document.getElementById('remMorePop').hidden;
     document.getElementById('remMoreBtn').click();
     var noOv=document.documentElement.scrollWidth<=innerWidth;
-    var barWrap=getComputedStyle(document.querySelector('#remBar .session-bar')).flexWrap==='wrap';
+    var barWrap=getComputedStyle(document.querySelector('#remSafeBar .inner')).flexWrap==='wrap';
     document.getElementById('remBack').click();
     return {wideHidden,moreWorks,noOv,barWrap};`, 600],
+  ['settings-login', `goto('settings');
+    document.getElementById('liBtn').click();
+    var formFocus=document.activeElement.id==='liUser'&&document.getElementById('liErr').textContent.length>0;
+    var mask=document.getElementById('liPass').type==='password';
+    document.getElementById('liUser').value='ops9';document.getElementById('liPass').value='x';document.getElementById('liRole').value='operator';
+    document.getElementById('liBtn').click();
+    var loginSwitchesRole=CUR_USER==='ops9'&&myRole==='operator'&&AUDIT.some(function(a){return a.action==='auth.login';});
+    var signedInCard=document.getElementById('liStatus').textContent.includes('Signed in as ops9');
+    var ttlChip=document.getElementById('page-settings').textContent.includes('TTL 24 h');
+    document.getElementById('liOut').click();
+    var signoutRestores=myRole==='viewer'&&document.getElementById('liStatus').textContent.includes('Signed out');
+    applyProto('sim','loginerror');
+    var errorLeg=document.getElementById('liErr').textContent.includes('Invalid credentials');
+    var simTag=document.getElementById('page-settings').textContent.includes('simulated');
+    var aboutVersion=document.getElementById('aboutVer').textContent===PROTO_VER;
+    goto('signaling');document.getElementById('sigTest').click();
+    var sigTestSimTag=!document.getElementById('sigResult').hidden&&document.getElementById('sigResult').textContent.includes('simulated');
+    return {formFocus,mask,loginSwitchesRole,signedInCard,ttlChip,signoutRestores,errorLeg,simTag,aboutVersion,sigTestSimTag};`],
+  ['settings-index', `goto('settings');
+    var sixRows=document.querySelectorAll('#cfgIndex .set-row').length===6;
+    var valuesSim=document.getElementById('cfgIndex').textContent.includes('simulated');
+    document.querySelector('#cfgIndex .cfg-open[data-go=rooms]').click();
+    var deepLinkRooms=current==='rooms';
+    goto('settings');
+    var edits=[...document.querySelectorAll('#cfgIndex .cfg-edit')];
+    var gatedReason=edits.every(function(b){return b.getAttribute('aria-disabled')==='true'&&(b.dataset.reason||'').includes('manifest');});
+    var noEditAffordance=edits.every(function(b){return b.getAttribute('aria-disabled')==='true';});
+    document.querySelector('#cfgIndex .cfg-open[data-go=keys]').click();
+    var deepLinkKeys=current==='keys';
+    return {sixRows,valuesSim,deepLinkRooms,gatedReason,noEditAffordance,deepLinkKeys};`],
+  ['remote-safetyfix', `myRole='admin';goto('remote');remSession='desk-ops';renderRemSession();remCapture();
+    var rl=document.getElementById('remRelease');rl.focus();
+    var c0=remInputCount;rl.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));
+    var spaceOnChromeNotForwarded=!remKeys.has(' ')&&remInputCount===c0;
+    var tl=document.getElementById('remTile');tl.focus();
+    var c1=remInputCount;tl.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));
+    var spaceOnTileForwarded=remInputCount>c1&&remKeys.has(' ');
+    remKeys.delete(' ');
+    var sel=document.createElement('select');sel.id='testSel';document.getElementById('remTop').appendChild(sel);sel.focus();
+    sel.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true}));
+    var arrowOnSelectExcluded=!remKeys.has('ArrowDown');sel.remove();
+    var er=document.getElementById('remEstop').getBoundingClientRect();
+    var el=document.elementFromPoint(er.left+er.width/2,er.top+er.height/2);
+    var narrow400EstopUncovered=!!el&&(el.id==='remEstop'||document.getElementById('remEstop').contains(el));
+    var rr=document.getElementById('remRelease').getBoundingClientRect();
+    var el2=document.elementFromPoint(rr.left+rr.width/2,rr.top+rr.height/2);
+    var narrow400BarReachable=!!el2&&(el2.id==='remRelease'||document.getElementById('remRelease').contains(el2));
+    document.getElementById('remBack').click();
+    return {spaceOnChromeNotForwarded,spaceOnTileForwarded,arrowOnSelectExcluded,narrow400EstopUncovered,narrow400BarReachable};`, 400],
+  ['remote-window', `myRole='admin';goto('remote');remSession='desk-ops';renderRemSession();
+    document.body.classList.add('rem-hideov');
+    var safetyBarNeverHide=getComputedStyle(document.getElementById('remSafeBar')).display!=='none'&&getComputedStyle(document.getElementById('remStateChip')).display!=='none'&&getComputedStyle(document.getElementById('hudLease')).display!=='none'&&getComputedStyle(document.getElementById('remTake')).display!=='none';
+    document.body.classList.remove('rem-hideov');
+    var topHiddenDefault=getComputedStyle(document.getElementById('remTop')).opacity==='0';
+    document.getElementById('remWake').click();
+    var wakeWorks=document.body.classList.contains('rem-topwake');
+    document.getElementById('remTake').click();document.getElementById('cfmOk').click();
+    var capturedCarrierBall=getComputedStyle(document.getElementById('remBall')).display==='flex'&&getComputedStyle(document.getElementById('remTop')).display==='none'&&getComputedStyle(document.getElementById('remWake')).display==='none';
+    var stateSwitchBadge=document.getElementById('remLive').textContent.length>0;
+    var b=document.getElementById('remBall');b.style.left=(innerWidth-60)+'px';b.style.top=(innerHeight-60)+'px';ballDockTick();
+    var forbiddenZones=parseFloat(b.style.left)<innerWidth-100;
+    b.style.left='12px';b.style.top='52px';ballDockTick();var dockEdge=b.classList.contains('docked');
+    b.style.left=Math.round(innerWidth/2)+'px';b.style.top=Math.round(innerHeight/2)+'px';ballDockTick();
+    var ballDragDock=dockEdge&&!b.classList.contains('docked');
+    b.classList.add('docked');var dim=getComputedStyle(b).opacity; b.focus();var foc=getComputedStyle(b).opacity;
+    var ballDimFocusRestore=parseFloat(dim)<1&&parseFloat(foc)===1;
+    document.getElementById('remBall').click();
+    var menuIaTemplate=!!document.getElementById('remBallPop').querySelector('#remFs3')&&!!document.getElementById('remOsdBtn3')&&!!document.getElementById('remDisplayRow')&&!!document.getElementById('remBack3');
+    document.getElementById('remDisplayRow').click();
+    var gatedDisplay=document.getElementById('gQuality').getAttribute('aria-disabled')==='true';
+    document.getElementById('remZoomOrig').click();
+    var st=document.getElementById('remStage');
+    var c0=remInputCount;
+    document.getElementById('remTile').dispatchEvent(new MouseEvent('mousedown',{button:1,bubbles:true,cancelable:true}));
+    document.dispatchEvent(new MouseEvent('mousemove',{movementX:-40,movementY:0,bubbles:true}));
+    document.dispatchEvent(new MouseEvent('mouseup',{bubbles:true}));
+    var originalScrollPanExempt=st.classList.contains('original')&&st.scrollLeft>0&&remInputCount===c0;
+    document.getElementById('remZoomFit').click();
+    var videoContainDefault=!st.classList.contains('original');
+    document.getElementById('remSessRow').click();
+    var rows=document.querySelectorAll('#remSessList [data-ss]');
+    var target=[...rows].find(x=>x.dataset.ss!=='desk-ops');
+    target.click();
+    var sessionListSwitchReleasesOld=remSession===target.dataset.ss;
+    remSession='desk-ops';renderRemSession();
+    document.getElementById('remExpand').click();
+    var expandDetails=!document.getElementById('remDetailsPop').hidden&&document.getElementById('remDetailsBody').textContent.includes('H.264');
+    closeTbPop(null,true);
+    var badgeNotStretched=!document.querySelector('#remTile .tile-live');
+    var no230Constant=![...document.querySelectorAll('style')].some(sty=>/#remTile\{[^}]*230px/.test(sty.textContent));
+    var connOverlay=document.getElementById('remConnecting');
+    var connectingState=!!connOverlay;
+    document.getElementById('remBack').click();
+    return {safetyBarNeverHide,topHiddenDefault,wakeWorks,capturedCarrierBall,stateSwitchBadge,forbiddenZones,ballDragDock,ballDimFocusRestore,menuIaTemplate,gatedDisplay,originalScrollPanExempt,videoContainDefault,sessionListSwitchReleasesOld,expandDetails,badgeNotStretched,no230Constant,connectingState};`],
+  ['remote-launcher', `goto('remote');
+    var launcherEmpty=!document.getElementById('remLauncherEmpty').hidden&&document.getElementById('remLauncher').hidden;
+    var card=document.querySelector('.rem-card[data-id=desk-ops]');card.click();
+    var launcherSelect=!document.getElementById('remLauncher').hidden&&document.getElementById('remLauncherTitle').textContent.length>0&&document.querySelector('.rem-card[data-id=desk-ops]').classList.contains('sel');
+    document.getElementById('lmCopy').click();
+    var metaCopyFallback=document.getElementById('lmCode').textContent.length>0;
+    var gated=document.querySelector('#remLauncher [data-cap=file]');
+    gated.click();
+    var tilesGatedNeverLaunch=document.getElementById('remSession').hidden&&document.getElementById('guardTip').textContent.includes('Not available yet');
+    gated.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+    gated.click();
+    var gatedEnterLeg=document.getElementById('remSession').hidden;
+    gated.focus();
+    var gatedReasonKeyboard=document.getElementById('guardTip').textContent.includes('Not available yet')&&gated.getAttribute('aria-describedby')==='guardTip';
+    var pow=document.querySelector('#remLauncher [data-pow=reboot]');pow.click();pow.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));pow.click();
+    var powerGatedNeverFire=document.getElementById('remSession').hidden&&!AUDIT.some(function(a){return a.action.indexOf('power')===0;});
+    var staleRoom=ROOMS.find(function(x){return x.id==='desk-ops';});staleRoom.revoked=true;renderLauncher();
+    var launcherStaleError=document.getElementById('remLauncher').textContent.includes('offline or revoked');
+    staleRoom.revoked=false;renderLauncher();
+    remLoading=true;renderRemote();
+    var launcherLoading=document.getElementById('remGrid').textContent.includes('Loading');
+    remLoading=false;renderRemote();
+    document.querySelector('#remLauncher [data-cap=control]').click();
+    var tilesRealRoute=remSession==='desk-ops';
+    remLoading=false;renderRemote();
+    document.getElementById('remBack').click();
+    document.querySelector('.rem-card[data-id=desk-ops]').click();
+    document.querySelector('#remLauncher [data-cap=view]').click();
+    var vr=remRoom();
+    var viewSessionNoTake=!document.getElementById('remSession').hidden&&document.getElementById('remLobby').hidden&&vr.kind==='view'&&document.getElementById('remTake').hidden&&document.getElementById('remRelease').hidden;
+    var tile=document.getElementById('remTile');
+    tile.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+    tile.click();
+    var tileEnterNoCapture=remCaptured===false&&tile.getAttribute('aria-label').includes('View-only');
+    var viewBarVariantChip=!document.getElementById('remViewHint').hidden&&document.getElementById('hudLease').hidden;
+    var estopStillInView=getComputedStyle(document.getElementById('remEstop')).display!=='none';
+    document.getElementById('remViewBack').click();
+    document.querySelector('.rem-card[data-id=desk-ops]').click();
+    document.querySelector('#remLauncher [data-cap=camera]').click();
+    var cameraViewRoute=remRoom().kind==='view'&&remRoom().mode==='camera'&&!!remRoom().feed;
+    document.getElementById('remBack').click();
+    return {launcherEmpty,launcherSelect,metaCopyFallback,tilesGatedNeverLaunch,gatedEnterLeg,gatedReasonKeyboard,powerGatedNeverFire,launcherStaleError,launcherLoading,tilesRealRoute,viewSessionNoTake,tileEnterNoCapture,viewBarVariantChip,estopStillInView,cameraViewRoute};`],
+  ['remote-launcher-narrow', `goto('remote');document.querySelector('.rem-card[data-id=desk-ops]').click();
+    var gr=document.getElementById('remGrid').getBoundingClientRect();var lr=document.getElementById('remLauncher').getBoundingClientRect();
+    var narrowFold=lr.top>gr.top&&lr.width>300;
+    var noOv=document.documentElement.scrollWidth<=innerWidth;
+    return {narrowFold,noOv};`, 400],
   ['accounts-narrow', `myRole='admin';goto('accounts');
     var noOv=document.documentElement.scrollWidth<=innerWidth;
     var card=getComputedStyle(document.querySelector('#accBody td:nth-child(2)')).display==='flex';
@@ -962,6 +1105,12 @@ const NEG = {
   'remote-fixes': `leaseTick=function(){};`,
   'remote-layout': `renderRemSession=function(){};`,
   'remote-layout-narrow': `renderRemSession=function(){};`,
+  'settings-login': `renderSettings=function(){};`,
+  'settings-index': `renderConfigIndex=function(){};`,
+  'remote-safetyfix': `remInput=function(){};`,
+  'remote-window': `ballDockTick=function(){};`,
+  'remote-launcher': `renderLauncher=function(){};`,
+  'remote-launcher-narrow': `renderLauncher=function(){};`,
   'nav-collapse': `syncNavCollapse=function(){};`,
   'accounts-narrow': `renderAccounts=function(){};`,
   notif: `renderNotif=function(){};`,

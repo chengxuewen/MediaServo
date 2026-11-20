@@ -1,5 +1,5 @@
 {
-  "when": "2026-11-20T02:37:36.335Z",
+  "when": "2026-11-20T07:39:59.827Z",
   "mode": "negative",
   "fail": 0,
   "results": {
@@ -302,10 +302,10 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "ob is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:69\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:70\n@http://127.0.0.1:8201/portal-unified.html:2:843\n@http://12",
+        "__err": "ob is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:67\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:70\n@http://127.0.0.1:8201/portal-unified.html:2:907\n@http://12",
         "sessOpen": false,
         "viewOnly": true,
-        "pairViewFeed": false,
+        "pairViewFeed": true,
         "videoBg": true,
         "backLobby": true,
         "errState": false,
@@ -313,7 +313,7 @@
         "retryWorks": false,
         "noObject": true
       },
-      "error": "ob is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:69\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:70\n@http://127.0.0.1:8201/portal-unified.html:2:843\n@http://12"
+      "error": "ob is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:67\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:70\n@http://127.0.0.1:8201/portal-unified.html:2:907\n@http://12"
     },
     "remote-lease": {
       "negative": true,
@@ -489,7 +489,85 @@
         "wideHidden": false,
         "moreWorks": true,
         "noOv": true,
-        "barWrap": false
+        "barWrap": true
+      },
+      "error": null
+    },
+    "settings-login": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "formFocus": false,
+        "mask": true,
+        "loginSwitchesRole": true,
+        "signedInCard": false,
+        "ttlChip": true,
+        "signoutRestores": false,
+        "errorLeg": false,
+        "simTag": true,
+        "aboutVersion": true,
+        "sigTestSimTag": true
+      },
+      "error": null
+    },
+    "settings-index": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:4:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8201/portal-unified.html:2:1078\n@http://1"
+      },
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:4:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8201/portal-unified.html:2:1078\n@http://1"
+    },
+    "remote-safetyfix": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "spaceOnChromeNotForwarded": true,
+        "spaceOnTileForwarded": false,
+        "arrowOnSelectExcluded": true,
+        "narrow400EstopUncovered": true,
+        "narrow400BarReachable": true
+      },
+      "error": null
+    },
+    "remote-window": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "safetyBarNeverHide": true,
+        "topHiddenDefault": true,
+        "wakeWorks": true,
+        "capturedCarrierBall": true,
+        "stateSwitchBadge": true,
+        "forbiddenZones": false,
+        "ballDragDock": false,
+        "ballDimFocusRestore": true,
+        "menuIaTemplate": true,
+        "gatedDisplay": true,
+        "originalScrollPanExempt": true,
+        "videoContainDefault": true,
+        "sessionListSwitchReleasesOld": true,
+        "expandDetails": true,
+        "badgeNotStretched": true,
+        "no230Constant": true,
+        "connectingState": true
+      },
+      "error": null
+    },
+    "remote-launcher": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:42:277\n@http://127.0.0.1:8201/portal-unified.html:2:3875\n@http://"
+      },
+      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:42:277\n@http://127.0.0.1:8201/portal-unified.html:2:3875\n@http://"
+    },
+    "remote-launcher-narrow": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "narrowFold": false,
+        "noOv": true
       },
       "error": null
     },
