@@ -2098,3 +2098,13 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 **解法**: 找到持有该实例的守护（`tr '\0' '\n' < /proc/<daemon>/environ | grep OXMGR_HOME` 对齐实例树），对它 `kill -INT`（守护优雅停 app 后退出）；再核对 `ss -ltnup` 端口释放。空转无端口旧守护可另清。
 
 **验证**: `ss -ltnup | grep -E ':(8080|9800|20000)\b'` 为空；`pgrep -af "oxmgr daemon|caddy run|msrtc-server run"` 无该实例残留。
+
+## PIT-252: 双品牌交付面各有一套镜像——smoke 金丝雀在 mediaservo 面 (2026-11-19/20)
+
+**症状**: psk-bootstrap-env 冒烟两断言红：Config.Env 明明带着 MEDIASERVO_PSK（正控 OK），init 却两次都生成随机 64-hex；而 msrtc 品牌手动栈与镜像内直接 init 均能钉住。
+
+**根因**: `./msrtc.sh build image prod` 只重建 **msrtc** 品牌镜像；e2e-prod-smoke 默认跑 **mediaservo** 品牌面（输出实证 `/opt/mediaservo/`）——那边的 `mediaservo-server:<tag>` 还是旧镜像（无 bootstrap 代码）。此前 manual-polish/EXPOSE 各轮同样只重建 msrtc 面，mediaservo tar 一直包着旧镜像（随包手册新、镜像内手册旧的内部漂移）。
+
+**解法**: 交付面任何镜像内容变更（Rust/入口/烤入手册/EXPOSE）后，**双品牌各自 `build image prod`**（父壳 msrtc.sh + 子仓 mediaservo.sh），再各自 `package image`；判定哪个面在跑看容器路径 `/opt/<brand>/` 或 PID1 cmdline。冒烟=mediaservo 面金丝雀，天然兜底。
+
+**验证**: mediaservo 面重建（315s）后全链冒烟 PASS（PSK 三断言+正控+scrub 全绿）；两品牌 tar 的镜像内 grep 均含新串。
