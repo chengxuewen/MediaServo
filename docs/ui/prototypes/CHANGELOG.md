@@ -1,5 +1,186 @@
 # Prototypes CHANGELOG
 
+## v1.92 — 2026-11-20 (portal-unified) — Remote N-2 delivered: session layout + six features; §3n ROUND COMPLETE (pending final review)
+Implements web-portal-ui §3n N-2a/b/c (plan v2; D1-D7 adjudicated; N-1 v1.91 prerequisite).
+- **Zero-nav session**: body.rem-session hides sidebar/topbar/devtools AND collapses #body grid to one
+  column (sidebar-hidden grid auto-placement had put main in the 220px nav column - fixed); page head
+  hidden; session = flex column filling viewport; #remHealth own never-hide banner (meet deg-banner
+  misreference corrected in plan).
+- **Hybrid layout (D2=C)**: session top bar = Back + asset/mode/holder/clock | view group (Fullscreen /
+  Fit-Original / OSD / Keys / info / overflow); tile fills remaining viewport with contain letterbox
+  (card = full-stage centering container; percentage-width-against-auto bug fixed); bottom control bar
+  fixed bottom-center using SHARED SHELL .session-bar (also applied to #meetBar; radius unified 10px;
+  coarse 44px rule covers both); state slot aria-live off; grace mirror per-tick.
+- **Menus = tb-pop variants anchored to session top bar** (Keys / info / overflow), reusing
+  openTbPop/closeTbPop focus+Esc contract; outside-click handler now exempts aria-haspopup triggers
+  (was instantly closing newly opened menus).
+- **Six features (D4=A)**: Fullscreen API on session ROOT (estop+bar inside) with fullscreenchange ->
+  remRelease fallback (UA Esc interception safety) + headless stub flag (__fsPending/__fsStub, real
+  device validation open); Fit/Original zoom (stage scroll in original); session clock (mm:ss, hh:mm:ss
+  >1h, starts at session open); OSD fps/bitrate toggle aria-pressed (simulated values, H-hideable);
+  special-keys menu (Ctrl+Alt+Del/Ctrl+Esc/Alt+Tab/Win+L) through same lease + audit control.specialkey
+  (simulated); Take control/Release formal contracts inherited from N-1.
+- **Honesty/info**: honesty + pair-note + five-not-built list moved into info popover; semantic line
+  keeps simulated chip + lease/Esc hint; H-hide exemptions = state chip + HUD lease/conn + bar +
+  estop + STOPPED + health (OSD hideable).
+- Verified: harness 45 cases ALL GREEN (remote-layout 18 assertions incl shared-shell radius equality,
+  fullscreen real-or-stub, estop visible in fullscreen, zoom modes, timer, OSD pressed, special-keys
+  lease, estop never covered, H exemptions, health never-hide; remote-layout-narrow overflow/wrap/noOv)
+  + NEG all red (renderRemSession noop x2); regression: remote seven + meet/admin/nav unchanged;
+  node --check + lint clean; stamps x5; screenshots n2-ctl/latched/teleop/narrow.
+- Fixes en route: grid single-column; card centering container; OSD overlapped state chip (top:36px);
+  page head hidden in session; outside-click menu exemption; meetBar radius double-declaration.
+- **Round §3n complete**: N-1 v1.91 / N-2 v1.92. Open items: quality/codec/fps-adjust backend, B-lease
+  server batch, real pointer-lock/fullscreen UA Esc device validation, real gamepad, special-keys real
+  channel, R6 five backendization, view-wall fullscreen cross-plan scope (not auto-extended),
+  PROGRAM/memorys sync (parallel-owned), devtools hidden in session (sim legs via harness).
+
+## v1.91 — 2026-11-20 (portal-unified) — Remote N-1 defect batch delivered (pending review); corrects v1.88/v1.90 false claims
+Implements web-portal-ui §3n N-1a/b/c (plan v2 post 4-seat review; D1-D7 adjudicated).
+- Safety: gamepad grace renews held (same lease); conn=lost guards capture/input/ESTOP + #remHealth
+  "LINK LOST - asset state unknown" (STOPPED hidden when stop frame unreachable); resume hold
+  pointerleave/pointercancel cancel + Esc/overlay close clears interval (dlgClose hook); estop hold
+  binds room id (cross-room latch guarded); latch KEEPS holder (D6) so holder-resume reachable;
+  Y-edge before captured early-return + remRelease clears estop interval/Y state (phantom-latch fix);
+  force while latched -> lease inert + corrected copy (no free-for-all until resume); Back release gate
+  uses holder; navigation away releases lease + clears intervals/body classes; lobby STOPPED chip.
+- Esc single chain v2: modal -> tb-pop -> meet panel/hold (page-owned) -> devDrawer -> input-guard
+  (first press blurs) -> remote release (page-owned) -> cascade. Key whitelist v2 (printable+arrows,
+  modifier combos and h/H excluded); H toggle page-owned.
+- UX: tile tabindex/role/aria-label + Enter/Space; provisional bottom bar (state + grace mirror +
+  Take control/Release mutually exclusive; Release holder-only, latched handback audited); seize
+  confirmDlg initial focus #cfmCancel + OK revalidation; --video-ink #E7ECF5/#A7B2C5 + video semantic
+  inks + WCAG-formula assertion >=4.5:1; E-STOP into session head (tab order) + accesskey=x +
+  aria-keyshortcuts + weight 600; req chip focus Accept on show / restore on hide-timeout-deny;
+  grace announcements transition-only into polite #remLive (bar mirror per-tick aria-live off);
+  dual hint "Esc or Release button"; session open focus = Take control.
+- Ledger honesty: boards e2e_hooks YAML TRULY repaired (quoted+closed) + 24 remote hooks + regions[] +
+  open_questions[]; CORRECTS v1.90 "YAML repair/syntax restored" (was NOT repaired then) and v1.88
+  "holder||admin" (branch dead until D6 now); statusPop opening quote repaired (status chip was dead);
+  stale R-2/R-3 copy updated; PLAN wording writeback; heads/anchor/README synced.
+- Verified: harness 43 cases ALL GREEN (remote-fixes 27 assertions incl WCAG formula, cross-room latch,
+  force-inert, nav cleanup, Esc chain, whitelist, seize focus/revalidate, grace transitions, req focus,
+  statusPop) + NEG all red; regression adaptations registered and disclosed; node --check + lint clean;
+  stamps x5.
+- Impl bugs fixed en route: dead-code removal ate main-click closure + outer block close (restored via
+  HEAD comparison); dlgClose resume cleanup; harness false-negatives from latched guards (adapted).
+- Late fixes (same version): #remTake/#remRelease/#remGraceMirror [hidden] display rules (.btn display
+  overrode hidden attr, deg-banner precedent); req-chip focus restore picks first VISIBLE control
+  (Take hidden while captured).
+
+## v1.90 — 2026-11-19 (portal-unified) — Remote round R-5 delivered: B-R1 ROUND COMPLETE (pending final review)
+Implements web-portal-ui §3m B-R1 task R-5 (R5=A/R6=A; closes the Remote design round).
+- **Inputs**: kbd/mouse capture counts feed HUD input/s (R-2 base asserted); Gamepad API path via
+  pinned headless injection leg window.__gamepadSim(axes,buttons) + gamepadTick (deadzone 0.15,
+  same lease, no separate code path); Y button hold → estopHoldTick path (sole completion path).
+- **Gamepad map**: in-flow collapsible panel ABOVE tile (default collapsed; expand shows Left stick
+  chassis / Right stick gimbal / triggers speed limit / Y hold E-STOP / same-lease note); teleop-only;
+  no popover-Esc loop; no collision with devtools float (fixed-position attempt reverted).
+- **Touch joystick**: gated placeholder + reason "Touch teleop backend unproven — gated."
+- **Guard a11y sweep**: setGuard now sets aria-describedby=guardTip on guarded elements (removed when
+  unguarded); tap on guarded element shows reason tip (iOS tap-no-focus hole); keyboard focusin kept.
+- **boards sidecar YAML repair**: M-6 meet hooks were appended outside the e2e_hooks array bracket →
+  moved inside (syntax restored).
+- Regression: nav8/hub10/admin/rooms-noObject/meet cases unchanged; remote FIVE cases + remote-timing
+  (9-part real timers) + remote-lease-narrow; NEG targets renderRemote/leaseTick×2/estopHoldTick/
+  acceptHandover/gamepadTick all red.
+- Verified: harness 42 cases ALL GREEN + NEG all red; node --check + lint clean; stamps x5;
+  screenshots r5-map/r5-narrow (+ r1/r2/r3/r4 sets).
+- Fixes en route: teleop-class anchor whitespace miss; y-hold assertion tick interposition;
+  map/touch fixed-position collided with devtools float → in-flow row; mk('remote') template split
+  by two-step move → rebuilt clean single-line template.
+- **Round B-R1 complete**: R-1 v1.86 / R-2 v1.87 / R-3 v1.88 / R-4 v1.89 / R-5 v1.90.
+  Open items (not swallowed): B-lease server batch (lease object/renew/fail-closed/release frames/
+  estop asymmetry protocol/server-side first-click arbitration); five add-on capabilities await
+  backend; permission-granularity proposal → roles.rs business capability matrix (floor precedent,
+  NOT identity Access matrix); touch teleop backend; real gamepad device validation; HUD real
+  contracts (roundTripTime); real pointer-lock UA Esc interception; emergency capability backend field.
+
+## v1.89 — 2026-11-19 (portal-unified) — Remote round R-4 delivered (pending review): handover + force release
+Implements web-portal-ui §3m B-R1 task R-4 (R4=A; floor force-release precedent).
+- **Holder badge** persistent ("Controlled by X" / "no holder") in session chip row + lobby cards.
+- **Request control**: non-holder canvas click → request (does NOT seize); duplicate request guarded;
+  no holder → capture directly (free-for-all).
+- **Holder notification = persistent actionable chip** (role=alertdialog, top-right, Accept/Deny) +
+  cue + devtools "Incoming request" leg; NOT a 1.9 s toast (UX F4); 30 s timeout → auto-expire +
+  toast feedback (leaseTick sweep).
+- **Accept handover**: old holder captured cleared + keysHeld cleared + released frame banner; new
+  holder set + lease idle; audit control.handover; if new holder == self → captured.
+- **Deny**: request removed + feedback toast + audit control.handover.deny.
+- **Force release (admin)**: confirmDlg consequence four elements (old holder release frame +
+  view-only + inputs cleared / audited control.force / cannot undo / free-for-all NOT auto-hold);
+  holder=null → guarded button + reason "No active holder" + denied toast (floor idle=409 precedent);
+  non-admin guarded.
+- Verified: harness 41 cases ALL GREEN (remote-handover 14 assertions: holderBadge/holderBadgeCtl/
+  requestNoSeize/notifyPersistent/timeoutFeedback/acceptFrames/denyFeedback/forceConfirm/forceAudit/
+  forceFreeForAll/freeCapture/noHolderGuard/noHolderToast/expiredFreeForAll) + NEG all red
+  (acceptHandover noop); node --check + lint clean; stamps x5; screenshots r4-request/force/narrow.
+- Fix en route: harness default role dispatcher → force needs admin (case sets myRole=admin).
+
+## v1.88 — 2026-11-19 (portal-unified) — Remote round R-3 delivered (pending review): e-stop / resume asymmetry
+Implements web-portal-ui §3m B-R1 task R-3 (R2=A; workbudy 03 §8).
+- **E-STOP**: bottom-right never-hide button (44px, coarse registered), hold >=400 ms progress ring
+  (estopHoldTick independent 50 ms x0.125 step, sole completion path), keyboard Space/Enter hold +
+  keyup cancel, pointerleave/pointercancel cancel + "Hold cancelled" feedback; short hold no latch.
+- **Latched**: whole-window 4px --danger perimeter (fixed, pointer-events:none, no layout shift) +
+  persistent STOPPED banner (role=status) + capture/input/handover guarded ("E-stop latched") +
+  renew stopped → ttl expiry even with physically-held keys (released frame clears keysHeld).
+- **Capability gate**: emergency added to operator/dispatcher/admin ROLE_CAPS; viewer → guarded
+  E-STOP + reason (workbudy 03:170).
+- **Resume asymmetry**: modal = hold 400 ms FIRST (then name input enabled + focused) + type asset
+  name exactly (wrong name → inline role=alert error + Resume disabled) + authorization holder||admin
+  (viewer guarded); audits estop.latch / estop.release; Esc cancels modal (dlgKey).
+- Verified: harness 40 cases ALL GREEN (remote-estop 20 assertions: estopVisible/coarse44/kbHold/
+  kbCancel/cancelFeedback/shortHoldNoLatch/capabilityGate/hold400Latch/perimeter4px/stoppedBanner/
+  neverHide/inputGuardLatched/ttlExpireWhileHeld/resumeAuthViewer/resumeFocus/resumeHeld/
+  wrongNameBlocked/typedOk/unlatched/auditBoth) + NEG all red (estopHoldTick noop); node --check +
+  lint clean; stamps x5; screenshots r3-latched/resume/narrow (perimeter+STOPPED+E-STOP visible).
+- Fix en route: 400 ms hold step was 0.05 (=1 s) → 0.125 (8x50 ms); harness tick interpositions for
+  cancel-path assertions.
+
+## v1.87 — 2026-11-19 (portal-unified) — Remote round R-2 delivered (pending review): capture + lease machine + HUD
+Implements web-portal-ui §3m B-R1 task R-2 (plan v2; R1=A/R3=A).
+- **Three-state chip never-hide**: VIEW-ONLY → CAPTURED (captured+lease idle) → CONTROLLED (held/grace);
+  tile accent outline + crosshair cursor when captured; "Esc to release" persistent hint.
+- **Capture precondition**: holder==null||self; holder other → denied cue + honest toast (handover R-4).
+- **Lease machine (ttl-based)**: any input opens/renews (300 ms); all-inputs-released → grace 1000 ms
+  countdown; <300 ms warn = color+glyph dual channel; ttl expiry → released frame banner + keysHeld
+  cleared + captured cleared + holder null → view-only; expired→idle return after banner (1.5 s).
+  leaseTick direct-callable (50 ms step) for deterministic assertions.
+- **Released frame semantics**: "All logically-held inputs cleared" (workbudy 03:104-105) + audit
+  control.released; WS-drop leg → immediate expiry + released frame; reconnect leg → conn ok but
+  STAYS view-only (must re-click; safety side).
+- **HUD five readings** (latency/jitter/lease live-bar or grace countdown/input per s/conn), simulated†;
+  H hides feed label/pair note/asset/mode chips with exemptions (state chip + HUD + back); narrow wrap.
+- **Esc chain position**: modal→tb-pop→meet panel→meet hold→**remote captured release**→drawer→…;
+  capture key events ignore inputs/repeat; keyup clears keysHeld.
+- Verified: harness 39 cases ALL GREEN (remote-lease 14 assertions + remote-lease-narrow wrap/noOv +
+  remote-timing 9-part REAL-timer leg: renew300/grace/graceMid/graceLate/expired1s/bannerStill/idleBack)
+  + NEG all red (leaseTick noop ×2); node --check + lint clean; stamps x5; screenshots
+  r2-captured/controlled/grace/narrow.
+- Fixes en route: remRelease overwrote expired state (keepState param); timing keyup race moved to
+  part boundary; idle-return window needed 9 parts (real drift); #remFeedLabel inline display:grid
+  overrode hide rule (!important).
+
+## v1.86 — 2026-11-19 (portal-unified) — Remote round R-1 delivered (pending review): lobby + view-only session
+Implements web-portal-ui §3m B-R1 task R-1 (plan v2 post 4-seat review; R1-R6 adjudicated).
+- **Lobby**: desk/ctrl room cards (asset/mode Teleop|Desktop/holder badge/lease state/conn/simulated†)
+  + Open session; kind semantics honoured (ctrl=data-only control room, desk=desktop); U4 note.
+- **Session (view-only)**: video-bg token tile + VIEW-ONLY chip + asset/mode/conn/lease chips +
+  simulated†; ctrl sessions note paired view-room feed (workbudy M1 pull+control cross-room);
+  Back to sessions; honesty banner (lease 300ms/1s/WS-drop; capture/HUD=R-2, estop=R-3).
+- **Three states**: empty (No remote sessions) / loading (300ms simulated) / error (store unreachable
+  + Retry; devtools "Remote store · Simulate error" leg).
+- **video-bg token** added to light+dark roots (raw hex #1c2740/#0e1526 retired per DQ token rule).
+- Legacy native-disabled Acquire button removed with page rebuild (guard doctrine).
+- Fixes en route: goto(remote) render made synchronous (harness read empty); video-bg insertion
+  landed in dark root twice (light root lacks --bg anchor) → light root fixed; #remRetry[hidden]
+  display rule (.btn display overrides hidden attr, deg-banner precedent).
+- Verified: harness 36 cases ALL GREEN (remote-lobby 3-part 14 assertions: cards/modeChip/holderBadge/
+  leaseState/simTag/loading/sessOpen/viewOnly/pairViewFeed/videoBg/backLobby/errState/retryLoading/
+  retryWorks + rooms noObject regression) + NEG all red (renderRemote noop); node --check + lint
+  clean; stamps x5; screenshots r1-lobby/session/narrow.
+
 ## v1.85 — 2026-11-19 (portal-unified) — M-6 polish: meeting live-surface gaps closed (4-seat panel + isolated UX self-pass)
 Panel verdicts: correctness NOT READY / evidence FAIL / consistency REJECT; UX seat quota-failed →
 isolated sequential self-pass substituted (disclosed). Objective fixes (no new product rulings):

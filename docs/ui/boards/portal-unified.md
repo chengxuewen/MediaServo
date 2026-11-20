@@ -1,6 +1,6 @@
 # Unified baseline — MediaServo Portal (single page)
 
-> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.85 见 sidecar)**
+> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.92 见 sidecar)**
 > Carrier: `../prototypes/portal-unified.html` · Supersedes the fragmented boards for iteration.
 
 ## Why this exists (user directive 11-13)
@@ -16,9 +16,9 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.85
+version: v1.92
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
-e2e_hooks: [".nav-item.active", ".page.active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg"], #meetGrid, #meetScrim, #prejoinScrim, #meetCanvas, #meetTiles, #meetRail, #meetPip, #muteChip, #meetBar, #mkLeave, #holdRing, #holdBar, #meetExitHint, #meetPanel, #mpBody, #mpTabs, #mpBadge, #mpChatBadge, #meetInfo, #meetTransScrim
+e2e_hooks: [".nav-item", ".active", ".page", ".active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg", "#meetGrid", "#meetScrim", "#prejoinScrim", "#meetCanvas", "#meetTiles", "#meetRail", "#meetPip", "#muteChip", "#meetBar", "#mkLeave", "#holdRing", "#holdBar", "#meetExitHint", "#meetPanel", "#mpBody", "#mpTabs", "#mpBadge", "#mpChatBadge", "#meetInfo", "#meetTransScrim", "#remGrid", "#remSession", "#remTile", "#remBar", "#remTake", "#remRelease", "#remCtlState", "#remGraceMirror", "#remLive", "#remHealth", "#remEstop", "#remEstopRing", "#remReqChip", "#remHolderChip", "#remForce", "#remResumeScrim", "#remResumeName", "#remStopped", "#remPerimeter", "#remMapPanel", "#remTouch", "#remHud", "#remStateChip", "#remEscHint"]
 ```
 
 ## Unified navigation taxonomy (reconciles new-design groups + workbudy features)
@@ -419,6 +419,45 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   for right-edge collapse); now region-collapse + i-chevron (right), aria-label/title synced in
   renderDrawer. Precedent: region-collapse chevrons point toward collapse edge; modal dismiss = X.
   harness device-drawer += ddIcon assertion; 27 cases + NEG green.
+- v1.92 (Remote N-2 delivered; §3n ROUND COMPLETE pending final review): zero-nav session (grid single
+  column fix) + hybrid layout (top bar groups / tile fill contain / shared .session-bar bottom shell
+  also on meetBar / tb-pop menus anchored) + six features (fullscreen root + fullscreenchange release
+  fallback + headless stub, fit/original zoom, session clock, OSD aria-pressed sim, special-keys same
+  lease + audit, Take/Release inherited) + info popover honesty/five-not-built + H exemptions.
+  45 cases + NEG green. Open items logged CHANGELOG v1.92.
+- v1.91 (Remote N-1 defect batch delivered, PENDING REVIEW): gamepad grace same-lease; conn lost guards
+  capture/input/estop + #remHealth (no false STOPPED); resume hold drag/Esc cancel via dlgClose;
+  cross-room latch bound id; latch keeps holder (D6, holder-resume reachable); Y-edge pre-early-return +
+  remRelease clears estop state; force-latched inert + corrected copy; Back holder gate + full cleanup;
+  nav release + body classes + lobby STOPPED chip; Esc single chain v2 (page-owned meet/remote,
+  input-guard first-blur); key whitelist v2; tile keyboard + Take/Release bar + seize confirm
+  (cfmCancel focus + OK revalidate); --video-ink + WCAG formula assertion; estop tab order/accesskey/600;
+  req focus restore; grace #remLive transition-only announcements + bar mirror; dual hint; statusPop
+  quote fix; YAML TRULY repaired + 24 remote hooks + regions/open_questions; CORRECTS v1.90 YAML claim
+  and v1.88 holder-branch claim; stale copy updated. 43 cases + NEG green.
+- v1.90 (Remote R-5 delivered; B-R1 ROUND COMPLETE pending final review): gamepad injection leg +
+  gamepadTick same-lease + Y=estop path; in-flow collapsible gamepad map (teleop-only); touch joystick
+  gated; setGuard aria-describedby + tap-tip sweep; boards e2e_hooks YAML repaired. 42 cases + NEG
+  green. Region annotations: R5=A/R6=A, workbudy 03:163-164 same-lease, C54 guard a11y, DQ tokens.
+- v1.89 (Remote R-4 delivered, PENDING REVIEW): holder badge + request-no-seize + persistent
+  alertdialog Accept/Deny chip + cue + 30s timeout + accept clears old captured/keys + released frame +
+  deny feedback + admin force confirm (four consequence elements, free-for-all not auto-hold) +
+  no-holder guard (floor 409 precedent). Region annotations: R4=A, floor force-release precedent,
+  C54 guards, PIT-269 confirm. harness 41 cases + NEG green.
+- v1.88 (Remote R-3 delivered, PENDING REVIEW): E-STOP hold400 ring + keyboard/touch cancel feedback +
+  whole-window 4px perimeter + STOPPED banner + emergency capability gate + latched guards + ttl expiry
+  while held + resume hold-then-typed-name asymmetry (holder||admin) + audits. Region annotations:
+  workbudy 03 §8/170-174, R2=A, C54 guards, C69/coarse44, PIT-269 modal. harness 40 cases + NEG green.
+- v1.87 (Remote R-2 delivered, PENDING REVIEW): three-state chip + capture precondition + ttl lease
+  machine (300 renew/1000 grace/<300 warn dual/expiry released frame clears keysHeld/expired→idle) +
+  WS-drop immediate release + reconnect stays view-only + HUD five + H exemptions + Esc chain position.
+  remote-timing 9-part real-timer leg. Region annotations: W2 numbers, workbudy 03:104-105/158-161,
+  R1=A/R3=A, C62 simulated†, C54 guards. harness 39 cases + NEG green.
+- v1.86 (Remote R-1 delivered, PENDING REVIEW): lobby desk/ctrl cards (mode/holder/lease/conn/sim†) +
+  view-only session (video-bg token/VIEW-ONLY chip/paired-view note for ctrl) + three states + Retry;
+  legacy native-disabled Acquire removed. Region annotations: W2 lease numbers, U4 + kind exception
+  note (ctrl teleop mode under desk app), workbudy M1 cross-room feed, C62 simulated†, DQ video-bg
+  token. harness 36 cases + NEG green.
 - v1.85 (M-6 polish, panel-driven): speaker REAL render+rail+off-page indicator; panel lifecycle
   (leave closes/PiP shift/narrow bar z); PiP content linkage; tile conn overlays (dot/3-bar/ring+slash);
   context never-hide row (name/clock/count); guest ended card; Reopen resets+transcript archive;

@@ -606,6 +606,304 @@ const CASES = [
     var noOv=document.documentElement.scrollWidth<=innerWidth;
     closeMeetPanel();meetLeave();
     return {leaveReachable,pipHidden,noOv};`, 600],
+  ['remote-lobby', [
+    `goto('remote');
+     var cards=document.querySelectorAll('#remGrid .card').length===2;
+     var txt=document.getElementById('remGrid').textContent;
+     var modeChip=txt.includes('Teleop')&&txt.includes('Desktop');
+     var holderBadge=txt.includes('no holder');
+     var leaseState=txt.includes('lease idle');
+     var simTag=txt.includes('simulated');
+     var ob=document.querySelector('.rem-open[data-id=ctrl-VH-11]');ob.focus();ob.click();
+     var loading=document.getElementById('remGrid').textContent.includes('Loading');
+     return {cards,modeChip,holderBadge,leaseState,simTag,loading};`,
+    `var sessOpen=!document.getElementById('remSession').hidden&&document.getElementById('remLobby').hidden;
+     var viewOnly=document.getElementById('remViewChip').textContent.includes('VIEW-ONLY');
+     var pairViewFeed=document.getElementById('remPairNote').textContent.includes('view-wall');
+     var videoBg=getComputedStyle(document.getElementById('remTile')).backgroundColor!=='rgba(0, 0, 0, 0)';
+     document.getElementById('remBack').click();
+     var backLobby=!document.getElementById('remLobby').hidden&&document.getElementById('remSession').hidden;
+     applyProto('sim','remoteerror');
+     var errState=document.getElementById('remGrid').textContent.includes('unreachable');
+     document.getElementById('remRetry').click();
+     var retryLoading=document.getElementById('remGrid').textContent.includes('Loading');
+     return {sessOpen,viewOnly,pairViewFeed,videoBg,backLobby,errState,retryLoading};`,
+    `var retryWorks=document.querySelectorAll('#remGrid .card').length===2;
+     goto('rooms');var noObject=!document.getElementById('roomBody').textContent.includes('[object Object]');
+     return {retryWorks,noObject};`
+  ]],
+  ['remote-lease', `goto('remote');remSession='desk-ops';renderRemSession();
+    var chipView=document.getElementById('remStateChip').textContent==='VIEW-ONLY';
+    document.getElementById('remTile').click();document.getElementById('cfmOk').click();
+    var chipCaptured=document.getElementById('remStateChip').textContent==='CAPTURED'&&remRoom().holder===CUR_USER&&document.getElementById('remEscHint').textContent.includes('Esc');
+    var r=remRoom();r.holder='admin.x';remCaptured=false;renderRemState();
+    document.getElementById('remTile').click();
+    var captureGuardOtherHolder=remCaptured===false&&document.getElementById('toast').textContent.includes('admin.x');
+    r.holder=null;remCapture();
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'w',bubbles:true,cancelable:true}));
+    var inputOpensLease=r.lease.state==='held'&&remKeys.has('w');
+    leaseTick();var renewTick=r.lease.state==='held'&&remLeaseTtl===300;
+    document.body.dispatchEvent(new KeyboardEvent('keyup',{key:'w',bubbles:true,cancelable:true}));
+    leaseTick();var graceStart=r.lease.state==='grace'&&remGraceTtl===1000;
+    for(var i=0;i<4;i++)leaseTick();
+    var graceCountdown=r.lease.state==='grace'&&remGraceTtl===800&&document.getElementById('hudLease').textContent.includes('800');
+    for(var j=0;j<15;j++)leaseTick();
+    var warnDualChannel=document.getElementById('hudLease').classList.contains('grace-warn');
+    for(var k=0;k<3;k++)leaseTick();
+    var ttlExpireReleasedFrame=r.lease.state==='expired'&&document.getElementById('remReleased').classList.contains('show')&&remKeys.size===0&&remCaptured===false&&document.getElementById('remStateChip').textContent==='VIEW-ONLY';
+    remCapture();document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'a',bubbles:true,cancelable:true}));
+    applyProto('sim','remws');
+    var wsDropReleasedFrame=r.conn==='lost'&&remCaptured===false&&document.getElementById('remReleased').classList.contains('show');
+    applyProto('sim','remwsok');
+    var reconnectViewOnly=r.conn==='ok'&&remCaptured===false&&document.getElementById('remStateChip').textContent==='VIEW-ONLY';
+    remCapture();document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'s',bubbles:true,cancelable:true}));
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    var escRelease=remCaptured===false&&remKeys.size===0&&document.getElementById('remStateChip').textContent==='VIEW-ONLY';
+    var hudFive=['hudLat','hudJit','hudLease','hudInput','hudConn'].every(id=>document.getElementById(id).textContent.length>0);
+    document.body.classList.add('rem-hideov');
+    var hExempt=getComputedStyle(document.getElementById('remStateChip')).display!=='none'&&getComputedStyle(document.getElementById('hudLease')).display!=='none'&&getComputedStyle(document.getElementById('hudConn')).display!=='none'&&getComputedStyle(document.getElementById('remFeedLabel')).display==='none';
+    document.body.classList.remove('rem-hideov');
+    document.getElementById('remBack').click();
+    return {chipView,chipCaptured,captureGuardOtherHolder,inputOpensLease,renewTick,graceStart,graceCountdown,warnDualChannel,ttlExpireReleasedFrame,wsDropReleasedFrame,reconnectViewOnly,escRelease,hudFive,hExempt};`],
+  ['remote-lease-narrow', `goto('remote');remSession='desk-ops';renderRemSession();remCapture();
+    var wrap=getComputedStyle(document.getElementById('remHud')).flexWrap==='wrap';
+    var noOv=document.documentElement.scrollWidth<=innerWidth;
+    document.getElementById('remBack').click();
+    return {wrap,noOv};`, 600],
+  ['remote-timing', [
+    `goto('remote');remSession='desk-ops';renderRemSession();remCapture();document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'w',bubbles:true,cancelable:true}));return {held:remRoom().lease.state==='held'};`,
+    `document.body.dispatchEvent(new KeyboardEvent('keyup',{key:'w',bubbles:true,cancelable:true}));return {renew300:remLeaseTtl===300};`,
+    `return {grace:remRoom().lease.state==='grace',graceMid:remRoom().lease.state==='grace'&&remGraceTtl>300&&remGraceTtl<1000};`,
+    `return {graceLate:remRoom().lease.state==='grace'&&remGraceTtl<=300};`,
+    `var expired=remRoom().lease.state==='expired';return {expired1s:expired&&remCaptured===false&&document.getElementById('remReleased').classList.contains('show')};`,
+    `return {bannerStill:document.getElementById('remReleased').classList.contains('show')};`,
+    `return {midState:['expired','idle'].includes(remRoom().lease.state)};`,
+    `return {midState2:['expired','idle'].includes(remRoom().lease.state)};`,
+    `return {idleBack:remRoom().lease.state==='idle'};`
+  ]],
+  ['remote-estop', `goto('remote');remSession='desk-ops';renderRemSession();var r=remRoom();
+    var estopVisible=getComputedStyle(document.getElementById('remEstop')).display==='flex';
+    var coarse44=[...document.querySelectorAll('style')].some(st=>st.textContent.includes('(pointer:coarse){#remEstop'));
+    var es=document.getElementById('remEstop');
+    es.dispatchEvent(new KeyboardEvent('keydown',{key:' ',bubbles:true,cancelable:true}));estopHoldTick();
+    var kbHold=remEstopProg>0;
+    es.dispatchEvent(new KeyboardEvent('keyup',{key:' ',bubbles:true,cancelable:true}));
+    var kbCancel=remEstopProg===0&&document.getElementById('toast').textContent.includes('Hold cancelled');
+    es.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));estopHoldTick();
+    es.dispatchEvent(new PointerEvent('pointerleave',{bubbles:true}));
+    var cancelFeedback=remEstopProg===0&&document.getElementById('toast').textContent.includes('Hold cancelled');
+    remEstopStart();for(var i=0;i<3;i++)estopHoldTick();remEstopCancel();
+    var shortHoldNoLatch=r.estop===false;
+    myRole='viewer';renderRemSession();
+    var capabilityGate=document.getElementById('remEstop').getAttribute('aria-disabled')==='true';
+    myRole='admin';renderRemSession();
+    remCapture();remKeys.add('w');remInput();
+    remEstopStart();for(var j=0;j<8;j++)estopHoldTick();
+    var hold400Latch=r.estop===true&&document.body.classList.contains('rem-latched');
+    var pm=getComputedStyle(document.getElementById('remPerimeter'));
+    var perimeter4px=pm.borderTopWidth==='4px'&&pm.pointerEvents==='none'&&pm.position==='fixed';
+    var stoppedBanner=getComputedStyle(document.getElementById('remStopped')).display==='block'&&document.getElementById('remStopped').textContent.includes('STOPPED');
+    document.body.classList.add('rem-hideov');
+    var neverHide=getComputedStyle(document.getElementById('remEstop')).display==='flex'&&getComputedStyle(document.getElementById('remStopped')).display==='block';
+    document.body.classList.remove('rem-hideov');
+    remCapture();var inputGuardLatched=remCaptured===false;
+    for(var k=0;k<25;k++)leaseTick();
+    var ttlExpireWhileHeld=r.lease.state==='expired'&&remKeys.size===0;
+    myRole='viewer';r.holder='admin.x';renderRemSession();
+    var resumeAuthViewer=document.getElementById('remResumeOpen').getAttribute('aria-disabled')==='true';
+    myRole='admin';renderRemSession();
+    document.getElementById('remResumeOpen').click();
+    var resumeFocus=document.activeElement.id==='remResumeHold';
+    document.getElementById('remResumeHold').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));
+    for(var m=0;m<8;m++)resumeHoldTick();
+    var resumeHeld=remResumeHeld===true&&document.getElementById('remResumeName').disabled===false;
+    document.getElementById('remResumeName').value='WRONG';document.getElementById('remResumeName').dispatchEvent(new Event('input',{bubbles:true}));
+    var wrongNameBlocked=document.getElementById('remResumeOk').disabled===true&&document.getElementById('remResumeErr').textContent.includes('does not match');
+    document.getElementById('remResumeName').value=r.asset;document.getElementById('remResumeName').dispatchEvent(new Event('input',{bubbles:true}));
+    var typedOk=document.getElementById('remResumeOk').disabled===false;
+    document.getElementById('remResumeOk').click();
+    var unlatched=r.estop===false&&!document.body.classList.contains('rem-latched');
+    var auditBoth=AUDIT.some(a=>a.action==='estop.latch')&&AUDIT.some(a=>a.action==='estop.release');
+    document.getElementById('remBack').click();
+    return {estopVisible,coarse44,kbHold,kbCancel,cancelFeedback,shortHoldNoLatch,capabilityGate,hold400Latch,perimeter4px,stoppedBanner,neverHide,inputGuardLatched,ttlExpireWhileHeld,resumeAuthViewer,resumeFocus,resumeHeld,wrongNameBlocked,typedOk,unlatched,auditBoth};`],
+  ['remote-handover', `myRole='admin';goto('remote');remSession='desk-ops';renderRemSession();var r=remRoom();
+    var holderBadge=document.getElementById('remHolderChip').textContent==='no holder';
+    remCapture();renderRemReq();
+    var holderBadgeCtl=document.getElementById('remHolderChip').textContent.includes('dispatch.x');
+    r.holder='admin.x';remCaptured=false;renderRemState();
+    document.getElementById('remTile').click();
+    var requestNoSeize=r.requests.some(q=>q.from===CUR_USER)&&r.holder==='admin.x'&&remCaptured===false;
+    r.holder=CUR_USER;r.requests=[{from:'admin.x',at:Date.now()}];renderRemReq();
+    var notifyPersistent=document.getElementById('remReqChip').classList.contains('show')&&document.getElementById('remReqTxt').textContent.includes('admin.x')&&document.getElementById('remReqChip').getAttribute('role')==='alertdialog';
+    r.requests[0].at=Date.now()-31000;leaseTick();
+    var timeoutFeedback=r.requests.length===0&&document.getElementById('toast').textContent.includes('timed out');
+    remCaptured=true;remKeys.add('w');r.requests=[{from:'admin.x',at:Date.now()}];
+    acceptHandover('admin.x');
+    var acceptFrames=r.holder==='admin.x'&&remCaptured===false&&remKeys.size===0&&document.getElementById('remReleased').classList.contains('show')&&AUDIT.some(a=>a.action==='control.handover');
+    r.holder=CUR_USER;r.requests=[{from:'ops1',at:Date.now()}];renderRemReq();
+    denyHandover('ops1');
+    var denyFeedback=r.requests.length===0&&document.getElementById('toast').textContent.includes('denied')&&AUDIT.some(a=>a.action==='control.handover.deny');
+    r.holder='admin.x';renderRemReq();
+    forceRelease();
+    var forceConfirm=document.getElementById('cfmScrim').classList.contains('show');
+    document.getElementById('cfmOk').click();
+    var forceAudit=r.holder===null&&AUDIT.some(a=>a.action==='control.force')&&document.getElementById('remReleased').classList.contains('show');
+    var forceFreeForAll=r.holder===null&&remCaptured===false;
+    remCapture();var freeCapture=r.holder===CUR_USER;
+    r.holder=null;remCaptured=false;renderRemReq();
+    var noHolderGuard=document.getElementById('remForce').getAttribute('aria-disabled')==='true';
+    forceRelease();var noHolderToast=document.getElementById('toast').textContent.includes('No active holder');
+    remCapture();remKeys.add('w');remInput();remKeys.clear();for(var i=0;i<25;i++)leaseTick();
+    var expiredFreeForAll=r.holder===null;
+    document.getElementById('remBack').click();
+    return {holderBadge,holderBadgeCtl,requestNoSeize,notifyPersistent,timeoutFeedback,acceptFrames,denyFeedback,forceConfirm,forceAudit,forceFreeForAll,freeCapture,noHolderGuard,noHolderToast,expiredFreeForAll};`],
+  ['remote-input', `myRole='admin';goto('remote');remSession='ctrl-VH-11';renderRemSession();remRoom().conn='ok';remCapture();var r=remRoom();
+    var c0=remInputCount;document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'w',bubbles:true,cancelable:true}));
+    var kbdCount=remInputCount>c0;
+    var c1=remInputCount;document.getElementById('remTile').dispatchEvent(new MouseEvent('mousemove',{bubbles:true}));
+    var mouseCount=remInputCount>c1;
+    var c2=remInputCount;window.__gamepadSim([0.8,0,0,0],[false,false,false,false]);gamepadTick();
+    var gamepadAxes=remInputCount>c2;
+    var sameLease=r.lease.state==='held';
+    var mp=document.getElementById('remMapPanel');
+    var mappingVisible=getComputedStyle(mp).display==='block'&&mp.textContent.includes('Left stick')&&mp.textContent.includes('Y (hold)');
+    document.getElementById('remMapToggle').click();
+    var expand1=!mp.classList.contains('collapsed')&&document.getElementById('remMapToggle').getAttribute('aria-expanded')==='true';
+    document.getElementById('remMapToggle').click();
+    var mappingNoEscLoop=mp.classList.contains('collapsed')&&remCaptured===true;
+    window.__gamepadSim([0,0,0,0],[false,false,false,true]);gamepadTick();estopHoldTick();
+    var yEstopHold=remEstopProg>0;
+    for(var i=0;i<8;i++)estopHoldTick();
+    var yLatched=r.estop===true;remUnlatch();
+    var tg=document.getElementById('remTouch');
+    var touchGatedReason=tg.getAttribute('aria-disabled')==='true'&&(tg.dataset.reason||'').includes('unproven')&&tg.getAttribute('aria-describedby')==='guardTip';
+    r.holder=null;renderRemReq();
+    var guardDescribedBy=document.getElementById('remForce').getAttribute('aria-describedby')==='guardTip';
+    tg.dispatchEvent(new MouseEvent('click',{bubbles:true}));
+    var tapTip=document.getElementById('guardTip').textContent.includes('unproven');
+    var videoBgToken=getComputedStyle(document.getElementById('remTile')).backgroundColor!=='rgba(0, 0, 0, 0)';
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    var escNotSwallowed=remCaptured===false;
+    remSession='desk-ops';renderRemSession();
+    var deskNoMap=getComputedStyle(document.getElementById('remMapPanel')).display==='none';
+    document.getElementById('remBack').click();
+    return {kbdCount,mouseCount,gamepadAxes,sameLease,mappingVisible,expand1,mappingNoEscLoop,yEstopHold,yLatched,touchGatedReason,guardDescribedBy,tapTip,videoBgToken,escNotSwallowed,deskNoMap};`],
+  ['remote-fixes', `myRole='admin';goto('remote');remSession='desk-ops';renderRemSession();var r=remRoom();
+    remCapture();remKeys.add('w');remInput();remKeys.clear();leaseTick();
+    window.__gamepadSim([0.8,0,0,0],[false,false,false,false]);leaseTick();
+    var gamepadGraceHeld=r.lease.state==='held';
+    window.__gamepadSim([0,0,0,0],[false,false,false,false]);
+    applyProto('sim','remws');remCaptured=false;remCapture();
+    var connLostCaptureBlocked=remCaptured===false;
+    remEstopStart();for(var i=0;i<8;i++)estopHoldTick();
+    var connLostEstopBlocked=r.estop===false;
+    var healthBannerNotStopped=getComputedStyle(document.getElementById('remHealth')).display==='block'&&getComputedStyle(document.getElementById('remStopped')).display==='none';
+    applyProto('sim','remwsok');remCapture();remEstopStart();for(var j=0;j<8;j++)estopHoldTick();
+    document.getElementById('remResumeOpen').click();
+    document.getElementById('remResumeHold').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));resumeHoldTick();resumeHoldTick();
+    document.getElementById('remResumeHold').dispatchEvent(new PointerEvent('pointerleave',{bubbles:true}));
+    var resumeDragCancel=remResumeProg===0&&remResumeIv===null;
+    document.getElementById('remResumeHold').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true}));resumeHoldTick();
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    var resumeEscClears=remResumeIv===null&&!document.getElementById('remResumeScrim').classList.contains('show');
+    remUnlatch();remCapture();remEstopStart();
+    ROOMS.push({id:'desk-2',kind:'desk',name:'Desk two',parts:1,state:'idle',asset:'DESK-09',mode:'desk',holder:null,lease:{state:'idle',ttl:0},estop:false,conn:'ok',viewers:[],requests:[],pairView:null});
+    remSession='desk-2';for(var k=0;k<8;k++)estopHoldTick();
+    var crossRoomLatchGuard=ROOMS.find(x=>x.id==='desk-2').estop===false&&r.estop===false;
+    remSession='desk-ops';renderRemSession();remCapture();remEstopStart();for(var m=0;m<8;m++)estopHoldTick();
+    var latchKeepsHolder=r.holder===CUR_USER&&r.estop===true;
+    var holderResumeReachable=document.getElementById('remResumeOpen').getAttribute('aria-disabled')!=='true';
+    forceRelease();document.getElementById('cfmOk').click();
+    var forceLatchedInert=r.holder===null&&r.lease.state==='inert';
+    r.holder=CUR_USER;var rb=document.getElementById('remBack');rb.click();
+    var backLatchedClearsHolder=r.holder===null;
+    goto('remote');remSession='desk-ops';renderRemSession();remCapture();goto('rooms');
+    var navLeaseReleased=remCaptured===false&&AUDIT.some(a=>a.action==='control.released');
+    var navBodyClassesCleared=!document.body.classList.contains('rem-session')&&!document.body.classList.contains('rem-latched');
+    goto('remote');
+    var lobbyStoppedChip=document.getElementById('remGrid').textContent.includes('STOPPED');
+    remSession='desk-ops';renderRemSession();remUnlatch();remCapture();openDevDrawer(DEVICES[0].id);
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    var escChainAfterDrawer=!document.getElementById('devDrawer').classList.contains('open')&&remCaptured===true;
+    meetPhase='live';document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    var escMeetBranchPageOwned=escHold===null&&remCaptured===false;meetPhase='lobby';
+    remCapture();document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Tab',bubbles:true,cancelable:true}));
+    var phantomKeysExcluded=!remKeys.has('Tab');
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'c',ctrlKey:true,bubbles:true,cancelable:true}));
+    var modifierCombosExcluded=!remKeys.has('c');
+    remRelease('test');remUnlatch();var tl=document.getElementById('remTile');tl.focus();
+    tl.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));
+    var tileKeyboardCapture=document.getElementById('cfmScrim').classList.contains('show');
+    var seizeConfirmFocus=document.activeElement.id==='cfmCancel';
+    document.getElementById('cfmOk').click();
+    var seizeOkCaptured=remCaptured===true;
+    remRelease('test');r.conn='lost';tl.click();
+    var seizeOkRevalidate=!document.getElementById('cfmScrim').classList.contains('show');
+    r.conn='ok';
+    setTheme('light');
+    function lum(hex){var c=hex.replace('#','');var v=[0,2,4].map(function(o){var x=parseInt(c.substr(o,2),16)/255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4);});return 0.2126*v[0]+0.7152*v[1]+0.0722*v[2];}
+    var cs=getComputedStyle(document.documentElement);var l1=lum(cs.getPropertyValue('--video-ink').trim());var l2=lum(cs.getPropertyValue('--video-bg').trim());
+    var lightContrastFormula=(Math.max(l1,l2)+0.05)/(Math.min(l1,l2)+0.05)>=4.5;
+    remCapture();remKeys.add('w');remInput();remKeys.clear();leaseTick();
+    var graceEnter=document.getElementById('remLive').textContent.includes('release in 1 second');
+    for(var q=0;q<15;q++)leaseTick();
+    var graceLiveTransitions=graceEnter&&document.getElementById('remLive').textContent.includes('Warning');
+    var touchReleaseHintDual=document.getElementById('remEscHint').textContent.includes('Esc or Release');
+    r.holder=CUR_USER;r.requests=[{from:'admin.x',at:Date.now()}];renderRemReq();
+    var reqFocus=document.activeElement.id==='remReqAccept';
+    denyHandover('admin.x');
+    var reqFocusRestore=reqFocus&&['remTake','remRelease','remTile'].includes(document.activeElement.id);
+    var statusPopFixed=!!document.getElementById('statusPop')&&document.getElementById('statusPop').classList.contains('tb-pop');
+    document.getElementById('remBack').click();
+    return {gamepadGraceHeld,connLostCaptureBlocked,connLostEstopBlocked,healthBannerNotStopped,resumeDragCancel,resumeEscClears,crossRoomLatchGuard,latchKeepsHolder,holderResumeReachable,forceLatchedInert,backLatchedClearsHolder,navLeaseReleased,navBodyClassesCleared,lobbyStoppedChip,escChainAfterDrawer,escMeetBranchPageOwned,phantomKeysExcluded,modifierCombosExcluded,tileKeyboardCapture,seizeConfirmFocus,seizeOkCaptured,seizeOkRevalidate,lightContrastFormula,graceLiveTransitions,touchReleaseHintDual,reqFocusRestore,statusPopFixed};`],
+  ['remote-layout', `myRole='admin';goto('remote');remSession='desk-ops';renderRemSession();var r=remRoom();
+    var shellHidden=getComputedStyle(document.getElementById('sidebar')).display==='none'&&getComputedStyle(document.getElementById('topbar')).display==='none';
+    var stg=document.getElementById('remStage').getBoundingClientRect();var tl=document.getElementById('remTile').getBoundingClientRect();
+    var tileFillViewport=stg.height>400&&tl.width>600;
+    var top=document.getElementById('remTop');
+    var topbarGroups=['remFs','remZoom','remOsdBtn','remKeysBtn','remInfoBtn'].every(function(id){return !!top.querySelector('#'+id);});
+    document.getElementById('remMoreBtn').click();
+    var overflowTbPop=document.getElementById('remMorePop').classList.contains('tb-pop')&&!document.getElementById('remMorePop').hidden;
+    document.body.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));
+    var overflowEsc=document.getElementById('remMorePop').hidden;
+    var rb=document.querySelector('#remBar .inner');var mb=document.getElementById('meetBar');
+    var bottomBarSharedShell=rb.classList.contains('session-bar')&&mb.classList.contains('session-bar')&&getComputedStyle(rb).borderRadius===getComputedStyle(mb).borderRadius;
+    var stateSlotLiveOff=!document.getElementById('remCtlState').getAttribute('aria-live');
+    remCapture();remKeys.add('w');remInput();remKeys.clear();leaseTick();
+    var graceMirror=!document.getElementById('remGraceMirror').hidden&&document.getElementById('remGraceMirror').textContent.includes('release in');
+    document.getElementById('remFs').click();
+    var fullscreenRealOrStub=document.fullscreenElement===document.getElementById('remSession')||window.__fsStub===true||window.__fsPending===true;
+    var er=document.getElementById('remEstop').getBoundingClientRect();
+    var estopVisibleInFullscreen=getComputedStyle(document.getElementById('remEstop')).display==='flex'&&er.width>0;
+    document.getElementById('remZoom').click();
+    var zoomOriginal=document.getElementById('remStage').classList.contains('original')&&document.getElementById('remZoom').getAttribute('aria-pressed')==='false';
+    document.getElementById('remZoom').click();
+    var zoomFit=!document.getElementById('remStage').classList.contains('original');
+    var sessionTimer=/^[0-9][0-9]:[0-9][0-9]/.test(document.getElementById('remClock').textContent);
+    document.getElementById('remOsdBtn').click();
+    var osdTogglePressed=document.body.classList.contains('rem-osd')&&document.getElementById('remOsdBtn').getAttribute('aria-pressed')==='true'&&getComputedStyle(document.getElementById('remOsd')).display==='flex';
+    var c0=remInputCount;document.getElementById('remKeysBtn').click();
+    document.querySelector('#remKeysPop [data-sk="Ctrl+Alt+Del"]').click();
+    var specialKeysLease=remInputCount>c0&&AUDIT.some(function(a){return a.action==='control.specialkey';});
+    var ec=document.getElementById('remEstop').getBoundingClientRect();
+    var el=document.elementFromPoint(ec.left+ec.width/2,ec.top+ec.height/2);
+    var estopNeverCovered=!!el&&(el.id==='remEstop'||document.getElementById('remEstop').contains(el));
+    document.body.classList.add('rem-hideov');
+    var hExemptions=getComputedStyle(document.getElementById('remStateChip')).display!=='none'&&getComputedStyle(document.getElementById('hudLease')).display!=='none'&&getComputedStyle(document.getElementById('hudConn')).display!=='none'&&getComputedStyle(document.getElementById('remEstop')).display==='flex'&&getComputedStyle(document.getElementById('remFeedLabel')).display==='none';
+    r.conn='lost';renderRemSession();
+    var healthBannerNeverHide=getComputedStyle(document.getElementById('remHealth')).display==='block';
+    r.conn='ok';document.body.classList.remove('rem-hideov');renderRemSession();
+    document.getElementById('remBack').click();
+    return {shellHidden,tileFillViewport,topbarGroups,overflowTbPop,overflowEsc,bottomBarSharedShell,stateSlotLiveOff,graceMirror,fullscreenRealOrStub,estopVisibleInFullscreen,zoomOriginal,zoomFit,sessionTimer,osdTogglePressed,specialKeysLease,estopNeverCovered,hExemptions,healthBannerNeverHide};`],
+  ['remote-layout-narrow', `myRole='admin';goto('remote');remSession='desk-ops';renderRemSession();
+    var wideHidden=getComputedStyle(document.getElementById('remFs')).display==='none';
+    document.getElementById('remMoreBtn').click();
+    var moreWorks=!document.getElementById('remMorePop').hidden;
+    document.getElementById('remMoreBtn').click();
+    var noOv=document.documentElement.scrollWidth<=innerWidth;
+    var barWrap=getComputedStyle(document.querySelector('#remBar .session-bar')).flexWrap==='wrap';
+    document.getElementById('remBack').click();
+    return {wideHidden,moreWorks,noOv,barWrap};`, 600],
   ['accounts-narrow', `myRole='admin';goto('accounts');
     var noOv=document.documentElement.scrollWidth<=innerWidth;
     var card=getComputedStyle(document.querySelector('#accBody td:nth-child(2)')).display==='flex';
@@ -655,6 +953,15 @@ const NEG = {
   'meet-exit': `holdTick=function(){};`,
   'meet-polish': `speakerTick=function(){};`,
   'meet-polish-narrow': `openMeetPanel=function(){};`,
+  'remote-lobby': `renderRemote=function(){};`,
+  'remote-lease': `leaseTick=function(){};`,
+  'remote-timing': `leaseTick=function(){};`,
+  'remote-estop': `estopHoldTick=function(){};`,
+  'remote-handover': `acceptHandover=function(){};`,
+  'remote-input': `gamepadTick=function(){};`,
+  'remote-fixes': `leaseTick=function(){};`,
+  'remote-layout': `renderRemSession=function(){};`,
+  'remote-layout-narrow': `renderRemSession=function(){};`,
   'nav-collapse': `syncNavCollapse=function(){};`,
   'accounts-narrow': `renderAccounts=function(){};`,
   notif: `renderNotif=function(){};`,

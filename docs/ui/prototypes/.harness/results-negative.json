@@ -1,5 +1,5 @@
 {
-  "when": "2026-11-19T05:57:38.612Z",
+  "when": "2026-11-20T02:37:36.335Z",
   "mode": "negative",
   "fail": 0,
   "results": {
@@ -295,6 +295,201 @@
         "leaveReachable": true,
         "pipHidden": false,
         "noOv": true
+      },
+      "error": null
+    },
+    "remote-lobby": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "ob is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:69\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:70\n@http://127.0.0.1:8201/portal-unified.html:2:843\n@http://12",
+        "sessOpen": false,
+        "viewOnly": true,
+        "pairViewFeed": false,
+        "videoBg": true,
+        "backLobby": true,
+        "errState": false,
+        "retryLoading": false,
+        "retryWorks": false,
+        "noObject": true
+      },
+      "error": "ob is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:69\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:70\n@http://127.0.0.1:8201/portal-unified.html:2:843\n@http://12"
+    },
+    "remote-lease": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "chipView": true,
+        "chipCaptured": true,
+        "captureGuardOtherHolder": true,
+        "inputOpensLease": true,
+        "renewTick": true,
+        "graceStart": false,
+        "graceCountdown": false,
+        "warnDualChannel": false,
+        "ttlExpireReleasedFrame": false,
+        "wsDropReleasedFrame": true,
+        "reconnectViewOnly": true,
+        "escRelease": true,
+        "hudFive": true,
+        "hExempt": true
+      },
+      "error": null
+    },
+    "remote-timing": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "held": true,
+        "renew300": true,
+        "grace": false,
+        "graceMid": false,
+        "graceLate": false,
+        "expired1s": false,
+        "bannerStill": false,
+        "midState": false,
+        "midState2": false,
+        "idleBack": false
+      },
+      "error": null
+    },
+    "remote-estop": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "estopVisible": true,
+        "coarse44": true,
+        "kbHold": false,
+        "kbCancel": false,
+        "cancelFeedback": false,
+        "shortHoldNoLatch": true,
+        "capabilityGate": true,
+        "hold400Latch": false,
+        "perimeter4px": true,
+        "stoppedBanner": false,
+        "neverHide": false,
+        "inputGuardLatched": false,
+        "ttlExpireWhileHeld": false,
+        "resumeAuthViewer": true,
+        "resumeFocus": true,
+        "resumeHeld": true,
+        "wrongNameBlocked": true,
+        "typedOk": true,
+        "unlatched": true,
+        "auditBoth": false
+      },
+      "error": null
+    },
+    "remote-handover": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "holderBadge": true,
+        "holderBadgeCtl": true,
+        "requestNoSeize": true,
+        "notifyPersistent": true,
+        "timeoutFeedback": true,
+        "acceptFrames": false,
+        "denyFeedback": true,
+        "forceConfirm": true,
+        "forceAudit": true,
+        "forceFreeForAll": false,
+        "freeCapture": true,
+        "noHolderGuard": true,
+        "noHolderToast": true,
+        "expiredFreeForAll": true
+      },
+      "error": null
+    },
+    "remote-input": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "kbdCount": true,
+        "mouseCount": true,
+        "gamepadAxes": false,
+        "sameLease": true,
+        "mappingVisible": true,
+        "expand1": true,
+        "mappingNoEscLoop": true,
+        "yEstopHold": true,
+        "yLatched": false,
+        "touchGatedReason": true,
+        "guardDescribedBy": true,
+        "tapTip": true,
+        "videoBgToken": true,
+        "escNotSwallowed": true,
+        "deskNoMap": true
+      },
+      "error": null
+    },
+    "remote-fixes": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "gamepadGraceHeld": true,
+        "connLostCaptureBlocked": true,
+        "connLostEstopBlocked": true,
+        "healthBannerNotStopped": true,
+        "resumeDragCancel": true,
+        "resumeEscClears": true,
+        "crossRoomLatchGuard": true,
+        "latchKeepsHolder": true,
+        "holderResumeReachable": true,
+        "forceLatchedInert": true,
+        "backLatchedClearsHolder": true,
+        "navLeaseReleased": true,
+        "navBodyClassesCleared": true,
+        "lobbyStoppedChip": true,
+        "escChainAfterDrawer": true,
+        "escMeetBranchPageOwned": true,
+        "phantomKeysExcluded": true,
+        "modifierCombosExcluded": true,
+        "tileKeyboardCapture": true,
+        "seizeConfirmFocus": true,
+        "seizeOkCaptured": true,
+        "seizeOkRevalidate": true,
+        "lightContrastFormula": true,
+        "graceLiveTransitions": false,
+        "touchReleaseHintDual": true,
+        "reqFocusRestore": true,
+        "statusPopFixed": true
+      },
+      "error": null
+    },
+    "remote-layout": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "shellHidden": false,
+        "tileFillViewport": false,
+        "topbarGroups": true,
+        "overflowTbPop": true,
+        "overflowEsc": true,
+        "bottomBarSharedShell": true,
+        "stateSlotLiveOff": true,
+        "graceMirror": true,
+        "fullscreenRealOrStub": true,
+        "estopVisibleInFullscreen": false,
+        "zoomOriginal": true,
+        "zoomFit": true,
+        "sessionTimer": true,
+        "osdTogglePressed": true,
+        "specialKeysLease": true,
+        "estopNeverCovered": false,
+        "hExemptions": false,
+        "healthBannerNeverHide": false
+      },
+      "error": null
+    },
+    "remote-layout-narrow": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "wideHidden": false,
+        "moreWorks": true,
+        "noOv": true,
+        "barWrap": false
       },
       "error": null
     },
