@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "@mediaservo/client": "workspace:*",
+    "@mediaservo/react": "workspace:*",
+    "@mediaservo/talk-ui": "workspace:*",
     "@mediaservo/ui": "workspace:*",
     "lucide-react": "^1.38.0",
     "react": "^18.3.0",

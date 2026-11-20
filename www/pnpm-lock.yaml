@@ -17,6 +17,12 @@ importers:
       '@mediaservo/client':
         specifier: workspace:*
         version: link:../../packages/client
+      '@mediaservo/react':
+        specifier: workspace:*
+        version: link:../../packages/react
+      '@mediaservo/talk-ui':
+        specifier: workspace:*
+        version: link:../../packages/talk-ui
       '@mediaservo/ui':
         specifier: workspace:*
         version: link:../../packages/ui
@@ -113,6 +119,25 @@ importers:
       react-dom:
         specifier: ^18.3.0
         version: 18.3.1(react@18.3.1)
+      typescript:
+        specifier: ^5.5.0
+        version: 5.9.3
+
+  packages/talk-ui:
+    dependencies:
+      '@mediaservo/client':
+        specifier: workspace:*
+        version: link:../client
+      '@mediaservo/react':
+        specifier: workspace:*
+        version: link:../react
+      '@mediaservo/ui':
+        specifier: workspace:*
+        version: link:../ui
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
       typescript:
         specifier: ^5.5.0
         version: 5.9.3

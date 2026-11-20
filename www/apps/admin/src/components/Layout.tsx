@@ -58,6 +58,11 @@ export default function Layout() {
             </NavLink>
           )}
           {canMonitor && (
+            <NavLink to="/intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <Radio size={15} /> Intercom
+            </NavLink>
+          )}
+          {canMonitor && (
             <NavLink to="/vehicles" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <Car size={15} /> Vehicles
             </NavLink>
