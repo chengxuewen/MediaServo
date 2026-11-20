@@ -166,6 +166,33 @@ fn cmd_init(args: &mut dyn Iterator<Item = String>) -> i32 {
     }
 }
 
+/// PSK bootstrap (psk-bootstrap-env X1=A): MEDIASERVO_PSK seeds the FIRST
+/// server.yaml write only (an existing file is skipped below -- PIT-160
+/// first-writer-wins, so the env never rotates a live deployment). The value
+/// must be non-empty and match [A-Za-z0-9_-]{16,256}: anything else (typos with
+/// quotes/spaces that would corrupt the YAML template, or weak values) is
+/// REJECTED with a loud WARN and a generated value is used instead. The WARN
+/// deliberately does not echo the value (only its length + first char).
+/// Returns (secret, from_env).
+fn env_or_gen_secret() -> (String, bool) {
+    if let Ok(v) = std::env::var("MEDIASERVO_PSK") {
+        let v = v.trim();
+        let len = v.chars().count();
+        let ok = (16..=256).contains(&len)
+            && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        if ok {
+            return (v.to_string(), true);
+        }
+        if !v.is_empty() {
+            eprintln!(
+                "init: MEDIASERVO_PSK rejected (len {len}, first char {:?}): must match [A-Za-z0-9_-]{{16,256}} -- using a GENERATED value; fix .env to pin the PSK",
+                v.chars().next()
+            );
+        }
+    }
+    (gen_secret(), false)
+}
+
 fn init_instance(dir: &Path) -> Result<(), String> {
     let etc = dir.join("etc");
     let run = dir.join("run");
@@ -182,9 +209,14 @@ fn init_instance(dir: &Path) -> Result<(), String> {
     if cfg_path.exists() {
         eprintln!("init: {} already exists, skipping (credentials preserved)", cfg_path.display());
     } else {
-        let yaml = render_server_yaml(&gen_secret(), &gen_secret());
+        let (psk, pinned) = env_or_gen_secret();
+        let yaml = render_server_yaml(&psk, &gen_secret());
         write_private(&cfg_path, yaml.as_bytes())?;
-        println!("generated {} (PSK/JWT bootstrap, 0600)", cfg_path.display());
+        println!(
+            "generated {} ({}, 0600)",
+            cfg_path.display(),
+            if pinned { "PSK pinned from MEDIASERVO_PSK, JWT generated" } else { "PSK/JWT bootstrap" }
+        );
     }
 
     // 2. Empty registry templates (admin-plane C33; written only per missing file)
@@ -1754,5 +1786,67 @@ mod tests {
         assert!(v.contains("merged 3 manual env entries"), "N>0 variant: {v}");
         let l = pit160_note(2, 1);
         assert!(l.contains("additionally 1 entries"), "unmerged entries must report a count: {l}");
+    }
+}
+
+#[cfg(test)]
+mod psk_bootstrap_tests {
+    use super::*;
+
+    // Env-mutating assertions live in ONE test fn so they stay serial (env is
+    // process-global; edition-2024 set_var is unsafe -- precedent: tests/integration_test.rs).
+    #[test]
+    fn psk_bootstrap_states_and_first_writer_wins() {
+        // 1) legal value -> used verbatim
+        let legal = "smoke-psk-abcdef-0123456789";
+        unsafe { std::env::set_var("MEDIASERVO_PSK", legal) };
+        let (v, from_env) = env_or_gen_secret();
+        assert!(from_env, "legal value must be used");
+        assert_eq!(v, legal);
+
+        // 2) illegal charset (quotes/spaces) -> generated, not the input
+        let bad = "bad value \" with quotes";
+        unsafe { std::env::set_var("MEDIASERVO_PSK", bad) };
+        let (v, from_env) = env_or_gen_secret();
+        assert!(!from_env, "charset-invalid value must be rejected");
+        assert_ne!(v, bad);
+        assert_eq!(v.len(), 64, "generated secret is uuid-doubled hex (64)");
+
+        // 3) too short -> generated
+        unsafe { std::env::set_var("MEDIASERVO_PSK", "short") };
+        let (v, from_env) = env_or_gen_secret();
+        assert!(!from_env, "short value must be rejected");
+        assert_ne!(v, "short");
+
+        // 4) blank / unset -> generated (non-empty)
+        unsafe { std::env::set_var("MEDIASERVO_PSK", "   ") };
+        let (v, from_env) = env_or_gen_secret();
+        assert!(!from_env);
+        assert!(!v.is_empty());
+        unsafe { std::env::remove_var("MEDIASERVO_PSK") };
+        let (v, from_env) = env_or_gen_secret();
+        assert!(!from_env);
+        assert!(!v.is_empty());
+
+        // 5) init end-to-end: pinned value lands in server.yaml; a second init
+        //    with a DIFFERENT env leaves it untouched (first-writer-wins).
+        let dir = std::env::temp_dir().join("psk-init-bootstrap-test");
+        let _ = std::fs::remove_dir_all(&dir);
+        unsafe { std::env::set_var("MEDIASERVO_PSK", "pinned-psk-0123456789abcdef") };
+        init_instance(&dir).expect("init (pinned) failed");
+        let yaml = std::fs::read_to_string(dir.join("etc/server.yaml")).unwrap();
+        assert!(
+            yaml.contains("psk: \"pinned-psk-0123456789abcdef\""),
+            "pinned psk must land in server.yaml"
+        );
+        unsafe { std::env::set_var("MEDIASERVO_PSK", "other-psk-9876543210fedcba") };
+        init_instance(&dir).expect("init (second) failed");
+        let yaml2 = std::fs::read_to_string(dir.join("etc/server.yaml")).unwrap();
+        assert!(
+            yaml2.contains("psk: \"pinned-psk-0123456789abcdef\""),
+            "first writer wins: second init must not rewrite"
+        );
+        unsafe { std::env::remove_var("MEDIASERVO_PSK") };
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
