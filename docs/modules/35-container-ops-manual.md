@@ -6,6 +6,7 @@
 > **First-time install (CentOS 8 vault repos / kernel tuning / SELinux / the
 > offline drill) is in the companion `DEPLOY-MANUAL.md`**; this manual only
 > carries the self-contained day-2 steps.
+> Applies to the image tag shipped in this folder (`msrtc-server-<tag>.tar`).
 
 ## 0. What Is in the Package
 
@@ -165,6 +166,7 @@ docker run --rm --entrypoint sh \
   -v "$PWD/backup:/backup" msrtc-server:<tag> \
   -c 'tar czf /backup/msrtc_data.tar.gz -C /data .'
 # same for the recordings volume
+# (<project> = the compose project name; default msrtc -> msrtc_data)
 
 # Graceful stop (image STOPSIGNAL SIGINT; ~1s, exit 0)
 docker compose --env-file .env stop
@@ -172,6 +174,8 @@ docker compose --env-file .env stop
 # prefer stop
 
 # Restart / recreate
+# (restart: unless-stopped is set in the compose file — after a host reboot
+#  the stack returns automatically once docker.service is enabled)
 docker compose --env-file .env restart
 docker compose --env-file .env up -d        # recreate after a config change
 ```
@@ -184,6 +188,7 @@ docker load -i msrtc-server-<new-tag>.tar
 sed -i 's/^TAG=.*/TAG=<new-tag>/' .env
 docker compose --env-file .env up -d
 curl --noproxy '*' -f http://<IP>:8080/health
+docker image prune -f               # optional: reclaim superseded image layers
 
 # Rollback: keep the previous tar -> re-pin the old TAG -> recreate (volumes untouched)
 docker load -i msrtc-server-<old-tag>.tar
@@ -228,15 +233,8 @@ docker compose --env-file .env up -d
   longer affects existing accounts).
 - **ssh**: key-only (password login disabled), user `mediaservo` (root
   disabled). Host keys + `authorized_keys` live in the etc volume (**never
-  baked into the image**). Deliver a public key:
-
-  ```bash
-  docker compose --env-file .env exec -T server sh -c \
-    'cat >> /opt/msrtc/etc/ssh/authorized_keys' < ops_id_ed25519.pub
-  docker compose --env-file .env exec server sh -c \
-    'chown mediaservo:mediaservo /opt/msrtc/etc/ssh/authorized_keys; chmod 600 /opt/msrtc/etc/ssh/authorized_keys'
-  ssh -p 2222 mediaservo@<IP>
-  ```
+  baked into the image**). Public-key delivery and login-verification steps:
+  **see DEPLOY-MANUAL.md §5** (single source — the drill-tested commands live there).
 
 ## 11. Command Cheat Card
 

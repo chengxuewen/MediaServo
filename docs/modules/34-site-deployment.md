@@ -8,6 +8,7 @@
 > cheat card) live in the companion `OPS-MANUAL.md`.**
 > Scope = the offline delivery folder (one directory); target environment =
 > restricted intranet CentOS 8 sites (no internet, no image registry).
+> Applies to the image tag shipped in this folder (`msrtc-server-<tag>.tar`).
 
 ## 0. Delivery Set and Boundaries
 
@@ -21,6 +22,7 @@ release; copying that folder IS the handover):
 | `docker-compose.yml` | production compose (single container: service + gateway + process manager) |
 | `.env.example` | four-variable contract template (copy to `.env` and fill) |
 | `DEPLOY-MANUAL.md` | this manual |
+| `OPS-MANUAL.md` | site operations manual (day-2: verify/logs/backup/upgrade/troubleshooting) |
 
 **Single-container topology**: `msrtc-server` (server + caddy + oxmgr as PID1).
 oxmgr shepherds the server/web processes; caddy serves browsers on 8080, while
@@ -166,9 +168,9 @@ see the drill in §7.
   ```bash
   # Append the ops public key into the etc volume (container path
   # /opt/msrtc/etc/ssh/authorized_keys)
-  docker compose --env-file .env exec server sh -c \
+  docker compose --env-file .env exec -T server sh -c \
     'cat >> /opt/msrtc/etc/ssh/authorized_keys' < ops_id_ed25519.pub
-  docker compose --env-file .env exec server sh -c \
+  docker compose --env-file .env exec -T server sh -c \
     'chown mediaservo:mediaservo /opt/msrtc/etc/ssh/authorized_keys; chmod 600 /opt/msrtc/etc/ssh/authorized_keys'
   ssh -p 2222 mediaservo@<IP>    # verify key login
   ```
@@ -180,10 +182,8 @@ see the drill in §7.
 ## 6. Operations
 
 ```bash
-# Backup (uses the delivered image's own tar; no internet dependency; volumes
-# are discovered by the compose project label)
-mediaservo data backup ./backup        # needs the CLI env; bare-docker below
-# Bare-docker equivalent (no CLI on site):
+# Backup (bare docker on site; uses the delivered image's own tar, no internet
+# dependency)
 docker run --rm --entrypoint sh -v msrtc_data:/data:ro \
   -v "$PWD/backup:/backup" msrtc-server:<tag> \
   -c 'tar czf /backup/msrtc_data.tar.gz -C /data .'
@@ -220,7 +220,9 @@ curl --noproxy '*' -f http://<IP>:8080/health
 
 > Acceptance = one complete offline drill record. The table below is the drill
 > run on 2026-11-18 on the dev host (Ubuntu 20.04, simulating a restricted
-> site: only the delivery tar, no external image pulls).
+> site: only the delivery tar, no external image pulls). Ports and IPs in the
+> table are drill-environment values (isolated offsets); the site uses the
+> standard ports from §2.2.
 
 | # | Action | Result |
 |---|---|---|
