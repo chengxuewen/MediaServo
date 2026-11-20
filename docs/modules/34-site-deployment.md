@@ -7,7 +7,9 @@
 > **Day-2 operations (start/verify/logs/backup/troubleshooting/upgrade/rollback/
 > cheat card) live in the companion `OPS-MANUAL.md`.**
 > Scope = the offline delivery folder (one directory); target environment =
-> restricted intranet CentOS 8 sites (no internet, no image registry).
+> restricted intranet Linux sites (no internet, no image registry) — any
+> distro with docker-ce 20.10+, the compose v2 plugin, and systemd; distro
+> specifics live in Appendix A.
 > Applies to the image tag shipped in this folder (`msrtc-server-<tag>.tar`).
 
 ## 0. Delivery Set and Boundaries
@@ -33,25 +35,22 @@ base: debian:bookworm-slim.
 tracked follow-up): rollback = re-load the old tar + re-pin `TAG` in `.env`;
 data volumes are untouched.
 
-## 1. Prerequisite: docker-ce on CentOS 8 (vault repos)
+## 1. Prerequisite: docker-ce (any mainstream Linux)
 
-CentOS 8 is EOL and `mirror.centos.org` is dead → switch to `vault.centos.org`:
+The stack ships as an offline image + compose; the host only needs:
+
+- **docker-ce 20.10+** with the **compose v2 plugin**
+- **systemd** (docker.service enabled at boot)
+- root/sudo for the install-time steps
+
+Install per your distribution — see **Appendix A** for the per-distro recipes
+(CentOS 8 vault / Rocky / Alma / RHEL / Ubuntu / Debian, incl. offline rpm/deb
+fetch). Verify after install:
 
 ```bash
-# Point the base repos at vault (EOL archive)
-sed -i 's|mirror.centos.org|vault.centos.org|g; s|^#baseurl|baseurl|g; s|^mirrorlist|#mirrorlist|g' \
-    /etc/yum.repos.d/CentOS-*.repo
-dnf install -y dnf-utils
-# docker-ce official repo (the CentOS 8 path is still served)
-dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
 systemctl enable --now docker
-docker compose version   # confirm the compose v2 plugin
+docker compose version   # must print a v2.x
 ```
-
-> If the site cannot reach download.docker.com: on an internet-connected
-  machine run `dnf download --resolve docker-ce docker-ce-cli containerd.io
-  docker-compose-plugin`, copy the rpm set over, and `dnf localinstall *.rpm`.
 
 ## 2. System Tuning
 
@@ -65,7 +64,7 @@ EOF
 sysctl --system
 ```
 
-### 2.2 firewalld Port Table
+### 2.2 Firewall Ports (firewalld — RHEL family; ufw equivalents in Appendix A)
 
 | Port | Proto | Purpose |
 |---|---|---|
@@ -82,7 +81,7 @@ firewall-cmd --permanent --add-port=2222/tcp
 firewall-cmd --reload
 ```
 
-### 2.3 SELinux
+### 2.3 SELinux (RHEL family; Ubuntu/Debian use AppArmor — usually no action)
 
 Named volumes get their labels managed by docker; enforcing mode usually just
 works. Bind mounts may need the `:z` suffix. **Do NOT blanket-disable
@@ -240,6 +239,54 @@ curl --noproxy '*' -f http://<IP>:8080/health
 **Conclusion**: the full offline chain (load → up → browser → login → backup →
 persistence → graceful stop → rollback) is green; the explicit multi-NIC
 ANNOUNCED_IP rule and the admin/ssh credential handover flows are verified.
+
+
+## Appendix A: Per-Distribution Recipes (docker-ce / firewall / LSM / offline fetch)
+
+| Distro | Install docker-ce | Firewall | LSM | Offline fetch |
+|---|---|---|---|---|
+| CentOS 8 (EOL) | vault repo fix + docker-ce repo (below) | firewalld (§2.2) | SELinux (§2.3) | `dnf download --resolve ...` -> `dnf localinstall *.rpm` |
+| Rocky / Alma 8-9 | docker-ce repo (dnf) | firewalld (§2.2) | SELinux (§2.3) | same as CentOS 8 |
+| RHEL 8-9 | docker-ce repo (dnf) | firewalld (§2.2) | SELinux (§2.3) | same |
+| Ubuntu 20.04+ | docker-ce repo (apt) | ufw | AppArmor (no action) | `apt-get download ...` -> `apt install ./*.deb` |
+| Debian 11+ | docker-ce repo (apt) | ufw / nftables | AppArmor (no action) | same as Ubuntu |
+
+**CentOS 8 vault fix** (EOL — `mirror.centos.org` is dead):
+
+```bash
+sed -i 's|mirror.centos.org|vault.centos.org|g; s|^#baseurl|baseurl|g; s|^mirrorlist|#mirrorlist|g' \
+    /etc/yum.repos.d/CentOS-*.repo
+dnf install -y dnf-utils
+dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+**RHEL / Rocky / Alma** (live repos):
+
+```bash
+dnf config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+**Ubuntu / Debian** (replace `<ubuntu|debian>` with your series):
+
+```bash
+apt-get update && apt-get install -y ca-certificates curl
+install -m 0755 -d /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/<ubuntu|debian>/gpg -o /etc/apt/keyrings/docker.asc
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+  https://download.docker.com/linux/<ubuntu|debian> $(. /etc/os-release && echo $VERSION_CODENAME) stable" \
+  > /etc/apt/sources.list.d/docker.list
+apt-get update && apt-get install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+```
+
+**Firewall equivalents** (port set from §2.2): firewalld `firewall-cmd
+--permanent --add-port=<port>/<proto>` + `--reload`; ufw `ufw allow
+<port>/<proto>`.
+
+If a recipe fails on your distro version, fall back to the official Docker
+docs for that distro (fetch them on an internet-connected machine); everything
+else in this manual is distro-neutral.
 
 ## Appendix B: Legacy UDP Range Revival (only for legacy-image rollback)
 

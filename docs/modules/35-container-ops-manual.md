@@ -3,7 +3,7 @@
 > Ships with the delivery folder. Audience: **site operations staff** — how to
 > load, configure, start, verify, operate day-to-day, troubleshoot, and
 > upgrade/rollback after receiving the package.
-> **First-time install (CentOS 8 vault repos / kernel tuning / SELinux / the
+> **First-time install (docker install / kernel tuning / LSM / the
 > offline drill) is in the companion `DEPLOY-MANUAL.md`**; this manual only
 > carries the self-contained day-2 steps.
 > Applies to the image tag shipped in this folder (`msrtc-server-<tag>.tar`).
@@ -212,18 +212,13 @@ docker compose --env-file .env up -d
 | startup log shows **"dev placeholder accounts active"** | a dev-only toggle is enabled (`MEDIASERVO_ALLOW_DEV_CREDENTIALS`) or dev accounts were mounted into the etc volume — production MUST unset it and use the admin bootstrap instead (DEPLOY-MANUAL §5) |
 | Data lost / secrets changed | are the `etc`/`recordings`/`run/logs` volumes mounted (§4)? no volumes = regenerated on every recreate |
 
-## 9. First-Install Essentials (details in DEPLOY-MANUAL.md)
+## 9. First-Install Essentials (details + per-distro recipes: DEPLOY-MANUAL §1-§2, Appendix A)
 
-- **docker-ce**: CentOS 8 is EOL — switch the base repos to `vault.centos.org`
-  first, then install `docker-ce docker-ce-cli containerd.io
-  docker-compose-plugin`.
-- **UDP kernel params**: `net.core.rmem_max=16777216`,
-  `net.core.netdev_max_backlog=5000` (`/etc/sysctl.d/99-msrtc.conf` +
-  `sysctl --system`).
-- **Firewall** (firewalld): allow 8080/tcp, 9800/tcp, 20000/udp, 2222/tcp.
-- **SELinux**: named volumes usually run fine under enforcing; on denials
-  check `ausearch -m avc -ts recent` and refine — **do not disable SELinux
-  wholesale**.
+- **docker-ce 20.10+ / compose v2 / systemd** — any mainstream distro; install
+  recipes (CentOS 8 vault / Rocky / Alma / RHEL / Ubuntu / Debian) live in
+  DEPLOY-MANUAL Appendix A.
+- **UDP kernel params, firewall ports, LSM notes** (SELinux / AppArmor): see
+  DEPLOY-MANUAL §2 (distro-neutral core) and Appendix A (distro specifics).
 
 ## 10. Credentials and Security
 
