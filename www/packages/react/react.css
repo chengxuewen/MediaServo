@@ -1,0 +1,385 @@
+/* @mediaservo/react component styles (talk-app W0 / D3).
+ *
+ * Contract: import '@mediaservo/ui/tokens.css' FIRST, then this file.
+ * Tokens-only: every color / size / radius / shadow / font comes from --ms-*
+ * (see @mediaservo/ui/TOKENS.md). Raw values are banned in components —
+ * the packages/ui check-tokens guard verifies references resolve.
+ * Class prefix: msr- (BEM-lite). Container theming: override --ms-* on any scope.
+ */
+
+/* ---------------- Button ---------------- */
+.msr-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--ms-space-2);
+  height: var(--ms-control-h-md);
+  padding: 0 var(--ms-space-4);
+  font: inherit;
+  font-size: var(--ms-font-size-sm);
+  font-weight: var(--ms-font-weight-medium);
+  border-radius: var(--ms-radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: var(--ms-transition-fast);
+}
+
+.msr-btn:focus-visible {
+  outline: var(--ms-focus-ring-width) solid var(--ms-focus-ring-color);
+  outline-offset: 1px;
+}
+
+.msr-btn--sm {
+  height: var(--ms-control-h-sm);
+  padding: 0 var(--ms-space-3);
+  font-size: var(--ms-font-size-xs);
+}
+
+.msr-btn--primary {
+  background: var(--ms-color-primary);
+  color: var(--ms-color-text-inverse);
+}
+.msr-btn--primary:hover:not([aria-disabled='true']) {
+  background: var(--ms-color-primary-hover);
+}
+
+.msr-btn--secondary {
+  background: var(--ms-color-surface);
+  color: var(--ms-color-text);
+  border-color: var(--ms-color-border-strong);
+}
+.msr-btn--secondary:hover:not([aria-disabled='true']) {
+  background: var(--ms-color-surface-hover);
+}
+
+.msr-btn--danger {
+  background: var(--ms-color-danger);
+  color: var(--ms-color-text-inverse);
+}
+.msr-btn--danger:hover:not([aria-disabled='true']) {
+  background: var(--ms-color-danger);
+  filter: brightness(0.9);
+}
+
+.msr-btn--ghost {
+  background: transparent;
+  color: var(--ms-color-primary);
+}
+.msr-btn--ghost:hover:not([aria-disabled='true']) {
+  background: var(--ms-color-primary-soft);
+}
+
+/* guarded state: visible, focusable (reason is discoverable), not clickable */
+.msr-btn[aria-disabled='true'] {
+  cursor: not-allowed;
+  color: var(--ms-color-text-muted);
+  background: var(--ms-color-surface-muted);
+  border-color: var(--ms-color-border);
+}
+
+/* ---------------- Guard (disabled-with-reason host) ---------------- */
+.msr-guard {
+  position: relative;
+  display: inline-flex;
+  cursor: not-allowed;
+}
+
+.msr-guard::after {
+  content: attr(data-reason);
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + var(--ms-space-1));
+  transform: translateX(-50%);
+  max-width: 16rem;
+  padding: var(--ms-space-1) var(--ms-space-2);
+  background: var(--ms-color-text);
+  color: var(--ms-color-text-inverse);
+  font-size: var(--ms-font-size-xs);
+  border-radius: var(--ms-radius-sm);
+  white-space: normal;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ms-motion-duration-fast) var(--ms-motion-easing);
+  z-index: 10;
+}
+
+.msr-guard:hover::after,
+.msr-guard:focus-within::after,
+.msr-guard:focus::after {
+  opacity: 1;
+}
+
+/* ---------------- StatusGlyph (tone = hue, shape = form; never hue alone) ------- */
+.msr-glyph {
+  display: inline-block;
+  width: var(--ms-icon-size-sm);
+  height: var(--ms-icon-size-sm);
+  flex: none;
+  vertical-align: middle;
+}
+
+.msr-glyph--ok { color: var(--ms-color-success); }
+.msr-glyph--warn,
+.msr-glyph--unknown { color: var(--ms-color-warning); }
+.msr-glyph--danger { color: var(--ms-color-danger); }
+.msr-glyph--off { color: var(--ms-color-text-muted); }
+
+.msr-glyph--dot {
+  border-radius: var(--ms-radius-full);
+  background: currentColor;
+}
+
+.msr-glyph--ring {
+  border-radius: var(--ms-radius-full);
+  border: 2px solid currentColor;
+}
+
+/* triangle (alert form): pure CSS, no icon font/char */
+.msr-glyph--triangle {
+  width: calc(var(--ms-icon-size-sm) + 2px);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  background: currentColor;
+}
+
+/* seg: queue-depth bars (2 filled + 1 hollow), rendered as child <i> bars */
+.msr-glyph--seg {
+  width: auto;
+  display: inline-flex;
+  gap: 2px;
+  align-items: flex-end;
+  height: var(--ms-icon-size-sm);
+}
+.msr-glyph--seg i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  background: currentColor;
+}
+.msr-glyph--seg i.is-hollow {
+  background: transparent;
+  border: 1px solid currentColor;
+  box-sizing: border-box;
+}
+
+/* ---------------- Field / Input / Form ---------------- */
+.msr-field {
+  display: grid;
+  gap: var(--ms-space-1);
+}
+
+.msr-label {
+  font-size: var(--ms-font-size-sm);
+  font-weight: var(--ms-font-weight-medium);
+  color: var(--ms-color-text-secondary);
+}
+
+.msr-input {
+  height: var(--ms-control-h-md);
+  padding: 0 var(--ms-space-3);
+  font: inherit;
+  font-size: var(--ms-font-size-sm);
+  color: var(--ms-color-text);
+  background: var(--ms-color-surface);
+  border: 1px solid var(--ms-color-border-strong);
+  border-radius: var(--ms-radius-sm);
+}
+
+.msr-input::placeholder { color: var(--ms-color-text-muted); }
+
+.msr-input:focus-visible {
+  outline: var(--ms-focus-ring-width) solid var(--ms-focus-ring-color);
+  outline-offset: 0;
+}
+
+.msr-input[aria-invalid='true'] { border-color: var(--ms-color-danger); }
+
+.msr-input--sm { height: var(--ms-control-h-sm); font-size: var(--ms-font-size-xs); }
+
+.msr-input--mono { font-family: var(--ms-font-family-mono); }
+
+.msr-hint {
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-muted);
+}
+
+.msr-error {
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-danger);
+}
+
+.msr-form {
+  display: grid;
+  gap: var(--ms-space-4);
+}
+
+/* ---------------- Table ---------------- */
+.msr-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--ms-font-size-sm);
+  background: var(--ms-color-surface);
+  border: 1px solid var(--ms-color-border);
+}
+
+.msr-table th {
+  text-align: left;
+  font-size: var(--ms-font-size-xs);
+  font-weight: var(--ms-font-weight-semibold);
+  color: var(--ms-color-text-muted);
+  padding: var(--ms-space-2) var(--ms-space-3);
+  background: var(--ms-color-surface-subtle);
+  border-bottom: 1px solid var(--ms-color-border);
+  white-space: nowrap;
+}
+
+.msr-table td {
+  padding: var(--ms-space-2) var(--ms-space-3);
+  border-bottom: 1px solid var(--ms-color-border-subtle);
+  color: var(--ms-color-text);
+}
+
+.msr-table tbody tr:last-child td { border-bottom: none; }
+.msr-table tbody tr:hover td { background: var(--ms-color-surface-hover); }
+
+.msr-table--dense th,
+.msr-table--dense td { padding: var(--ms-space-1) var(--ms-space-2); }
+
+/* ---------------- Combobox (custom; native <select> banned by design rules) ---- */
+.msr-cb {
+  position: relative;
+  display: inline-block;
+}
+
+.msr-cb-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.msr-cb-input {
+  width: 100%;
+  padding-right: calc(var(--ms-control-h-md) / 2);
+}
+
+.msr-cb-toggle {
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--ms-control-h-md);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+}
+
+.msr-cb-toggle:focus-visible {
+  outline: none;
+}
+
+.msr-cb-box:focus-within .msr-cb-input {
+  outline: var(--ms-focus-ring-width) solid var(--ms-focus-ring-color);
+}
+
+/* caret: CSS triangle, no glyph fonts / emoji / text icons */
+.msr-cb-toggle::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -30%);
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid var(--ms-color-text-muted);
+}
+
+.msr-cb-list {
+  position: absolute;
+  top: calc(100% + var(--ms-space-1));
+  left: 0;
+  right: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: var(--ms-color-surface);
+  border: 1px solid var(--ms-color-border-strong);
+  border-radius: var(--ms-radius-sm);
+  box-shadow: var(--ms-shadow-2);
+  max-height: calc(var(--ms-control-h-md) * 6);
+  overflow-y: auto;
+  z-index: 20;
+}
+
+.msr-cb-option {
+  padding: var(--ms-space-2) var(--ms-space-3);
+  font-size: var(--ms-font-size-sm);
+  color: var(--ms-color-text);
+  cursor: pointer;
+}
+
+.msr-cb-option.is-active {
+  background: var(--ms-color-primary-soft);
+}
+
+.msr-cb-option[aria-selected='true'] {
+  font-weight: var(--ms-font-weight-semibold);
+}
+
+.msr-cb-empty {
+  padding: var(--ms-space-2) var(--ms-space-3);
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-muted);
+}
+
+/* ---------------- Modal / Confirm (PIT-269: stack arbitration, focus trap) ---- */
+.msr-scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--ms-scrim);
+  display: grid;
+  place-items: center;
+  padding: var(--ms-space-6);
+  z-index: 1000;
+}
+
+.msr-modal {
+  width: min(32rem, 100%);
+  background: var(--ms-color-surface);
+  border: 1px solid var(--ms-color-border);
+  border-radius: var(--ms-radius-md);
+  box-shadow: var(--ms-shadow-3);
+}
+
+.msr-modal:focus-visible {
+  outline: none;
+}
+
+.msr-modal__head {
+  display: flex;
+  align-items: center;
+  padding: var(--ms-space-4);
+  border-bottom: 1px solid var(--ms-color-border-subtle);
+}
+
+.msr-modal__title {
+  margin: 0;
+  font-size: var(--ms-font-size-md);
+  font-weight: var(--ms-font-weight-semibold);
+  color: var(--ms-color-text);
+}
+
+.msr-modal__body {
+  padding: var(--ms-space-4);
+  font-size: var(--ms-font-size-sm);
+  color: var(--ms-color-text-secondary);
+  line-height: var(--ms-font-leading-normal);
+}
+
+.msr-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--ms-space-2);
+  padding: var(--ms-space-3) var(--ms-space-4);
+  border-top: 1px solid var(--ms-color-border-subtle);
+}

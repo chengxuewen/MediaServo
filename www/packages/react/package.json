@@ -1,0 +1,21 @@
+{
+  "name": "@mediaservo/react",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MediaServo base React components (talk-app W0 / ruling D3): Button, Input, Guard, StatusGlyph, Table, Form, Combobox, Modal, Confirm. Tokens-only (consume @mediaservo/ui), headless-friendly (D4), PIT-269 dialog discipline. Consumers: packages/shell, @mediaservo/talk-ui, admin pages.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./react.css": "./react.css"
+  },
+  "scripts": {
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "typescript": "^5.5.0"
+  }
+}
