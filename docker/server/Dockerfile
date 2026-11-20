@@ -144,7 +144,7 @@ RUN chmod 755 /usr/local/bin/server-entrypoint.sh && \
 # root runs the entrypoint (volume writes + sshd port-22 bind); the daemon is
 # privilege-dropped via setpriv at the entrypoint's exec (PID-1 signal fidelity).
 USER root
-EXPOSE 8080 9800 22 20000/udp 40000-40100/udp
+EXPOSE 8080 9800 22 20000/udp
 # R17 compound probe: caddy + routing + server in one curl; start_period=60s
 # unifies the startup budget; retries=3 (90s self-heal tolerance). oxmgr
 # liveness = PID1-death semantics (R13).
