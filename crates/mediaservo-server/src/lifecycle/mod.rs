@@ -166,31 +166,34 @@ fn cmd_init(args: &mut dyn Iterator<Item = String>) -> i32 {
     }
 }
 
-/// PSK bootstrap (psk-bootstrap-env X1=A): MEDIASERVO_PSK seeds the FIRST
-/// server.yaml write only (an existing file is skipped below -- PIT-160
-/// first-writer-wins, so the env never rotates a live deployment). The value
-/// must be non-empty and match [A-Za-z0-9_-]{16,256}: anything else (typos with
-/// quotes/spaces that would corrupt the YAML template, or weak values) is
-/// REJECTED with a loud WARN and a generated value is used instead. The WARN
-/// deliberately does not echo the value (only its length + first char).
-/// Returns (secret, from_env).
-fn env_or_gen_secret() -> (String, bool) {
+/// PSK bootstrap (psk-bootstrap-env X1=A, revised R1=A fail-fast): MEDIASERVO_PSK
+/// seeds the FIRST server.yaml write only (an existing file is skipped below -- PIT-160
+/// first-writer-wins, so the env never rotates a live deployment AND an invalid
+/// value can never break an existing volume). A non-empty value must match
+/// [A-Za-z0-9_-]{16,256}: anything else (typos with quotes/spaces, weak values)
+/// is a REFUSAL -- Err propagates out of init, the entrypoint exits, the
+/// container lands in Exited/Restarting where `docker compose ps` shows it
+/// immediately. Deployment intent violated > silent downgrade (the msrtc-dev
+/// incident). The message does not echo the value (length + first char only).
+/// Empty/blank/unset keeps the random-generation path (feature simply unused).
+/// Returns Ok((secret, from_env)).
+fn env_or_gen_secret() -> Result<(String, bool), String> {
     if let Ok(v) = std::env::var("MEDIASERVO_PSK") {
         let v = v.trim();
         let len = v.chars().count();
         let ok = (16..=256).contains(&len)
             && v.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
         if ok {
-            return (v.to_string(), true);
+            return Ok((v.to_string(), true));
         }
         if !v.is_empty() {
-            eprintln!(
-                "init: MEDIASERVO_PSK rejected (len {len}, first char {:?}): must match [A-Za-z0-9_-]{{16,256}} -- using a GENERATED value; fix .env to pin the PSK",
+            return Err(format!(
+                "MEDIASERVO_PSK invalid (len {len}, first char {:?}): must match [A-Za-z0-9_-]{{16,256}} -- refusing to start; fix .env (openssl rand -hex 32) or leave it empty/unset for a random PSK",
                 v.chars().next()
-            );
+            ));
         }
     }
-    (gen_secret(), false)
+    Ok((gen_secret(), false))
 }
 
 fn init_instance(dir: &Path) -> Result<(), String> {
@@ -209,7 +212,7 @@ fn init_instance(dir: &Path) -> Result<(), String> {
     if cfg_path.exists() {
         eprintln!("init: {} already exists, skipping (credentials preserved)", cfg_path.display());
     } else {
-        let (psk, pinned) = env_or_gen_secret();
+        let (psk, pinned) = env_or_gen_secret()?;
         let yaml = render_server_yaml(&psk, &gen_secret());
         write_private(&cfg_path, yaml.as_bytes())?;
         println!(
@@ -1800,33 +1803,38 @@ mod psk_bootstrap_tests {
         // 1) legal value -> used verbatim
         let legal = "smoke-psk-abcdef-0123456789";
         unsafe { std::env::set_var("MEDIASERVO_PSK", legal) };
-        let (v, from_env) = env_or_gen_secret();
+        let (v, from_env) = env_or_gen_secret().expect("legal value");
         assert!(from_env, "legal value must be used");
         assert_eq!(v, legal);
 
-        // 2) illegal charset (quotes/spaces) -> generated, not the input
-        let bad = "bad value \" with quotes";
-        unsafe { std::env::set_var("MEDIASERVO_PSK", bad) };
-        let (v, from_env) = env_or_gen_secret();
-        assert!(!from_env, "charset-invalid value must be rejected");
-        assert_ne!(v, bad);
-        assert_eq!(v.len(), 64, "generated secret is uuid-doubled hex (64)");
+        // 2) illegal charset (quotes/spaces) -> REFUSAL (R1 fail-fast)
+        unsafe { std::env::set_var("MEDIASERVO_PSK", "bad value \" with quotes") };
+        let e = env_or_gen_secret().expect_err("charset-invalid must refuse");
+        assert!(e.contains("MEDIASERVO_PSK invalid"), "err: {e}");
 
-        // 3) too short -> generated
+        // 3) too short -> REFUSAL (R1 fail-fast)
         unsafe { std::env::set_var("MEDIASERVO_PSK", "short") };
-        let (v, from_env) = env_or_gen_secret();
-        assert!(!from_env, "short value must be rejected");
-        assert_ne!(v, "short");
+        let e = env_or_gen_secret().expect_err("short must refuse");
+        assert!(e.contains("len 5"), "err: {e}");
 
-        // 4) blank / unset -> generated (non-empty)
+        // 4) blank / unset -> generated (non-empty) — feature simply unused
         unsafe { std::env::set_var("MEDIASERVO_PSK", "   ") };
-        let (v, from_env) = env_or_gen_secret();
+        let (v, from_env) = env_or_gen_secret().expect("blank");
         assert!(!from_env);
-        assert!(!v.is_empty());
+        assert_eq!(v.len(), 64);
         unsafe { std::env::remove_var("MEDIASERVO_PSK") };
-        let (v, from_env) = env_or_gen_secret();
+        let (v, from_env) = env_or_gen_secret().expect("unset");
         assert!(!from_env);
         assert!(!v.is_empty());
+
+        // 5) fresh volume + invalid env -> init_instance REFUSES end-to-end
+        let dir_bad = std::env::temp_dir().join("psk-init-refuse-test");
+        let _ = std::fs::remove_dir_all(&dir_bad);
+        unsafe { std::env::set_var("MEDIASERVO_PSK", "short") };
+        let e = init_instance(&dir_bad).expect_err("init must refuse on invalid psk");
+        assert!(e.contains("MEDIASERVO_PSK invalid"), "err: {e}");
+        assert!(!dir_bad.join("etc/server.yaml").exists(), "no half-written config");
+        let _ = std::fs::remove_dir_all(&dir_bad);
 
         // 5) init end-to-end: pinned value lands in server.yaml; a second init
         //    with a DIFFERENT env leaves it untouched (first-writer-wins).
@@ -1841,6 +1849,9 @@ mod psk_bootstrap_tests {
         );
         unsafe { std::env::set_var("MEDIASERVO_PSK", "other-psk-9876543210fedcba") };
         init_instance(&dir).expect("init (second) failed");
+        // existing volume + INVALID env -> skip path wins, no refusal (env not consumed)
+        unsafe { std::env::set_var("MEDIASERVO_PSK", "short") };
+        init_instance(&dir).expect("existing volume must ignore invalid env");
         let yaml2 = std::fs::read_to_string(dir.join("etc/server.yaml")).unwrap();
         assert!(
             yaml2.contains("psk: \"pinned-psk-0123456789abcdef\""),

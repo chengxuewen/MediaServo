@@ -200,8 +200,8 @@ a no-op:
 - **Pin it (recommended for fleets)**: set `MEDIASERVO_PSK` in `.env` (generate
   with `openssl rand -hex 32`). A valid value (letters/digits/`-`/`_`, 16–256
   chars) is written into the volume at first boot instead of a random one; an
-  invalid value is REJECTED with a loud init WARN and a random value is used
-  (fix `.env`, then `down -v && up -d` to retry). First-boot-only: an existing
+  invalid value REFUSES TO START — the container lands in Exited with the init
+  error in the logs (fix `.env`, then `up -d` again). First-boot-only: an existing
   volume is never rotated by env changes. KEEP the line after handover — it is
   the recovery seed; protect `.env` (`chmod 600`).
 - **Migrate / pre-seed (zero-code alternative)**: before the first `up`, place

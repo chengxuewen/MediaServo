@@ -52,7 +52,11 @@ SFU_PORT=$SFU_PORT
 MEDIASERVO_PSK=$PIN
 EOF
 COMPOSE=(docker compose -p "$PROJECT" -f docker-compose.yml --env-file "$ENVF")
-cleanup() { "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true; rm -f "$ENVF"; }
+cleanup() {
+    "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+    [ -n "${BADCOMPOSE:-}" ] && "${BADCOMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
+    rm -f "$ENVF" "${BADENV:-}"
+}
 trap cleanup EXIT
 
 docker image inspect "$IMAGE" >/dev/null 2>&1 || { echo "FAIL: image $IMAGE absent — build it first (docker/server/Dockerfile)"; exit 1; }
@@ -147,6 +151,21 @@ note "graceful stop (STOPSIGNAL SIGINT baked)"
 docker stop "$CID" >/dev/null 2>&1
 EC=$(docker inspect "$CID" --format '{{.State.ExitCode}}')
 [ "$EC" = 0 ] && ok "docker stop graceful exit = 0" || bad "stop exit = $EC"
+
+note "invalid MEDIASERVO_PSK refuses to start (R1 fail-fast)"
+BADENV="$(mktemp)"
+sed "s/^MEDIASERVO_PSK=.*/MEDIASERVO_PSK=short/" "$ENVF" > "$BADENV"
+BADCOMPOSE=(docker compose -p "$PROJECT-bad" -f docker-compose.yml --env-file "$BADENV")
+"${BADCOMPOSE[@]}" up -d >/dev/null 2>&1
+sleep 6
+BCID="$("${BADCOMPOSE[@]}" ps -q server)"
+if [ -n "$BCID" ] && docker logs "$BCID" 2>&1 | grep -q "MEDIASERVO_PSK invalid"; then
+    ok "invalid PSK -> init refusal in logs (fail-fast)"
+else
+    bad "invalid PSK did NOT refuse (no init error in logs)"
+fi
+"${BADCOMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1
+rm -f "$BADENV"
 
 echo
 if [ "$FAIL" = 0 ]; then

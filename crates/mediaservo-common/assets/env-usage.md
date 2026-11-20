@@ -7,7 +7,7 @@ Environment variables (deployment env master table - the release shell and the s
       RUST_LOG=mediaservo_server=info      log level
       WEAKNET_ADMIN_PASS=...                 weaknet panel write credential (credential never templated, PIT-160 channel)
   [C] process-start env (injected via systemd/oxmgr/shell, any of them):
-      MEDIASERVO_PSK                       signaling shared secret (bootstrap: a valid env value seeds the FIRST server.yaml write, then the volume owns it; fallback for native runs)
+      MEDIASERVO_PSK                       signaling shared secret (bootstrap: a valid env value seeds the FIRST server.yaml write, then the volume owns it; invalid value = boot refusal; fallback for native runs)
       MEDIASERVO_SFU_ANNOUNCED_IP          ICE announced address (required with multi-NIC / container NAT)
       MEDIASERVO_SFU_PORT                  fixed media port (default ${MEDIASERVO_SFU_PORT})
       MEDIASERVO_WEB_PORT                  set when the web entrypoint must yield port 8080

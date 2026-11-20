@@ -40,7 +40,7 @@ MS_GID="$(id -g mediaservo)"
 [ -x "$OXMGR" ] || { echo "FATAL: $OXMGR missing (R14 deploy leg did not land oxmgr)" >&2; exit 1; }
 
 # ── 1. init (root writes the etc volume; idempotent — existing files skipped) ──
-"$SERVER" init "$TREE"
+"$SERVER" init "$TREE" || { echo "FATAL: init failed (see logs above) — refusing to start" >&2; exit 1; }
 # Keep the bootstrap password out of the long-lived daemon/app environment.
 unset MEDIASERVO_ADMIN_PASSWORD MEDIASERVO_PSK
 

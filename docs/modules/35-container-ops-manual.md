@@ -78,7 +78,7 @@ docker compose --env-file .env ps
 | Variable | Default | Meaning |
 |---|---|---|
 | `MEDIASERVO_BRAND` | `msrtc` | tree prefix `/opt/<brand>` + volume paths; changing it requires a matching image |
-| `MEDIASERVO_PSK` | _(unset)_ | signaling PSK seed — FIRST-boot-only; a valid value ([A-Za-z0-9_-]{16,256}) is written into the etc volume instead of a random one. Keep after handover (recovery seed); details: DEPLOY-MANUAL §5 |
+| `MEDIASERVO_PSK` | _(unset)_ | signaling PSK seed — FIRST-boot-only; a valid value ([A-Za-z0-9_-]{16,256}) is written into the etc volume instead of a random one; an INVALID value refuses to start (container Exited, init error in logs). Keep after handover (recovery seed); details: DEPLOY-MANUAL §5 |
 | `MEM_LIMIT` | `512m` | container memory limit (memory only; CPU unlimited); raise per §4 for larger loads |
 | `RUST_LOG` | `info` | log level |
 | `WEB_PORT`/`AGENT_PORT`/`SFU_PORT` | 8080/9800/20000 | shift the **host-side** ports only; container targets are fixed |
