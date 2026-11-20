@@ -172,6 +172,13 @@ see the drill in §7.
   ssh -p 2222 mediaservo@<IP>    # verify key login
   ```
 
+  Optional hardening — restrict the ssh port to the ops subnet (examples):
+
+  ```bash
+  firewall-cmd --permanent --add-rich-rule='rule family=ipv4 source address=<ops-cidr> port port=2222 protocol=tcp accept'
+  ufw allow from <ops-cidr> to any port 2222 proto tcp
+  ```
+
   > The account shadow field is `*` (password disabled but account usable) —
     the `!` locked state left by `useradd` makes sshd with `UsePAM no` reject
     pubkey auth; the image fixes the shadow field (`usermod -p '*'`).

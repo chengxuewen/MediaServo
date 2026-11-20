@@ -37,6 +37,10 @@ docker compose version                # needs the compose v2 plugin
   2222/tcp (ssh maintenance, changeable). First-time install: see DEPLOY-MANUAL.
 - **Resources**: `mem_limit` defaults to 512m (measured at the standard tier,
   see §4); reserve disk according to recording volume.
+- **Time sync**: keep `chrony` / `systemd-timesyncd` healthy — JWT and TURN
+  credentials are time-bound; clock skew breaks logins and media relay.
+- **Disk**: run `df -h` before install; plan >= 20 GiB for the data volume
+  plus recordings growth (recordings dominate — estimate from camera count).
 
 ## 2. Quick Start (5 Steps)
 
@@ -159,6 +163,10 @@ docker inspect <container> --format '{{.State.Health.Status}}'
 # they survive recreates — post-mortem evidence stays after upgrades/rollbacks)
 docker compose --env-file .env exec server sh -c 'tail -100 /opt/msrtc/run/logs/*.out.log'
 
+# Log rotation (the container ships no cron — schedule from the HOST, e.g. daily):
+#   0 3 * * * docker compose --env-file .env exec server sh -c \
+#     'for f in /opt/msrtc/run/logs/*.out.log; do truncate -s 0 "$f"; done'
+
 # Backup (pack the two volumes; uses the image's own tar, no internet needed)
 docker run --rm --entrypoint sh \
   -v <project>_data:/data:ro \
@@ -197,6 +205,21 @@ docker compose --env-file .env up -d
 # named volume)
 ```
 
+### 7.1 Emergency Volume Restore (data volume)
+
+Restores accounts/secrets from a `msrtc_data.tar.gz` backup (created in §6):
+
+```bash
+docker compose --env-file .env down            # stop the stack first
+docker run --rm --entrypoint sh \
+  -v msrtc_data:/data -v "$PWD/backup:/backup" msrtc-server:<tag> \
+  -c 'tar xzf /backup/msrtc_data.tar.gz -C /data'
+docker compose --env-file .env up -d           # start, then verify an admin login
+```
+
+> Restoring rolls accounts AND secrets (PSK/JWT) back to the backup moment:
+> devices re-enrolled or passwords rotated after that moment are lost.
+
 ## 8. Troubleshooting
 
 | Symptom | Where to look |
@@ -224,7 +247,9 @@ docker compose --env-file .env up -d
 
 - **admin password**: `MEDIASERVO_ADMIN_PASSWORD` in `.env` only bootstraps
   the first boot; rotate it via the admin UI after handover (the old value no
-  longer affects existing accounts).
+  longer affects existing accounts). After handover, remove or comment out
+  `MEDIASERVO_ADMIN_PASSWORD` in `.env` — it serves no purpose past first
+  boot and there is no reason to keep the plaintext around.
 - **ssh**: key-only (password login disabled), user `mediaservo` (root
   disabled). Host keys + `authorized_keys` live in the etc volume (**never
   baked into the image**). Public-key delivery and login-verification steps:
