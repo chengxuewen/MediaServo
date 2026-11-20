@@ -1,16 +1,25 @@
 {
   "name": "@mediaservo/ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "MediaServo design system - shared design tokens (CSS custom properties) for admin/voice. agent-subagent-layer B8 (closes O-7). Values extracted from the existing admin styles; admin migration to consume them is B8 part 2.",
+  "description": "MediaServo design system - shared design tokens (CSS custom properties). v2 (talk-app T1/L4): two-layer palette->semantic, prototype-mapped default theme + dark preset ([data-theme=dark]), themes/ exported, public contract in TOKENS.md. Lineage: B8 (O-7) -> design-multi-style B3a/B3b.",
   "exports": {
-    "./tokens.css": "./tokens.css"
+    "./tokens.css": "./tokens.css",
+    "./themes/fluent.css": "./themes/fluent.css",
+    "./themes/material.css": "./themes/material.css"
   },
   "files": [
-    "tokens.css"
+    "tokens.css",
+    "themes/fluent.css",
+    "themes/material.css",
+    "TOKENS.md"
   ],
   "sideEffects": [
     "*.css"
-  ]
+  ],
+  "scripts": {
+    "check": "node scripts/check-tokens.mjs",
+    "lint": "node scripts/check-tokens.mjs"
+  }
 }

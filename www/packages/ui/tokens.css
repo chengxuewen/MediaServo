@@ -1,48 +1,88 @@
-/* MediaServo design tokens (@mediaservo/ui) — agent-subagent-layer B8 (O-7).
+/* MediaServo design tokens (@mediaservo/ui) — v2 (talk-app T1, ruling L4).
  *
- * Single source of the shared design language. Values are extracted from the
- * existing admin styles (apps/admin/src), NOT invented: this layer names what
- * is already there so the scattered CSS can converge on it (B8 part 2).
+ * Lineage: B8 (O-7, extracted from admin) → design-multi-style B3a (additive
+ * style-system dimensions) → T1 v2: two-layer palette→semantic structure;
+ * default theme values now mapped from the portal-unified prototype
+ * (docs/ui/prototypes/portal-unified.html :root + [data-theme] blocks);
+ * dark preset via :root[data-theme="dark"] (default stays LIGHT per Q19).
  *
- * Consumption (B8 part 2): `import "@mediaservo/ui/tokens.css";` once at the
- * app entry, then reference the custom properties below instead of raw hex.
- * Naming: --ms-<category>-<role>[-<variant>]. Categories: color, font, space,
- * radius, shadow, size. Do not add a token without a real consumer need.
+ * Contract (see TOKENS.md — the public overridable API):
+ *   1. Components consume SEMANTIC tokens only (--ms-color-*, --ms-space-*,
+ *      …) — never palette hex and never raw values.
+ *   2. THEMES override semantic tokens (precedent: themes/fluent.css,
+ *      themes/material.css — design-multi-style B3b true sources, untouched).
+ *   3. Consumers may scope overrides to any container
+ *      (.my-scope { --ms-color-primary: … }) — runtime theming, no rebuild.
+ *   4. Palette layer (--ms-palette-*) = raw hues shared with the prototype;
+ *      semantic light/dark values reference it where the prototype does.
+ *
+ * Deferred (documented, not forgotten): layout size tokens (--ms-size-*)
+ * keep admin's current values until the B-shell batch restyles the shell
+ * (prototype --nav-w 230px / --top-h 54px land there, not here); *-ink
+ * (text-on-tint) and --ms-color-info are candidates awaiting a real consumer.
  */
 
 :root {
-  /* ---- color: brand ---- */
-  --ms-color-primary: #4361ee;        /* accent / active nav / links */
-  --ms-color-primary-hover: #3651d4;  /* primary pressed/hover */
-  --ms-color-primary-soft: #eef1ff;   /* accent-tinted surface (active row) */
+  /* ---- palette (prototype shared :root — raw hues, not for direct use) ---- */
+  --ms-palette-blue: #4361ee;
+  --ms-palette-blue-hi: #3651d4;              /* pressed/ink on light */
+  --ms-palette-blue-ink: #8ea3f9;             /* lighter accent for dark surfaces */
+  --ms-palette-blue-tint: rgba(67, 97, 238, 0.16);
+  --ms-palette-green: #2fbf71;
+  --ms-palette-green-ink: #45d18a;
+  --ms-palette-green-tint: rgba(47, 191, 113, 0.14);
+  --ms-palette-amber: #f5a524;
+  --ms-palette-amber-ink: #f5a524;
+  --ms-palette-amber-tint: rgba(245, 165, 36, 0.14);
+  --ms-palette-red: #ff5a5f;
+  --ms-palette-red-ink: #ff8a8d;
+  --ms-palette-red-tint: rgba(255, 90, 95, 0.16);
+  --ms-palette-cyan: #22d3ee;
+  --ms-palette-violet: #a78bfa;
+  --ms-palette-video-bg: #1c2740;
+  --ms-palette-video-ink: #e7ecf5;
+  --ms-palette-video-ok: #7ee2a8;
+  --ms-palette-video-warn: #ffd9a0;
+  --ms-palette-video-danger: #ffb4b4;
+
+  /* ---- color: brand (semantic; light defaults = prototype light mapping) ---- */
+  --ms-color-primary: var(--ms-palette-blue);
+  --ms-color-primary-hover: var(--ms-palette-blue-hi);
+  --ms-color-primary-soft: #eef1ff;           /* prototype light --accent-tint */
   --ms-color-primary-soft-border: #d8deff;
 
-  /* ---- color: semantic ---- */
-  --ms-color-danger: #e74c3c;         /* errors, destructive actions */
-  --ms-color-success: #27ae60;        /* online / healthy / confirm */
-  --ms-color-warning: #e67e22;        /* degraded / caution */
+  /* ---- color: semantic states ---- */
+  --ms-color-danger: #e5484d;                 /* prototype light --danger */
+  --ms-color-danger-soft: #fdecec;
+  --ms-color-success: #1f9d55;                /* prototype light --ok */
+  --ms-color-success-soft: #e6f7ee;
+  --ms-color-warning: #c97a00;                /* prototype light --warn */
+  --ms-color-warning-soft: #fdf3e2;
 
   /* ---- color: text ---- */
-  --ms-color-text: #1a1a2e;           /* primary text / dark header bg */
-  --ms-color-text-secondary: #555;    /* body secondary text (mid tone) */
-  --ms-color-text-tertiary: #333;     /* headings on light (name is historical: usage is heading tone, darker by design -- B3a audit) */
-  --ms-color-text-muted: #888;        /* hints, placeholders, meta */
-  --ms-color-text-faint: #aaa;        /* disabled / faint */
-  --ms-color-text-inverse: #fff;      /* on dark/primary surfaces */
+  --ms-color-text: #141821;                   /* prototype --tx1 */
+  --ms-color-text-secondary: #4a5364;         /* --tx2 */
+  --ms-color-text-tertiary: #646e82;          /* --tx3 (name historical: mid tone) */
+  --ms-color-text-muted: #9aa3b2;             /* --txdis */
+  --ms-color-text-faint: #9aa3b2;             /* alias of muted (prototype has 4 tiers) */
+  --ms-color-text-inverse: #ffffff;           /* --txinv */
 
-  /* ---- color: background ---- */
-  --ms-color-bg: #f0f2f5;             /* page background */
-  --ms-color-surface: #fff;           /* cards, panels, sidebar */
-  --ms-color-surface-subtle: #f8f9fa; /* subtle raised surface */
-  --ms-color-surface-hover: #f5f5f5;  /* hover row / nav */
-  --ms-color-surface-muted: #f0f0f0;  /* muted fill / tracks */
+  /* ---- color: background / surfaces ---- */
+  --ms-color-bg: #f2f4f8;                     /* prototype --bg */
+  --ms-color-surface: #ffffff;                /* --surface */
+  --ms-color-surface-subtle: #ffffff;         /* --raised (equals surface in light; splits in dark) */
+  --ms-color-surface-hover: #f1f4f9;          /* --hover */
+  --ms-color-surface-muted: #e9edf3;          /* --sunken */
 
   /* ---- color: border ---- */
-  --ms-color-border: #ddd;            /* default input/card border */
-  --ms-color-border-subtle: #e8e8e8;  /* panel dividers, sidebar edge */
+  --ms-color-border: #e4e8ef;                 /* prototype --bd */
+  --ms-color-border-subtle: #e4e8ef;          /* same source; kept for call-site nuance */
+  --ms-color-border-strong: #b9c1ce;          /* --bd2 */
+  --ms-color-border-interactive: var(--ms-color-primary);
 
   /* ---- font ---- */
-  --ms-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --ms-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', Roboto, Arial, sans-serif;
+  --ms-font-family-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', 'Roboto Mono', Menlo, Consolas, monospace;
   --ms-font-size-xs: 0.75rem;
   --ms-font-size-sm: 0.85rem;
   --ms-font-size-base: 0.9rem;
@@ -51,7 +91,7 @@
   --ms-font-weight-medium: 500;
   --ms-font-weight-semibold: 600;
 
-  /* ---- space (rem scale already in use) ---- */
+  /* ---- space ---- */
   --ms-space-1: 0.25rem;
   --ms-space-2: 0.5rem;
   --ms-space-3: 0.75rem;
@@ -60,24 +100,24 @@
   --ms-space-6: 1.5rem;
 
   /* ---- radius ---- */
-  --ms-radius-sm: 4px;    /* buttons, inputs, small chips */
-  --ms-radius-md: 8px;    /* cards, modals, panels */
-  --ms-radius-lg: 10px;   /* large surfaces */
-  --ms-radius-full: 50%;  /* avatars, dots */
+  --ms-radius-sm: 4px;
+  --ms-radius-md: 8px;
+  --ms-radius-lg: 10px;
+  --ms-radius-full: 50%;
+  --ms-radius-xl: 16px;                       /* B3a */
 
-  /* ---- size (layout constants already in use) ---- */
+  /* ---- size (layout constants — admin's current shell; B-shell revisits) ---- */
   --ms-size-header-h: 48px;
   --ms-size-sidebar-w: 200px;
 
   /* ---- motion ---- */
   --ms-transition-fast: all 0.15s;
 
-/* Style-system dimensions (design-multi-style B3a; additive-only). Reserved
-   for themes/ (B3b/c) -- this note stands in lieu of a base consumer. */
+  /* ---- style-system dimensions (design-multi-style B3a; additive-only) ---- */
   --ms-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.08);
   --ms-shadow-2: 0 2px 8px rgba(0, 0, 0, 0.12);
   --ms-shadow-3: 0 8px 24px rgba(0, 0, 0, 0.16);
-  --ms-focus-ring-color: var(--ms-color-primary);
+  --ms-focus-ring-color: #3651d4;             /* prototype light --focus */
   --ms-focus-ring-width: 2px;
   --ms-motion-duration-fast: 0.15s;
   --ms-motion-duration-base: 0.25s;
@@ -88,13 +128,50 @@
   --ms-icon-size-md: 18px;
   --ms-state-layer-hover: rgba(0, 0, 0, 0.08);
   --ms-state-layer-pressed: rgba(0, 0, 0, 0.12);
-  --ms-scrim: rgba(0, 0, 0, 0.4);
+  --ms-scrim: rgba(20, 24, 33, 0.45);         /* prototype light --scrim */
   --ms-layer-01: var(--ms-color-surface);
   --ms-layer-02: var(--ms-color-surface-subtle);
   --ms-layer-03: var(--ms-color-surface-muted);
-  --ms-color-border-strong: #ccc;
-  --ms-color-border-interactive: var(--ms-color-primary);
   --ms-font-leading-tight: 1.25;
   --ms-font-leading-normal: 1.45;
-  --ms-radius-xl: 16px;
+}
+
+/* ---- default theme DARK preset (prototype :root[data-theme=dark]) ---- */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --ms-color-primary: var(--ms-palette-blue);
+  --ms-color-primary-hover: var(--ms-palette-blue-ink);   /* lighter on dark */
+  --ms-color-primary-soft: var(--ms-palette-blue-tint);
+  --ms-color-primary-soft-border: #37415a;                /* prototype dark --bd2 */
+
+  --ms-color-danger: var(--ms-palette-red);
+  --ms-color-danger-soft: var(--ms-palette-red-tint);
+  --ms-color-success: var(--ms-palette-green);
+  --ms-color-success-soft: var(--ms-palette-green-tint);
+  --ms-color-warning: var(--ms-palette-amber);
+  --ms-color-warning-soft: var(--ms-palette-amber-tint);
+
+  --ms-color-text: #e7ecf5;                   /* --tx1 */
+  --ms-color-text-secondary: #a7b2c5;         /* --tx2 */
+  --ms-color-text-tertiary: #7e8ba1;         /* --tx3 */
+  --ms-color-text-muted: #4e5869;             /* --txdis */
+  --ms-color-text-faint: #4e5869;
+  --ms-color-text-inverse: #0b0e14;
+
+  --ms-color-bg: #0b0e14;
+  --ms-color-surface: #131824;
+  --ms-color-surface-subtle: #1b2230;         /* --raised (now distinct from surface) */
+  --ms-color-surface-hover: rgba(255, 255, 255, 0.05);
+  --ms-color-surface-muted: #080b11;          /* --sunken */
+
+  --ms-color-border: #242c3c;
+  --ms-color-border-subtle: #242c3c;
+  --ms-color-border-strong: #37415a;
+
+  --ms-focus-ring-color: var(--ms-palette-blue-ink);      /* prototype dark --focus */
+  --ms-state-layer-hover: rgba(255, 255, 255, 0.05);      /* prototype --hover */
+  --ms-state-layer-pressed: rgba(255, 255, 255, 0.09);    /* prototype --active */
+  --ms-scrim: rgba(4, 6, 10, 0.72);
+  /* shadows/motion/spacing/radius stay theme-shared (B3a owns the tiers) */
 }
