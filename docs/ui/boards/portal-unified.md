@@ -1,6 +1,6 @@
 # Unified baseline — MediaServo Portal (single page)
 
-> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.97 见 sidecar)**
+> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.99 见 sidecar)**
 > Carrier: `../prototypes/portal-unified.html` · Supersedes the fragmented boards for iteration.
 
 ## Why this exists (user directive 11-13)
@@ -16,10 +16,10 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.97
+version: v1.99
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
-e2e_hooks: [".nav-item", ".active", ".page", ".active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg", "#meetGrid", "#meetScrim", "#prejoinScrim", "#meetCanvas", "#meetTiles", "#meetRail", "#meetPip", "#muteChip", "#meetBar", "#mkLeave", "#holdRing", "#holdBar", "#meetExitHint", "#meetPanel", "#mpBody", "#mpTabs", "#mpBadge", "#mpChatBadge", "#meetInfo", "#meetTransScrim", "#remGrid", "#remSession", "#remTile", "#remBar", "#remTake", "#remRelease", "#remCtlState", "#remGraceMirror", "#remLive", "#remHealth", "#remEstop", "#remEstopRing", "#remReqChip", "#remHolderChip", "#remForce", "#remResumeScrim", "#remResumeName", "#remStopped", "#remPerimeter", "#remMapPanel", "#remTouch", "#remHud", "#remStateChip", "#remEscHint", "#remTop", "#remZoom", "#remClock", "#remOsdBtn", "#remKeysBtn", "#remInfoBtn", "#remMoreBtn", "#remFs", "#remKeysPop", "#remInfoPop", "#remMorePop", "#remOsd", "#remStage", "#cfgIndex", "#ktVal", "#ktSave", "#ktClear", "#liUser", "#liPass", "#liRole", "#liBtn", "#liOut", "#liErr", "#aboutVer", "#sigResult", "#remLauncher", "#remLauncherEmpty", "#remLauncherTitle", "#lmCode", "#lmCopy", "#lmInfo", "#remDevPop", "#remTiles", ".rem-tile", ".rem-card", "#remViewHint", "#remViewBack"]
-regions: [remote-lobby-cards, remote-session-topbar, view-group, semantic-line, gamepad-map-row, feed-tile-letterbox, osd-overlay, bottom-bar-state-grace-take-release, estop-never-hide, health-banner, stopped-banner-resume, req-chip, perimeter-latched, info-popover, settings-login-card, settings-config-index, keys-admin-token, remote-launcher-panel, capability-tiles, power-row-gated, pure-view-safebar-variant]
+e2e_hooks: [".nav-item", ".active", ".page", ".active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg", "#meetGrid", "#meetScrim", "#prejoinScrim", "#meetCanvas", "#meetTiles", "#meetRail", "#meetPip", "#muteChip", "#meetBar", "#mkLeave", "#holdRing", "#holdBar", "#meetExitHint", "#meetPanel", "#mpBody", "#mpTabs", "#mpBadge", "#mpChatBadge", "#meetInfo", "#meetTransScrim", "#remGrid", "#remSession", "#remTile", "#remBar", "#remTake", "#remRelease", "#remCtlState", "#remGraceMirror", "#remLive", "#remHealth", "#remEstop", "#remEstopRing", "#remReqChip", "#remHolderChip", "#remForce", "#remResumeScrim", "#remResumeName", "#remStopped", "#remPerimeter", "#remMapPanel", "#remTouch", "#remHud", "#remStateChip", "#remEscHint", "#remTop", "#remZoom", "#remClock", "#remOsdBtn", "#remKeysBtn", "#remInfoBtn", "#remMoreBtn", "#remFs", "#remKeysPop", "#remInfoPop", "#remMorePop", "#remOsd", "#remStage", "#cfgIndex", "#ktVal", "#ktSave", "#ktClear", "#liUser", "#liPass", "#liRole", "#liBtn", "#liOut", "#liErr", "#aboutVer", "#sigResult", "#remLauncher", "#remLauncherEmpty", "#remLauncherTitle", "#lmCode", "#lmCopy", "#lmInfo", "#remDevPop", "#remTiles", ".rem-tile", ".rem-card", "#remViewHint", "#remViewBack", "#remSafeBar", "#remBall", "#remBallPop", "#remSessPop", "#remDetailsPop", "#remWake", "#remConnecting", "#remPanHint", "#remDisplayPop", "#remInputPop", "#remSecPop", "#remTree", "#remSearch", "#remHitCount", "#remSortBtn", "#remSortPop", "#remFilterBtn", "#remFilters", "#remActiveRows", "#remActiveCount", "#remRecentRows", "#remRecentToggle", "#remDevEmpty", "#remClearFilters", "#remRenameScrim", "#rnAlias", "#rnNote", "#rnTagIn", "#rnTags", "#rnSave", "#remGroupScrim", "#rgName", "#lmRename", ".dev-row", ".dev-meta", ".dev-badges"]
+regions: [remote-lobby-cards, remote-session-topbar, view-group, semantic-line, gamepad-map-row, feed-tile-letterbox, osd-overlay, bottom-bar-state-grace-take-release, estop-never-hide, health-banner, stopped-banner-resume, req-chip, perimeter-latched, info-popover, settings-login-card, settings-config-index, keys-admin-token, remote-launcher-panel, capability-tiles, power-row-gated, pure-view-safebar-variant, device-group-tree, device-row-tiers, rename-modal, search-sort-filter, recent-section, in-session-section]
 open_questions: [quality-codec-fps-adjust-backend, B-lease-server-batch, real-pointer-lock-fullscreen-UA-Esc-device, real-gamepad-device, special-keys-real-channel, R6-five-backendization, view-wall-fullscreen-cross-plan, PROGRAM-memorys-parallel-owned, devtools-hidden-in-session, ball-dock-dwell-micro, C-switch-carrier-phase2, launcher-breakpoint, launcher-tile-grid, launcher-code-copy-format, launcher-info-fields]
 ```
 
@@ -421,6 +421,11 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   for right-edge collapse); now region-collapse + i-chevron (right), aria-label/title synced in
   renderDrawer. Precedent: region-collapse chevrons point toward collapse edge; modal dismiss = X.
   harness device-drawer += ddIcon assertion; 27 cases + NEG green.
+- v1.99 (Remote N-7 device-list; §3r round complete pending final review): device object layer + group
+  tree (APG) + row three tiers + STOPPED badge + rename modal + search/sort/filter/recent/in-session
+  (filter-exempt) + three states + sim head chip. 54 cases + NEG green.
+- v1.98 (Settings S-3 closure; §3o round complete pending final review): setLogin/setAbout ids,
+  keys-token page-side re-verify post-v1.97 (8/8 true), regression 51 cases + NEG green.
 - v1.97 (Remote N-6 launcher, PENDING REVIEW; §3q round complete): dual-column launcher + meta row +
   3 real/4 gated capability tiles + gated power row + pure-view semantics (capture all-entry guard,
   tile demoted, leaseTick skip, safe-bar view variant, estop kept) + three states + stale guard.

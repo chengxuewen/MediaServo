@@ -1,5 +1,55 @@
 # Prototypes CHANGELOG
 
+## v1.99 — 2026-11-20 (portal-unified) — Remote N-7 device-list board delivered; §3r round complete (pending final review)
+Implements web-portal-ui §3r B-R2 N-7a-e (D17-D20 adjudicated; plan v2 post 4-seat review; Sunflower group-tree + ToDesk list screenshots evidence).
+- **Object layer**: device list replaces session room-cards; DEVICES seed extended (group/os/alias/note/
+  tags/owner/asset); device->room mapping via asset (room id != device id fact corrected); session
+  cards retired into Recent / In-session sections.
+- **Group tree**: role=tree/treeitem + aria-expanded/selected + roving (Enter select, Left/Right
+  collapse/expand per APG); counts; refresh = local re-derive (simulated note); group CRUD modal
+  (add/rename/delete; delete moves devices to Ungrouped, never deletes devices; clears selection+chip).
+- **Row three tiers**: dot(online/degraded/offline)+OS glyph(new svg set)+alias(original) ellipsis with
+  full aria-label + badges (In control=holder!=null / Same account=owner==self / This device=self /
+  **STOPPED=estop regardless of holder** closing force-release blind spot) + conn word in meta;
+  offline dim = tertiary token (not opacity); tier1 >=1600 left 420 single-line right meta;
+  tier2 900-1600 left 320 single-line + selected subline; tier3 <=900 full-width two-line + tree
+  horizontal chips + launcher below; listbox/option semantics, no nested interactive in option;
+  coarse44 registered for twisty/chips/sort/filter/tag-x.
+- **Rename modal**: single entry = launcher Rename; alias input first focus; note + tag chips add/remove
+  (aria-label Remove tag X); local sim + audit device.rename (vs admin credential-face device.identity
+  noted); row + launcher title sync; session asset chip immutable.
+- **Search/sort/filter/recent/in-session**: search across name/alias/code/IP/tag/group within current
+  group + hit count aria-live; sort menu (menuitemradio, trigger shows current); filter chips stackable
+  (online/OS/tag); **In-session/stopped section exempt from group/search filters** (holder==self OR
+  self-opened session incl view OR estop; global count); recent = local history (written on session
+  open success, cap 8, empty hides section, click = select+launcher never auto-open); empty states
+  distinguish zero-devices vs no-match + Clear filters (focus back to search).
+- **Honesty**: list-head simulated chip (group/os/alias/tags local metadata); gated tiles for devices
+  without control room / without pull capability; device-layer loading/error+Retry three states.
+- Verified: harness 54 cases ALL GREEN (remote-devlist 21 assertions + narrow 3 @400 + 1600 2) + NEG all
+  red (renderDevRows noop x2 / renderDevTree noop retired->rows); regression adaptations registered
+  (remote-lobby rows/sim/launcher sampling, remote-launcher selectors+stale via room conn, remote-fixes
+  lobbyStoppedChip survives via row STOPPED badge); node --check + lint clean; stamps x8; screenshots
+  n7-1440/1600/400/rename/empty/stopped.
+- Fixes en route: 1600 media ordered before base flex (moved to stylesheet end); [hidden] overridden by
+  display:flex on treefoot/chips/sections; harness stale leg set room.revoked instead of conn (product
+  correct, harness adapted); narrow NEG immune via tree CSS (retargeted renderDevRows); tier1 badges
+  wrap (widths tightened).
+- **Round §3r complete**: N-7 v1.99. Open items: group/os/tags/rename backend endpoints, host hello os
+  field, history cross-device sync, enterprise-scale virtual scroll.
+
+## v1.98 — 2026-11-20 (portal-unified) — Settings S-3 closure delivered; §3o round complete (pending final review)
+Implements web-portal-ui §3o B-S1 task S-3 (regression + ledger closure; dependency N-6 satisfied).
+- Card ids #setLogin / #setAbout added so sidecar e2e_hooks claims match real DOM.
+- keys-token re-verified PAGE-SIDE post-v1.97 (8 assertions all true: partition/shortRejected/pasteSave/
+  masked/saved+audit/nonAdminGuard/clearConfirm/cleared+auditClear) — Marionette wedge limitation
+  (v1.77 precedent) unchanged, disclosed.
+- Regression: harness 51 cases ALL GREEN + NEG all red (keys psk/admin/nav/hub/meet/remote/settings
+  three cases incl settings-login 10 + settings-index 6); node --check + lint clean; stamps x8.
+- **Round §3o complete**: S-1 v1.93 / S-2 v1.94 / S-3 v1.98. Open items unchanged (real auth wiring,
+  config/push staged B-sec, in-place edit faces manifest-pending, component YAML schema index
+  extension, Admin token real issuance, About build real value).
+
 ## v1.97 — 2026-11-20 (portal-unified) — Remote N-6 launcher board delivered (pending review); §3q round complete
 Implements web-portal-ui §3q B-Q1 N-6a-e (D13-D16 adjudicated; plan v2 post 4-seat review; ToDesk launcher screenshot evidence todesk-12).
 - **Dual-column launcher**: left card list (online dot/holder/conn/owner + mode/lease/sim/STOPPED chips
