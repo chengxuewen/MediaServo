@@ -13,13 +13,9 @@
 
 ## Network Constraints
 
-### UDP Port Range for mediasoup
-- mediasoup Worker RTP/RTCP uses **UDP ports 40000-40100** by default.
-- Port mapping in `docker-compose.yml`:
-  ```
-  40000-40100:40000-40100/udp
-  ```
-- When deploying outside Docker, ensure the host firewall allows this UDP range. For production, narrow the range (e.g., `rtc_ports_range: (40000, 40100)`) — fewer ports reduce firewall surface area.
+### UDP Ports for mediasoup
+- The delivery model uses **single-port mux on 20000/udp** (rtc single-port); the legacy 40000-40100/udp mapping was REMOVED from `docker-compose.yml` (revival recipe: deployment manual Appendix B).
+- When deploying outside Docker, allow 20000/udp in the host firewall; a legacy `rtc_ports_range: (40000, 40100)` deployment still needs that range allowed.
 
 ### ICE/STUN Required for Local P2P
 - WebRTC (even on localhost) requires **ICE negotiation** with STUN to discover candidate pairs. Without a STUN server, localhost WebRTC connections fail because no candidate pairs are formed.

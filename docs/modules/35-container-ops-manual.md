@@ -90,7 +90,6 @@ docker compose --env-file .env ps
 | 9800 | 9800 | tcp | host-agent direct `/ws` |
 | 22 | 2222 (`SSH_PORT`) | tcp | ssh maintenance (key-only) |
 | 20000 | 20000 (`SFU_PORT`) | udp | SFU media (single-port mux) |
-| 40000-40100 | same | udp | legacy range, unused by the current model — safe to drop |
 
 **Volumes** (persistence — required):
 

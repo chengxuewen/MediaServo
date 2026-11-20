@@ -72,14 +72,12 @@ sysctl --system
 | 8080 | tcp | browser / caddy entry (admin/voice/API/WS reverse proxy) |
 | 9800 | tcp | host-agent direct /ws |
 | 20000 | udp | SFU RTC |
-| 40000-40100 | udp | SFU RTC range |
 | 2222 | tcp | ssh maintenance (`${SSH_PORT:-2222}:22`) |
 
 ```bash
 firewall-cmd --permanent --add-port=8080/tcp
 firewall-cmd --permanent --add-port=9800/tcp
 firewall-cmd --permanent --add-port=20000/udp
-firewall-cmd --permanent --add-port=40000-40100/udp
 firewall-cmd --permanent --add-port=2222/tcp
 firewall-cmd --reload
 ```
@@ -242,3 +240,14 @@ curl --noproxy '*' -f http://<IP>:8080/health
 **Conclusion**: the full offline chain (load → up → browser → login → backup →
 persistence → graceful stop → rollback) is green; the explicit multi-NIC
 ANNOUNCED_IP rule and the admin/ssh credential handover flows are verified.
+
+## Appendix B: Legacy UDP Range Revival (only for legacy-image rollback)
+
+The 40000-40100/udp mapping was removed from the delivered compose (unused by
+the current single-port SFU model on 20000/udp). Only if you roll back to a
+legacy image that needs the range, re-add under `services.server.ports`:
+
+    - "${SFU_PORT_RANGE:-40000-40100}:40000-40100/udp"
+
+and open it in the host firewall (`firewall-cmd --permanent --add-port=40000-40100/udp`
++ `--reload`, or the Appendix A equivalent for your distro).

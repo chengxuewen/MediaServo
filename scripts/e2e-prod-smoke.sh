@@ -15,7 +15,7 @@
 #
 # Prereq: the tree prod image present (docker/server/Dockerfile / `build image prod`).
 # Env knobs (all optional): TAG MEDIASERVO_BRAND WEB_PORT AGENT_PORT SSH_PORT
-#   SFU_PORT SFU_PORT_RANGE MEDIASERVO_SFU_ANNOUNCED_IP MEM_LIMIT.
+#   SFU_PORT MEDIASERVO_SFU_ANNOUNCED_IP MEM_LIMIT.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -27,7 +27,6 @@ WEB_PORT="${WEB_PORT:-18080}"
 AGENT_PORT="${AGENT_PORT:-19800}"
 SSH_PORT="${SSH_PORT:-12222}"
 SFU_PORT="${SFU_PORT:-21000}"
-SFU_PORT_RANGE="${SFU_PORT_RANGE:-41000-41100}"
 ANNOUNCED="${MEDIASERVO_SFU_ANNOUNCED_IP:-127.0.0.1}"
 PASS="$(openssl rand -hex 12)"
 TREE="/opt/$BRAND"
@@ -48,7 +47,6 @@ SSH_PORT=$SSH_PORT
 WEB_PORT=$WEB_PORT
 AGENT_PORT=$AGENT_PORT
 SFU_PORT=$SFU_PORT
-SFU_PORT_RANGE=$SFU_PORT_RANGE
 EOF
 COMPOSE=(docker compose -p "$PROJECT" -f docker-compose.yml --env-file "$ENVF")
 cleanup() { "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true; rm -f "$ENVF"; }

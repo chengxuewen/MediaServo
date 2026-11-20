@@ -25,7 +25,6 @@ services:
       - "${AGENT_PORT:-9800}:9800"                     # host-agent direct /ws
       - "${SSH_PORT:-2222}:22"                         # ssh maintenance (2222 avoids the CentOS host sshd)
       - "${SFU_PORT:-20000}:20000/udp"                 # SFU media (single-port mux)
-      - "${SFU_PORT_RANGE:-40000-40100}:40000-40100/udp"  # legacy range, unused by the current model — safe to drop
     environment:
       RUST_LOG: info
       # Single brand source: the entrypoint paths and the volume mounts below

@@ -73,7 +73,7 @@ docker compose down
 | mediasoup = Linux x86_64 only | macOS: `check` works, `build`/`test` fails — use Docker |
 | macOS volume mounts 3-5x slower | Use `cargo-cache` named volume for target |
 | First Docker build: 15-30 min | mediasoup C++ Worker + Rust deps from scratch |
-| UDP ports 40000-40100 | Must be mapped for SFU RTP/RTCP |
+| UDP 20000/udp (single-port mux) | Must be mapped 1:1 for SFU RTP/RTCP |
 | Server TLS uses rustls | No OpenSSL dependency needed |
 
 ## pixi Task Reference
