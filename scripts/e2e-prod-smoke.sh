@@ -138,7 +138,10 @@ CID="$("${COMPOSE[@]}" ps -q server)"
 wait_health || bad "health after volume recreate"
 PSK3=$(docker exec "$CID" sh -c "grep '^psk:' $TREE/etc/server.yaml" | sed 's/.*"\(.*\)".*/\1/')
 [ "$PSK3" = "$PIN" ] && ok "PSK re-pinned after down -v (fleet-safe)" || bad "PSK after recreate = '$PSK3'"
-docker exec "$CID" sh -c '! grep -q MEDIASERVO_PSK /proc/1/environ' && ok "MEDIASERVO_PSK scrubbed from PID1 env" || bad "MEDIASERVO_PSK visible in PID1 env"
+# positive control: the container CONFIG carries the var (docker inspect face);
+# negative: the PID1 PROCESS env does not (entrypoint unset) — needs root.
+docker inspect "$CID" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -q "^MEDIASERVO_PSK=$PIN$" && ok "container config carries MEDIASERVO_PSK (inspect face)" || bad "container config lost MEDIASERVO_PSK"
+docker exec -u 0 "$CID" sh -c '! grep -q MEDIASERVO_PSK /proc/1/environ' && ok "MEDIASERVO_PSK scrubbed from PID1 env" || bad "MEDIASERVO_PSK visible in PID1 env"
 
 note "graceful stop (STOPSIGNAL SIGINT baked)"
 docker stop "$CID" >/dev/null 2>&1
