@@ -37,6 +37,8 @@ ok()   { echo "OK: $1"; }
 bad()  { echo "FAIL: $1"; FAIL=1; }
 CURL=(curl --noproxy '*' -s --max-time 5)
 
+# Legal pinned PSK (>=16 chars, [A-Za-z0-9_-]) — exercises the bootstrap path.
+PIN="smoke-psk-$RANDOM-$RANDOM-$RANDOM"
 ENVF="$(mktemp)"
 cat > "$ENVF" <<EOF
 TAG=$TAG
@@ -47,6 +49,7 @@ SSH_PORT=$SSH_PORT
 WEB_PORT=$WEB_PORT
 AGENT_PORT=$AGENT_PORT
 SFU_PORT=$SFU_PORT
+MEDIASERVO_PSK=$PIN
 EOF
 COMPOSE=(docker compose -p "$PROJECT" -f docker-compose.yml --env-file "$ENVF")
 cleanup() { "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true; rm -f "$ENVF"; }
@@ -88,9 +91,10 @@ login() { "${CURL[@]}" -X POST "http://127.0.0.1:$WEB_PORT/api/auth/login" -H 'C
 TOK="$(login)"
 [ -n "$TOK" ] && ok "admin JWT issued" || bad "admin login failed"
 
-note "auth closed (random PSK, not dev placeholder) + boot marker (run/logs file face)"
+note "PSK bootstrap (pinned via MEDIASERVO_PSK) + auth closed + boot marker"
 PSK=$(docker exec "$CID" sh -c "grep '^psk:' $TREE/etc/server.yaml" | sed 's/.*"\(.*\)".*/\1/')
-[ "$PSK" != "mediaservo-dev" ] && [ "${#PSK}" = 64 ] && ok "PSK random 64-hex (auth closed)" || bad "PSK = '$PSK'"
+[ "$PSK" = "$PIN" ] && ok "PSK pinned from env (bootstrap)" || bad "PSK not pinned ('$PSK')"
+[ "$PSK" != "mediaservo-dev" ] && ok "auth closed (no dev PSK)" || bad "dev PSK in config"
 docker exec "$CID" sh -c "grep -q 'Server ready' $TREE/run/logs/*.out.log" && ok "run/logs Server ready marker" || bad "no Server ready log"
 docker exec "$CID" sh -c "grep -q 'mediaservo-dev' $TREE/etc/server.yaml" && bad "dev PSK present" || ok "no dev PSK in config"
 
@@ -126,6 +130,15 @@ TOK2="$(login)"
 docker exec "$CID" sh -c "grep '^psk:' $TREE/etc/server.yaml" > "$ENVF.psk-after"
 diff "$ENVF.psk-before" "$ENVF.psk-after" >/dev/null && ok "PSK not regenerated (secrets persisted)" || bad "PSK regenerated"
 rm -f "$ENVF.psk-before" "$ENVF.psk-after"
+
+note "PSK survives volume recreation (down -v -> up, same env) + env scrub"
+"${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1
+"${COMPOSE[@]}" up -d >/dev/null 2>&1
+CID="$("${COMPOSE[@]}" ps -q server)"
+wait_health || bad "health after volume recreate"
+PSK3=$(docker exec "$CID" sh -c "grep '^psk:' $TREE/etc/server.yaml" | sed 's/.*"\(.*\)".*/\1/')
+[ "$PSK3" = "$PIN" ] && ok "PSK re-pinned after down -v (fleet-safe)" || bad "PSK after recreate = '$PSK3'"
+docker exec "$CID" sh -c '! grep -q MEDIASERVO_PSK /proc/1/environ' && ok "MEDIASERVO_PSK scrubbed from PID1 env" || bad "MEDIASERVO_PSK visible in PID1 env"
 
 note "graceful stop (STOPSIGNAL SIGINT baked)"
 docker stop "$CID" >/dev/null 2>&1
