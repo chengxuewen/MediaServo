@@ -78,6 +78,7 @@ docker compose --env-file .env ps
 | Variable | Default | Meaning |
 |---|---|---|
 | `MEDIASERVO_BRAND` | `msrtc` | tree prefix `/opt/<brand>` + volume paths; changing it requires a matching image |
+| `MEDIASERVO_PSK` | _(unset)_ | signaling PSK seed — FIRST-boot-only; a valid value ([A-Za-z0-9_-]{16,256}) is written into the etc volume instead of a random one. Keep after handover (recovery seed); details: DEPLOY-MANUAL §5 |
 | `MEM_LIMIT` | `512m` | container memory limit (memory only; CPU unlimited); raise per §4 for larger loads |
 | `RUST_LOG` | `info` | log level |
 | `WEB_PORT`/`AGENT_PORT`/`SFU_PORT` | 8080/9800/20000 | shift the **host-side** ports only; container targets are fixed |
@@ -205,6 +206,11 @@ docker compose --env-file .env up -d
 # named volume)
 ```
 
+> PSK note: upgrades/rollbacks never touch the volumes, so the signaling PSK
+> only ever changes when the data volume is recreated (`down -v`, a
+> volume/project rename, host migration) — pin `MEDIASERVO_PSK` in `.env` to
+> make those events a no-op for the fleet (DEPLOY-MANUAL §5).
+
 ### 7.1 Emergency Volume Restore (data volume)
 
 Restores accounts/secrets from a `msrtc_data.tar.gz` backup (created in §6):
@@ -233,6 +239,7 @@ docker compose --env-file .env up -d           # start, then verify an admin log
 | Container won't start | `docker compose ... logs`; port conflicts (8080/9800/2222); disk full |
 | Console shows `/weaknet/v1/capabilities 502` | expected in production: the image ships no weaknet app; the Caddyfile route is a known no-op (console noise only, no impact) |
 | startup log shows **"dev placeholder accounts active"** | a dev-only toggle is enabled (`MEDIASERVO_ALLOW_DEV_CREDENTIALS`) or dev accounts were mounted into the etc volume — production MUST unset it and use the admin bootstrap instead (DEPLOY-MANUAL §5) |
+| **All hosts/vehicles fail signaling (401) after a redeploy** | the data volume was recreated without a pinned PSK — recover: put the old PSK into `.env` as `MEDIASERVO_PSK`, then `down -v && up -d` (or pre-seed the volume); see DEPLOY-MANUAL §5 |
 | Data lost / secrets changed | are the `etc`/`recordings`/`run/logs` volumes mounted (§4)? no volumes = regenerated on every recreate |
 
 ## 9. First-Install Essentials (details + per-distro recipes: DEPLOY-MANUAL §1-§2, Appendix A)

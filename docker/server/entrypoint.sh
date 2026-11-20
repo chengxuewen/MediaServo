@@ -42,7 +42,7 @@ MS_GID="$(id -g mediaservo)"
 # ── 1. init (root writes the etc volume; idempotent — existing files skipped) ──
 "$SERVER" init "$TREE"
 # Keep the bootstrap password out of the long-lived daemon/app environment.
-unset MEDIASERVO_ADMIN_PASSWORD
+unset MEDIASERVO_ADMIN_PASSWORD MEDIASERVO_PSK
 
 # ── 2. sshd maintenance port (R19) ─────────────────────────────────────────────
 SSHD_DIR="$TREE/etc/ssh"

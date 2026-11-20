@@ -37,6 +37,12 @@ services:
       MEDIASERVO_SFU_ANNOUNCED_IP: ${MEDIASERVO_SFU_ANNOUNCED_IP:?set MEDIASERVO_SFU_ANNOUNCED_IP in .env — site-reachable IP, multi-NIC explicit-fill}
       # first-boot admin bootstrap (init step 3); persisted in the etc volume.
       MEDIASERVO_ADMIN_PASSWORD: ${MEDIASERVO_ADMIN_PASSWORD:?set MEDIASERVO_ADMIN_PASSWORD in .env — first-boot admin account}
+      # Signaling PSK bootstrap (FIRST boot only): a non-empty valid value
+      # ([A-Za-z0-9_-]{16,256}) seeds etc/server.yaml instead of a random one;
+      # afterwards the volume owns it (existing volumes are never rotated).
+      # Empty/unset -> random. Keep the line in .env after handover: it is the
+      # recovery seed when the volume is ever recreated.
+      MEDIASERVO_PSK: ${MEDIASERVO_PSK:-}
     # Memory limit only (host protection); CPU is unlimited so RTP bursts stay
     # smooth. The 512m default is MEASURED at the standard tier (10 rooms /
     # 20 peers @720p: peak 56.81 MiB, ~9x headroom); see the MEM_LIMIT ladder

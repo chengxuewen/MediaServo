@@ -188,6 +188,30 @@ see the drill in §7.
     the `!` locked state left by `useradd` makes sshd with `UsePAM no` reject
     pubkey auth; the image fixes the shadow field (`usermod -p '*'`).
 
+### Signaling PSK: pin, migrate, rotate
+
+The signaling PSK authenticates every host/vehicle streaming client. By default
+init generates a random one at FIRST boot and persists it in the etc volume;
+restarts, upgrades and rollbacks never change it. It changes ONLY when the data
+volume is recreated (`docker compose down -v`, a volume/project rename, or a
+host migration) — which invalidates every client at once. To make those events
+a no-op:
+
+- **Pin it (recommended for fleets)**: set `MEDIASERVO_PSK` in `.env` (generate
+  with `openssl rand -hex 32`). A valid value (letters/digits/`-`/`_`, 16–256
+  chars) is written into the volume at first boot instead of a random one; an
+  invalid value is REJECTED with a loud init WARN and a random value is used
+  (fix `.env`, then `down -v && up -d` to retry). First-boot-only: an existing
+  volume is never rotated by env changes. KEEP the line after handover — it is
+  the recovery seed; protect `.env` (`chmod 600`).
+- **Migrate / pre-seed (zero-code alternative)**: before the first `up`, place
+  a server.yaml containing the target `psk:` into the empty `msrtc_data` volume
+  (0600); init's first-writer-wins then keeps it. Pre-seeded values bypass the
+  env validation — use the same legal charset (hex) anyway.
+- **Rotate (deliberate)**: the admin API PSK rotation writes the new value back
+  to disk — then update the fleet clients; or change `.env` + `down -v &&
+  up -d` and redeploy the new value.
+
 ## 6. Operations
 
 ```bash
