@@ -54,6 +54,11 @@ docker compose version   # must print a v2.x
 
 ## 2. System Tuning
 
+> Commands in this section write system state — run them **as root**
+> (`sudo -s`, the usual site posture) or prefix with `sudo`. For the §2.1
+> heredoc use `sudo tee` instead of `>` redirection (plain redirection runs
+> as your own user and hits Permission denied on `/etc/sysctl.d/`).
+
 ### 2.1 UDP sysctl (SFU RTP receive path)
 
 ```bash
