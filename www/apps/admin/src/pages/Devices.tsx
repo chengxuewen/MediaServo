@@ -17,9 +17,11 @@ import {
   THead,
   TR,
 } from '@mediaservo/react';
-import { getAdminDevices, registerDevice, revokeDevice, resetDeviceSecret, getPendingDevices, approvePendingDevice } from '../api/client';
-import type { AdminDevice, PendingDevice } from '../api/client';
+import { getAdminDevices, registerDevice, revokeDevice, resetDeviceSecret, getPendingDevices, approvePendingDevice, getVehicleStatus } from '../api/client';
+import type { AdminDevice, PendingDevice, StatusReport } from '../api/client';
 import ActiveDevices from '../components/ActiveDevices';
+import { useDevices } from '../hooks/useDevices';
+import { fleetCounts, telemetrySummary } from '../fleet';
 import { AlertTriangle, Check, Plus } from 'lucide-react';
 
 // first-seen time → relative time (scale mirrors Vehicles fmtUptime)
@@ -35,12 +37,17 @@ const monoStyle = { fontFamily: 'var(--ms-font-family-mono)' } as const;
 const REVOKE_SEMANTICS = 'Revoke deletes the credential: new connections are refused immediately; established sessions live until disconnect. This cannot be undone.';
 const RESET_SEMANTICS = 'Reset issues a new secret and invalidates the old one for new connections. The new value is shown once — copy it before closing.';
 
-export default function Devices() {
+export default function Devices({ initialQuery = '' }: { initialQuery?: string }) {
   const [devices, setDevices] = useState<AdminDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
+  // B4 fleet lens (radiogroup + roving) + health strip; fleet = devices with
+  // telemetry reports (exported semantics — server has no kind field yet).
+  const [lens, setLens] = useState<'all' | 'fleet'>('all');
+  const [reports, setReports] = useState<{ room_id: string; report: StatusReport }[]>([]);
+  const { devices: activeDevices } = useDevices();
 
   // register-form modal
   const [registerOpen, setRegisterOpen] = useState(false);
@@ -96,6 +103,15 @@ export default function Devices() {
     const interval = setInterval(fetchPending, 5000);
     return () => clearInterval(interval);
   }, [fetchPending]);
+
+  // telemetry for the fleet lens (15s cadence; stale rule lives in fleet.ts)
+  useEffect(() => {
+    let alive = true;
+    const pull = () => getVehicleStatus().then((r) => { if (alive) setReports(r.vehicles); }).catch(() => { /* lens degrades to empty */ });
+    pull();
+    const interval = setInterval(pull, 15000);
+    return () => { alive = false; clearInterval(interval); };
+  }, []);
 
   const openRegister = () => {
     setRegisterOpen(true);
@@ -193,6 +209,16 @@ export default function Devices() {
 
   const q = query.trim().toLowerCase();
   const rows = devices.filter((d) => !q || d.device_id.toLowerCase().includes(q));
+  const fleetSet = new Set(reports.map((r) => r.room_id));
+  const lensRows = lens === 'fleet' ? rows.filter((d) => fleetSet.has(d.device_id)) : rows;
+  const counts = fleetCounts(reports, new Set(activeDevices.map((d) => d.device_id)));
+  const strip: { k: string; v: number; c?: string }[] = [
+    { k: 'Vehicles', v: counts.n },
+    { k: 'Signal lost', v: counts.x, c: 'var(--ms-color-danger)' },
+    { k: 'Agent unreachable', v: counts.y, c: 'var(--ms-color-warning)' },
+    { k: 'Stalled topics', v: counts.z, c: 'var(--ms-color-warning)' },
+    { k: 'Down processes', v: counts.w, c: 'var(--ms-color-danger)' },
+  ];
 
   if (loading) return <div className="loading">Loading...</div>;
   if (error && devices.length === 0) return <div className="error">{error}</div>;
@@ -268,7 +294,49 @@ export default function Devices() {
         </Table>
       )}
 
-      <h2 style={{ fontSize: 'var(--ms-font-size-sm)', fontWeight: 'var(--ms-font-weight-semibold)', margin: 'var(--ms-space-4) 0 var(--ms-space-2)' }}>
+      {/* B4 lens: radiogroup + roving tabindex; fleet strip shows the five
+          health counts with the unreachable-supersede rule (fleet.ts). */}
+      <div role="radiogroup" aria-label="Device lens" style={{ display: 'flex', gap: 'var(--ms-space-1)', margin: 'var(--ms-space-4) 0 var(--ms-space-2)' }}>
+        {(['all', 'fleet'] as const).map((l) => (
+          <button
+            key={l}
+            role="radio"
+            aria-checked={lens === l}
+            tabIndex={lens === l ? 0 : -1}
+            onClick={() => setLens(l)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                e.preventDefault();
+                setLens(lens === 'all' ? 'fleet' : 'all');
+              }
+            }}
+            style={{
+              height: 'var(--ms-control-h-md)',
+              padding: '0 var(--ms-space-3)',
+              border: '1px solid var(--ms-color-border)',
+              borderRadius: 'var(--ms-radius-sm)',
+              background: lens === l ? 'var(--ms-color-primary)' : 'var(--ms-color-surface)',
+              color: lens === l ? 'var(--ms-color-text-inverse)' : 'var(--ms-color-text-secondary)',
+              fontSize: 'var(--ms-font-size-xs)',
+              cursor: 'pointer',
+            }}
+          >
+            {l === 'all' ? 'All devices' : 'Fleet'}
+          </button>
+        ))}
+      </div>
+      {lens === 'fleet' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 'var(--ms-space-3)', marginBottom: 'var(--ms-space-3)' }}>
+          {strip.map((s) => (
+            <div key={s.k} style={{ background: 'var(--ms-color-surface)', border: '1px solid var(--ms-color-border)', borderRadius: 'var(--ms-radius-md)', padding: 'var(--ms-space-2) var(--ms-space-3)' }}>
+              <div style={{ fontSize: 'var(--ms-font-size-xs)', color: 'var(--ms-color-text-tertiary)' }}>{s.k}</div>
+              <div style={{ fontSize: 'var(--ms-font-size-md)', fontWeight: 'var(--ms-font-weight-semibold)', color: s.c ?? 'var(--ms-color-text)' }}>{s.v}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <h2 style={{ fontSize: 'var(--ms-font-size-sm)', fontWeight: 'var(--ms-font-weight-semibold)', margin: '0 0 var(--ms-space-2)' }}>
         Registered Devices
       </h2>
       {error && <p role="alert">{error}</p>}
@@ -279,29 +347,46 @@ export default function Devices() {
           <THead>
             <TR>
               <TH>Device</TH>
+              {lens === 'fleet' && <TH>Telemetry</TH>}
               <TH style={{ textAlign: 'right' }}>Actions</TH>
             </TR>
           </THead>
           <TBody>
-            {rows.map((d) => (
-              <TR key={d.device_id}>
-                <TD><b style={monoStyle}>{d.device_id}</b></TD>
-                <TD>
-                  <span style={{ display: 'flex', gap: 'var(--ms-space-2)', justifyContent: 'flex-end' }}>
-                    <Button size="sm" disabled={busy === d.device_id} disabledReason="Working…" onClick={() => setResetting(d.device_id)}>
-                      Reset secret
-                    </Button>
-                    <Button size="sm" variant="danger" disabled={busy === d.device_id} disabledReason="Working…" onClick={() => setRevoking(d.device_id)}>
-                      Revoke
-                    </Button>
-                  </span>
-                </TD>
-              </TR>
-            ))}
-            {rows.length === 0 && (
+            {lensRows.map((d) => {
+              const t = telemetrySummary(reports, d.device_id);
+              return (
+                <TR key={d.device_id}>
+                  <TD><b style={monoStyle}>{d.device_id}</b></TD>
+                  {lens === 'fleet' && (
+                    <TD>
+                      {t ? (
+                        <span style={{ fontSize: 'var(--ms-font-size-xs)', color: t.signal === 'ok' ? 'var(--ms-color-text-secondary)' : 'var(--ms-color-danger)' }}>
+                          {t.signal === 'ok' ? 'signal ok' : 'signal lost'} · {t.stalled} stalled · {t.down} down
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 'var(--ms-font-size-xs)', color: 'var(--ms-color-text-muted)' }}>no telemetry</span>
+                      )}
+                    </TD>
+                  )}
+                  <TD>
+                    <span style={{ display: 'flex', gap: 'var(--ms-space-2)', justifyContent: 'flex-end' }}>
+                      <Button size="sm" disabled={busy === d.device_id} disabledReason="Working…" onClick={() => setResetting(d.device_id)}>
+                        Reset secret
+                      </Button>
+                      <Button size="sm" variant="danger" disabled={busy === d.device_id} disabledReason="Working…" onClick={() => setRevoking(d.device_id)}>
+                        Revoke
+                      </Button>
+                    </span>
+                  </TD>
+                </TR>
+              );
+            })}
+            {lensRows.length === 0 && (
               <TR>
-                <TD colSpan={2}>
-                  <span style={{ color: 'var(--ms-color-text-muted)' }}>No devices match.</span>
+                <TD colSpan={lens === 'fleet' ? 3 : 2}>
+                  <span style={{ color: 'var(--ms-color-text-muted)' }}>
+                    {lens === 'fleet' ? 'No fleet devices with telemetry.' : 'No devices match.'}
+                  </span>
                 </TD>
               </TR>
             )}

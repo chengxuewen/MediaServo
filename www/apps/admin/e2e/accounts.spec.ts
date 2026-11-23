@@ -23,6 +23,15 @@ test.describe('Accounts surface (W6 prototype language)', () => {
     await expect(page.getByText('API live; page pending board B6')).toBeVisible();
   });
 
+  test('scope chip cross-links to the Devices tab with prefilled search (B4)', async ({ page }) => {
+    await openAccountsTab(page);
+    // fixture operator account carries vehicles: [ms-dev-vehicle]
+    const row = page.getByRole('row').filter({ hasText: 'operator' });
+    await row.getByRole('button', { name: 'ms-dev-vehicle' }).click();
+    await expect(page.getByRole('tab', { name: 'Devices' })).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByPlaceholder('Search devices…')).toHaveValue('ms-dev-vehicle');
+  });
+
   test('create -> scope truth -> edit role -> delete round-trip', async ({ page }) => {
     const name = `e2e-acc-${Date.now()}`;
     await openAccountsTab(page);

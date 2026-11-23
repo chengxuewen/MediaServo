@@ -229,7 +229,17 @@ export default function Accounts() {
                     <span style={{ color: 'var(--ms-color-text-tertiary)' }}>— (all devices)</span>
                   ) : acc.vehicles.length > 0 ? (
                     <span style={{ display: 'flex', gap: 'var(--ms-space-1)', flexWrap: 'wrap' }}>
-                      {acc.vehicles.map((v) => <span key={v} style={chipStyle}>{v}</span>)}
+                      {/* B4 scope cross-link: jump to the device in the Devices tab */}
+                      {acc.vehicles.map((v) => (
+                        <button
+                          key={v}
+                          style={{ ...chipStyle, background: 'none', cursor: 'pointer' }}
+                          title={`Open ${v} in Devices`}
+                          onClick={() => navigate('/admin', { state: { tab: 'devices', query: v } })}
+                        >
+                          {v}
+                        </button>
+                      ))}
                     </span>
                   ) : (
                     <span style={chipStyle}>no devices</span>

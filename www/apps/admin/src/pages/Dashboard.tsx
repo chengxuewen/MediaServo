@@ -9,6 +9,7 @@ import {
 } from '../api/client';
 import type { AuditEventEntry, StatusReport } from '../api/client';
 import VideoPlayer from '../components/VideoPlayer';
+import { fleetCounts } from '../fleet';
 import './Dashboard.css';
 import { RefreshCw } from 'lucide-react';
 
@@ -77,20 +78,8 @@ function toAlerts(events: AuditEventEntry[]): Alert[] {
     .map((e) => ({ sev: ALERT_SEV[e.kind], txt: alertText(e), time: fmtTime(e.ts), ts: e.ts }));
 }
 
-// Fleet summary (prototype fleetCounts): reporting vehicles; signal lost =
-// remote link down; agent unreachable = active device without a status report;
-// stalled topics / down (expected) processes summed across reports.
-function fleetCounts(reports: { room_id: string; report: StatusReport }[], activeIds: Set<string>) {
-  let x = 0, z = 0, w = 0;
-  const reported = new Set(reports.map((r) => r.room_id));
-  for (const { report } of reports) {
-    if (!report.signal.remote_connected) x++;
-    z += report.topics.filter((t) => t.stalled).length;
-    w += report.processes.filter((p) => !p.running && p.expected).length;
-  }
-  const y = [...activeIds].filter((id) => !reported.has(id)).length;
-  return { n: reports.length, x, y, z, w };
-}
+// Fleet summary: shared B4口径 (src/fleet.ts) — unreachable supersede rule
+// included (stale reports count only as unreachable, never double-counted).
 
 export default function Dashboard() {
   const navigate = useNavigate();

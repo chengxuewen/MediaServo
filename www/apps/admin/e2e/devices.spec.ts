@@ -23,6 +23,20 @@ test.describe('Devices credentials lifecycle (W2)', () => {
     await expect(pendingTable.or(pendingEmpty)).toBeVisible();
   });
 
+  test('fleet lens radiogroup + five-count strip + telemetry column (B4)', async ({ page }) => {
+    await openDevicesTab(page);
+    const lens = page.getByRole('radiogroup', { name: 'Device lens' });
+    await expect(lens).toBeVisible();
+    await lens.getByRole('radio', { name: 'Fleet' }).click();
+    await expect(lens.getByRole('radio', { name: 'Fleet' })).toHaveAttribute('aria-checked', 'true');
+    for (const k of ['Vehicles', 'Signal lost', 'Agent unreachable', 'Stalled topics', 'Down processes']) {
+      await expect(page.getByText(k, { exact: true })).toBeVisible();
+    }
+    await expect(page.getByRole('columnheader', { name: 'Telemetry' })).toBeVisible();
+    await lens.getByRole('radio', { name: 'All devices' }).click();
+    await expect(page.getByText('Agent unreachable', { exact: true })).toHaveCount(0);
+  });
+
   test('register with provided secret -> close protection -> reset -> revoke', async ({ page }) => {
     const id = `ms-${Date.now().toString(16).padStart(12, '0').slice(-12)}`;
     const secret = 'e2e-provided-secret-123';
