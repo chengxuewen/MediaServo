@@ -375,31 +375,31 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   B1 scope: Access domain + capability matrix + Accounts (4 roles/Device scope/break-glass/focus contract/
   three-state/guard single-track sweep/default light per Q19); B2 PSK+Keys; B3 creds lifecycle; B4 Fleet
   lens+Telemetry; B5 Monitor real-backend link; B6 audit ring. Safety invariants: fail-closed all channels,
-- v1.69 (B1 delivered, PENDING USER REVIEW): Access domain + 9-row capability matrix + Accounts page
+- v1.69 (B1 delivered; USER-ADJUDICATED 2026-11-23 = approved real-data face, AccessBase provider layer deferred; see admin-prototype-restyle PLAN §11 #1): Access domain + 9-row capability matrix + Accounts page
   (4 roles/Device scope/break-glass/focus contract/three-state/guard sweep/default light/mode-health
   indicator/degraded banner). Region annotations: U2/W4 naming (Q10), P8 index+spoke, C54/C69 control
   family, C62 honesty (simulated provider/health, gated vision), Q9 derivation, Q11 server-authoritative
   roles, Q12 Device scope, Q13=E′ affordances, Q19 light, PIT-269 dialog contract. Three states: empty/
   loading/error+Retry. Open micro-decisions: scope multi-select form, loading duration, error-leg name,
-- v1.70 (B2 delivered, PENDING USER REVIEW): Keys dual partition — PSK card (view audited each reveal /
+- v1.70 (B2 delivered; USER-ADJUDICATED 2026-11-23 = approved real face + current placement, Q2=B amended to link aggregation; expires column + provider layer deferred; PLAN §11 #2): Keys dual partition — PSK card (view audited each reveal /
   rotate confirm + optional custom 8-128 / one-time display) + API keys real fields (id/role/scope/label/
   expires) + create modal + revoke confirm+audit; one-time secret modal with close protection + copy
   fallback; delegated gates + break-glass emergency rotate; three states; legacy fake delegates removed.
   Region annotations: Q2=B, Q13=E′, C62 one-time secrets, C54/C69, PIT-269 (secretScrim body-level after
   cfm for Esc order), Q12 scope. Open micro-decisions: one-time display modal vs inline reveal (chose
   modal), copy-fallback copy, old-secret invalidation copy.
-- v1.71 (B3 delivered, PENDING USER REVIEW): Credentials tab (register+approve w/ optional name+provided
+- v1.71 (B3 delivered; USER-ADJUDICATED 2026-11-23 = approved real credentials face on current list layout; drawer/config-draft/vision-switch/name field deferred; PLAN §11 #3): Credentials tab (register+approve w/ optional name+provided
   secret / reset-secret confirm / one-time close-protected secrets / revoke=DELETE semantics card /
   Reject-Restore-Reapprove no-endpoint labelled); vision gating Q4=B (VISION_SET + vGuard reason +
   devtools simulate leg); three states; drawer tabs 4→5 regression updated. Region annotations: Q4=B,
   Q12, C62, C54/C69, PIT-269. Open micro-decisions: provided-secret validation rules, reset cooldown,
   semantics-card wording.
-- v1.72 (B4 delivered, PENDING USER REVIEW): Fleet lens (radiogroup+roving) + health strip 5 counts
+- v1.72 (B4 delivered; USER-ADJUDICATED 2026-11-23 = approved real face incl. unreachable-supersede rule (overview fleet card fixed same batch); Telemetry tab deferred with drawer; PLAN §11 #4): Fleet lens (radiogroup+roving) + health strip 5 counts
   (unreachable supersede topic/process counts) + row telemetry summary + Telemetry tab (6th, full
   Vehicles.tsx fields) + Overview fleet card deep link + scope cross-link; three states; tabs 5→6
   regression updated. Region annotations: Q3=D', Q12, U2 lens label, C66 breakpoints, C54/C69.
   Open micro-decisions: stale threshold 30s, health-strip narrow wrap, lens default memory.
-- v1.73 (B5 delivered, PENDING USER REVIEW): Monitor linkage — picker tree ARIA+keyboard in place,
+- v1.73 (B5 delivered; USER-ADJUDICATED 2026-11-23 = approved CORRECTED contract: producer_id query param + device-room/stream-label addressing (producer uuid via stats list); PLAN §11 #5): Monitor linkage — picker tree ARIA+keyboard in place,
   Play All (connected-only, skipped counts), WALL_CAP=16 guards (checkbox/bulk/Apply), per-stream
   metrics asserted, #monSimNote honest banner, three states + Retry restores data.
   **Real-backend contract mapping (design)**: stream id `${dev}-${ch}` ↔ SFU producer id
