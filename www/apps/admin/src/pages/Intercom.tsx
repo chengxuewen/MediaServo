@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FloorBoard } from '@mediaservo/talk-ui';
 import { listManagedRooms } from '../api/client';
+import Rooms from './Rooms';
+import Evidence from './Evidence';
 
 /**
  * Intercom board page (talk-app T5): one row per designated talk room --
@@ -13,6 +15,7 @@ import { listManagedRooms } from '../api/client';
  */
 export default function Intercom() {
   const navigate = useNavigate();
+  const [tab, setTab] = useState<'board'|'rooms'|'evidence'>('board');
   const [rooms, setRooms] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -36,7 +39,18 @@ export default function Intercom() {
       <h1>Intercom</h1>
       {error && <p role="alert">Failed to load the room list: {error}</p>}
       {rooms === null && !error && <p role="status">Loading rooms...</p>}
-      {rooms !== null && !error && (
+      <div className="hub-tabs" role="tablist" aria-label="Intercom">
+        {(['board','rooms','evidence'] as const).map((t) => (
+          <button key={t} role="tab" aria-selected={tab===t}
+            className={tab===t ? 'hub-tab active' : 'hub-tab'}
+            onClick={() => setTab(t)}>
+            {t === 'board' ? 'Board' : t === 'rooms' ? 'Rooms' : 'Evidence'}
+          </button>
+        ))}
+      </div>
+      {tab === 'rooms' && <Rooms />}
+      {tab === 'evidence' && <Evidence />}
+      {tab === 'board' && rooms !== null && !error && (
         <FloorBoard rooms={rooms} onOpenRoom={(id) => navigate(`/intercom/${id}`)} />
       )}
     </section>

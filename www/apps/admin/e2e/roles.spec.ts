@@ -7,7 +7,10 @@ test.describe('H3 admin role-aware views', () => {
   test('admin sees audio + vehicles nav, header shows role', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.header .version')).toContainText('admin [admin]');
-    await expect(page.locator('nav a', { hasText: 'Audio Conference' })).toBeVisible();
+    // W8 retired: Audio merged into Intercom; Rooms/Evidence are Intercom tabs
+    await page.locator('nav a', { hasText: 'Intercom' }).click();
+    await expect(page.getByRole('tab', { name: 'Rooms' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Evidence' })).toBeVisible();
     // D12=A: Fleet moved into the Admin hub (one Administration entry)
     await page.locator('nav a', { hasText: 'Admin' }).click();
     await expect(page.getByRole('tab', { name: 'Fleet' })).toBeVisible();
@@ -23,13 +26,10 @@ test.describe('H3 admin role-aware views', () => {
     expect(deleteStatus).toBe(404); // read-only block: room not found → falls through to room lookup (auth passed)
   });
 
-  test('audio panel renders (rooms or empty state)', async ({ page }) => {
-    await page.goto('/audio');
-    await expect(page.locator('h2', { hasText: 'Audio Conference Rooms' })).toBeVisible();
-    const hasRooms = await page.locator('.audio-room').count();
-    if (hasRooms === 0) {
-      await expect(page.locator('.empty')).toContainText('No active audio rooms');
-    }
+  test('intercom board renders (Audio retired, W8)', async ({ page }) => {
+    await page.goto('/intercom');
+    await expect(page.getByRole('heading', { name: 'Intercom' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: 'Board' })).toBeVisible();
   });
 
   test('vehicles view renders (reports or empty state)', async ({ page }) => {

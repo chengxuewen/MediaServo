@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { clearToken } from '../api/client';
 import { FloorNotifChips, useFloorNotifs } from '../notifications';
 import './Layout.css';
-import { Radio, LayoutDashboard, Mic, MonitorCog, Users, Settings as SettingsIcon, Sliders, ListTree, FileAudio } from 'lucide-react';
+import { Radio, LayoutDashboard, MonitorCog, Users, Settings as SettingsIcon, Sliders, FileAudio } from 'lucide-react';
 
 export default function Layout() {
   const { role, username, canMonitor, token, isAdmin } = useAuth();
@@ -76,21 +76,6 @@ export default function Layout() {
               <NavLink to="/intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                 <Radio size={15} /> Intercom
                 {heldCount > 0 && <span className="nav-badge">{heldCount}</span>}
-              </NavLink>
-            )}
-            {canMonitor && (
-              <NavLink to="/rooms" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <ListTree size={15} /> Rooms
-              </NavLink>
-            )}
-            {canMonitor && (
-              <NavLink to="/evidence" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <FileAudio size={15} /> Evidence
-              </NavLink>
-            )}
-            {canMonitor && (
-              <NavLink to="/audio" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <Mic size={15} /> Audio Conference
               </NavLink>
             )}
             <span className="nav-item disabled" title="Meeting: deferred (board B-M1 pending)" aria-disabled="true">

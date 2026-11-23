@@ -7,7 +7,7 @@ test.describe('I1 operator admission alignment', () => {
   test('operator does NOT see audio/vehicles nav, header shows role', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.header .version')).toContainText('operator [operator]');
-    await expect(page.locator('nav a', { hasText: 'Audio Conference' })).toHaveCount(0);
+    await expect(page.locator('nav a', { hasText: 'Intercom' })).toHaveCount(0);
     await expect(page.locator('nav a', { hasText: 'Vehicles' })).toHaveCount(0);
     // Dashboard data goes through admin REST → operator is server-rejected → 401 error state (admission parity)
     await expect(page.locator('.error')).toContainText('Authentication required');

@@ -4,7 +4,6 @@ import Layout from './components/Layout';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Settings from './pages/Settings';
-import Audio from './pages/Audio';
 import Vehicles from './pages/Vehicles';
 import Devices from './pages/Devices';
 import Accounts from './pages/Accounts';
@@ -41,7 +40,7 @@ export default function App() {
         <Route path="/devices" element={<RequireAdmin><Devices /></RequireAdmin>} />
         <Route path="/accounts" element={<RequireAdmin><Accounts /></RequireAdmin>} />
         <Route path="/apikeys" element={<RequireAdmin><ApiKeys /></RequireAdmin>} />
-        <Route path="/audio" element={<Audio />} />
+        <Route path="/audio" element={<Navigate to="/intercom" replace />} />
         <Route path="/intercom" element={<Intercom />} />
         <Route path="/intercom/:roomId" element={<IntercomSession />} />
         <Route path="/rooms" element={<Rooms />} />
