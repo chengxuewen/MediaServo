@@ -433,6 +433,47 @@ const DEVICE_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// The deferred-queue cap for non-answer messages within the challenge window (prevents unauthenticated flooding; over the cap = disconnect WARN).
 const MAX_DEFERRED_AUTH_MSGS: usize = 16;
 
+/// B-sec fail-closed decision (web-portal-ui §3h invariant ①): does a VERIFIED
+/// JWT map to a capability principal? Returns `(code, reason)` when the token
+/// must be rejected: missing role claim = 4013 (the old fail-open legacy
+/// admission — the whole G3 matrix was bypassed over WS), unknown role = 4011
+/// (garbage value). REST mirrors the same policy via 401 (admin auth_middleware),
+/// keeping principal mapping fail-closed on all channels.
+fn jwt_rejection(role: Option<&str>) -> Option<(u16, String)> {
+    match role {
+        None => Some((
+            4013,
+            "token has no role claim: legacy sessions are not admitted (fail-closed)".to_string(),
+        )),
+        Some(r) if CockpitRole::parse(r).is_none() => {
+            Some((4011, format!("token role {r:?} not recognized")))
+        }
+        Some(_) => None,
+    }
+}
+
+#[cfg(test)]
+mod jwt_rejection_tests {
+    use super::jwt_rejection;
+
+    #[test]
+    fn missing_role_rejected_4013() {
+        assert_eq!(jwt_rejection(None).map(|(c, _)| c), Some(4013));
+    }
+
+    #[test]
+    fn unknown_role_rejected_4011() {
+        assert_eq!(jwt_rejection(Some("bogus")).map(|(c, _)| c), Some(4011));
+    }
+
+    #[test]
+    fn all_known_roles_admitted() {
+        for role in ["admin", "dispatcher", "operator", "viewer"] {
+            assert!(jwt_rejection(Some(role)).is_none(), "role {role} must map");
+        }
+    }
+}
+
 async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Option<String>) {
     // Track active connection count
     server.active_connections.fetch_add(1, Ordering::Relaxed);
@@ -473,55 +514,46 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     {
         match jwt_auth.verify(token) {
             Ok(claims) => {
-                // G3 role resolution (D-H11): a valid role -> account identity (cockpit); no role = a legacy
-                // token (keep the original behavior); unknown role -> refuse the connection (4011).
-                match claims.role.as_deref() {
-                    Some(role_str) if CockpitRole::parse(role_str).is_none() => {
-                        let reason = format!("token role {role_str:?} not recognized");
-                        tracing::warn!("JWT auth rejected: {reason}");
-                        audit::log_event(AuditEvent::AuthFailure {
-                            peer_id: peer_id.clone(),
-                            reason: reason.clone(),
-                        });
-                        let error = SignalingMessage::Error { code: 4011, message: reason };
-                        let _ = ws_sender
-                            .lock()
-                            .await
-                            .send(Message::Text(send_msg(&error).unwrap()))
-                            .await;
-                        return;
-                    }
-                    Some(role_str) => {
-                        // Account session: peer_id uses the username + a short random suffix (concurrent cockpits of the same account do not collide).
-                        let role = CockpitRole::parse(role_str).expect("checked above");
-                        account_identity = Some(AccountIdentity {
-                            username: claims.sub.clone(),
-                            role,
-                            vehicles: claims.vehicles.clone().unwrap_or_default(),
-                        });
-                        peer_id =
-                            format!("{}-{}", claims.sub, &uuid::Uuid::new_v4().to_string()[..8]);
-                        authenticated = true;
-                        tracing::info!(
-                            "JWT account authenticated: user={} role={}",
-                            claims.sub,
-                            role_str
-                        );
-                        audit::log_event(AuditEvent::AuthSuccess {
-                            peer_id: peer_id.clone(),
-                            device_id: None,
-                        });
-                    }
-                    None => {
-                        peer_id = claims.sub.clone();
-                        authenticated = true;
-                        tracing::info!("JWT authenticated: peer={}", peer_id);
-                        audit::log_event(AuditEvent::AuthSuccess {
-                            peer_id: peer_id.clone(),
-                            device_id: None,
-                        });
-                    }
+                // G3 role resolution (D-H11): a verified JWT must map to a capability
+                // principal. Missing role = legacy (B-sec fail-closed, §3h invariant ①);
+                // unknown role = garbage — both reject (see jwt_rejection() below).
+                if let Some((code, reason)) = jwt_rejection(claims.role.as_deref()) {
+                    tracing::warn!("JWT auth rejected: {reason} -> {code}");
+                    audit::log_event(AuditEvent::AuthFailure {
+                        peer_id: peer_id.clone(),
+                        reason: reason.clone(),
+                    });
+                    let error = SignalingMessage::Error {
+                        code,
+                        message: reason,
+                    };
+                    let _ = ws_sender
+                        .lock()
+                        .await
+                        .send(Message::Text(send_msg(&error).unwrap()))
+                        .await;
+                    return;
                 }
+                // Account session: peer_id uses the username + a short random suffix
+                // (concurrent cockpits of the same account do not collide).
+                let role = CockpitRole::parse(claims.role.as_deref().expect("rejection checked above"))
+                    .expect("valid role");
+                account_identity = Some(AccountIdentity {
+                    username: claims.sub.clone(),
+                    role,
+                    vehicles: claims.vehicles.clone().unwrap_or_default(),
+                });
+                peer_id = format!("{}-{}", claims.sub, &uuid::Uuid::new_v4().to_string()[..8]);
+                authenticated = true;
+                tracing::info!(
+                    "JWT account authenticated: user={} role={}",
+                    claims.sub,
+                    claims.role.as_deref().unwrap_or_default()
+                );
+                audit::log_event(AuditEvent::AuthSuccess {
+                    peer_id: peer_id.clone(),
+                    device_id: None,
+                });
             }
             Err(e) => {
                 // T0 fail-closed (accountless-client-auth): a token presented but verification failed = refuse.
