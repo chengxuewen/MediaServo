@@ -11,6 +11,8 @@ import { useBoardStore } from './hooks';
 export interface FloorBoardProps {
   /** Designated talk rooms (reference-stable — e.g. a state array). */
   rooms: string[];
+  /** Open the level-2 session view for a room (board row click). */
+  onOpenRoom?: (roomId: string) => void;
   className?: string;
 }
 
@@ -62,15 +64,30 @@ function derive(s: BoardRoomSnapshot): {
 function FloorRow({
   s,
   send,
+  onOpen,
 }: {
   s: BoardRoomSnapshot;
   send: (roomId: string, cmd: FloorCommand) => void;
+  onOpen?: (roomId: string) => void;
 }) {
   const { phase, holders, queue, mode } = derive(s);
   const holding = Boolean(s.peerId && holders?.includes(s.peerId));
   const staleReason = 'connection down — state unknown';
   return (
-    <div className="msr-talk-row" role="listitem">
+    <div
+      className="msr-talk-row"
+      role="listitem"
+      onClick={onOpen ? () => onOpen(s.roomId) : undefined}
+      onKeyDown={
+        onOpen
+          ? (e) => {
+              if (e.key === 'Enter') onOpen(s.roomId);
+            }
+          : undefined
+      }
+      tabIndex={onOpen ? 0 : undefined}
+      style={onOpen ? { cursor: 'pointer' } : undefined}
+    >
       <StatusGlyph tone={phase.tone} shape={phase.shape} label={phase.label} />
       <div className="msr-talk-id">
         <span className="msr-talk-name">{s.roomId}</span>
@@ -86,7 +103,10 @@ function FloorRow({
           variant="primary"
           disabled={s.stale || holding}
           disabledReason={s.stale ? staleReason : holding ? 'you already hold the floor' : undefined}
-          onClick={() => send(s.roomId, { type: 'floor_request' })}
+          onClick={(e) => {
+            e.stopPropagation();
+            send(s.roomId, { type: 'floor_request' });
+          }}
         >
           Request
         </Button>
@@ -94,7 +114,10 @@ function FloorRow({
           size="sm"
           disabled={s.stale || !holding}
           disabledReason={s.stale ? staleReason : 'you are not holding the floor'}
-          onClick={() => send(s.roomId, { type: 'floor_release' })}
+          onClick={(e) => {
+            e.stopPropagation();
+            send(s.roomId, { type: 'floor_release' });
+          }}
         >
           Release
         </Button>
@@ -103,7 +126,7 @@ function FloorRow({
   );
 }
 
-export function FloorBoard({ rooms, className = '' }: FloorBoardProps) {
+export function FloorBoard({ rooms, onOpenRoom, className = '' }: FloorBoardProps) {
   const { snap, send } = useBoardStore(rooms);
   if (!rooms.length) {
     return (
@@ -117,12 +140,13 @@ export function FloorBoard({ rooms, className = '' }: FloorBoardProps) {
       {rooms.map((id) => {
         const s = snap.rooms[id];
         return s ? (
-          <FloorRow key={id} s={s} send={send} />
+          <FloorRow key={id} s={s} send={send} onOpen={onOpenRoom} />
         ) : (
           <FloorRow
             key={id}
             s={{ roomId: id, conn: 'connecting', stale: true, lastEvent: null, peerId: null }}
             send={send}
+            onOpen={onOpenRoom}
           />
         );
       })}

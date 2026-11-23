@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { FloorBoard } from '@mediaservo/talk-ui';
 import { listManagedRooms } from '../api/client';
 
@@ -11,6 +12,7 @@ import { listManagedRooms } from '../api/client';
  * The channel session (level 2) lands with batches T11/T12.
  */
 export default function Intercom() {
+  const navigate = useNavigate();
   const [rooms, setRooms] = useState<string[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -34,7 +36,9 @@ export default function Intercom() {
       <h1>Intercom</h1>
       {error && <p role="alert">Failed to load the room list: {error}</p>}
       {rooms === null && !error && <p role="status">Loading rooms...</p>}
-      {rooms !== null && !error && <FloorBoard rooms={rooms} />}
+      {rooms !== null && !error && (
+        <FloorBoard rooms={rooms} onOpenRoom={(id) => navigate(`/intercom/${id}`)} />
+      )}
     </section>
   );
 }

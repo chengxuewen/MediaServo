@@ -92,6 +92,14 @@ export class BoardStore {
   private readonly wsFactory: (url: string, protocols: string[]) => WebSocket;
 
   constructor(opts: BoardStoreOptions) {
+    // browser connectivity events (K discipline): going offline drops the
+    // sockets immediately so rooms flip to UNKNOWN (never idle) instead of
+    // waiting for the next heartbeat; the backoff reconnects on 'online'.
+    if (typeof window !== 'undefined') {
+      window.addEventListener('offline', () => {
+        for (const conn of this.conns.values()) conn.ws?.close();
+      });
+    }
     this.baseUrl = opts.baseUrl ?? '';
     this.reconnectBaseMs = opts.reconnectBaseMs ?? 500;
     this.token = opts.token ?? getToken();

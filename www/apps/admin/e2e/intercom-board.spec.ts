@@ -59,3 +59,20 @@ test('unknown state: killing the ws flips rows to UNKNOWN with guarded actions',
   await expect(page.context().browser()).toBeTruthy(); // keep testInfo used minimally
   void testInfo;
 });
+
+test('session view opens from a board row and degrades honestly without a mic', async ({ page }) => {
+  await page.goto('/intercom');
+  const row = page.locator('.msr-talk-row', { hasText: 'talk-ops' });
+  await expect(row).toBeVisible();
+  await row.click();
+  await expect(page.getByRole('button', { name: /HOLD TO TALK/ })).toBeVisible({ timeout: 10_000 });
+  // headless chromium has no microphone: the honest cue must say so, and the
+  // PTT control stays live (floor control works; the server auto-revokes).
+  await expect(page.locator('.msr-error')).toContainText('microphone unavailable', {
+    timeout: 10_000,
+  });
+  await expect(page.getByRole('button', { name: /HOLD TO TALK/ })).toBeEnabled();
+  // Esc returns to the board
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('heading', { name: 'Intercom' })).toBeVisible();
+});

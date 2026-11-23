@@ -21,4 +21,6 @@ export const VERSION = '0.2.0';
 export { FloorBoard } from './Board';
 export type { FloorBoardProps } from './Board';
 export { useBoardStore } from './hooks';
+export { ChannelSession } from './Session';
+export type { ChannelSessionProps } from './Session';
 export type { BoardBinding } from './hooks';
