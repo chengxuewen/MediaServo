@@ -6,6 +6,7 @@ pub mod accounts;
 pub mod admin;
 pub mod apikeys;
 pub mod audit;
+pub mod evidence;
 pub mod config;
 pub mod devices;
 pub mod floor;

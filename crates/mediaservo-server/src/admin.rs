@@ -131,6 +131,16 @@ pub fn admin_router(state: AdminState) -> Router {
         .route("/api/admin/apikeys", get(list_api_keys).post(register_api_key))
         .route("/api/admin/apikeys/:key_id", delete(revoke_api_key))
         .route("/api/admin/psk", get(get_psk).post(rotate_psk))
+        // T9 evidence retention (K5/K14/7.3): declare (dispatch+admin), list /
+        // download (GET), withdraw (admin-only via middleware). Raw audio body
+        // -- own 3 MB limit over the 2 MB clip cap.
+        .route(
+            "/api/admin/evidence",
+            get(evidence_list)
+                .post(evidence_retain)
+                .layer(axum::extract::DefaultBodyLimit::max(3 * 1024 * 1024)),
+        )
+        .route("/api/admin/evidence/:id", get(evidence_download).delete(evidence_withdraw))
         // SB-5 (B6 face): the in-memory security ring as JSON. Read gate = the
         // auth_middleware default (admin + dispatcher GET), matching floor GET.
         // source 标 is honest: core-in-memory, NOT persisted (invariant ③
@@ -721,6 +731,101 @@ pub struct UpdateAccountRequest {
     pub vehicles: Option<Vec<String>>,
     #[serde(default)]
     pub new_password: Option<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct EvidenceQuery {
+    room_id: String,
+    label: Option<String>,
+}
+
+/// POST /api/admin/evidence?room_id=&label= -- raw audio bytes (T9 consent).
+async fn evidence_retain(
+    Extension(claims): Extension<JwtClaims>,
+    axum::extract::Query(q): axum::extract::Query<EvidenceQuery>,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<serde_json::Value>), (StatusCode, Json<ErrorResponse>)> {
+    if q.room_id.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse { error: "room_id is required".into() }),
+        ));
+    }
+    match crate::evidence::store().retain(
+        &q.room_id,
+        &claims.sub,
+        q.label.as_deref().unwrap_or_default(),
+        &body,
+    ) {
+        Ok(item) => {
+            crate::audit::log_event(crate::audit::AuditEvent::EvidenceRetain {
+                evidence_id: item.id.clone(),
+                room_id: item.room_id.clone(),
+                actor: claims.sub,
+                size: item.size,
+            });
+            Ok((StatusCode::CREATED, Json(serde_json::json!({ "item": item }))))
+        }
+        Err(e) => {
+            let code = if e.contains("exceeds") {
+                StatusCode::PAYLOAD_TOO_LARGE
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            Err((code, Json(ErrorResponse { error: e })))
+        }
+    }
+}
+
+/// GET /api/admin/evidence -- retained clips + the retention label (server-disk).
+async fn evidence_list() -> Json<serde_json::Value> {
+    let items = crate::evidence::store().list();
+    let count = items.len();
+    Json(serde_json::json!({
+        "items": items,
+        "count": count,
+        "retention_secs": crate::evidence::RETENTION_SECS,
+        "source": "server-disk",
+    }))
+}
+
+/// GET /api/admin/evidence/:id -- download the clip (audited).
+async fn evidence_download(
+    Extension(claims): Extension<JwtClaims>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<impl axum::response::IntoResponse, (StatusCode, Json<ErrorResponse>)> {
+    match crate::evidence::store().load(&id) {
+        Some((item, bytes)) => {
+            crate::audit::log_event(crate::audit::AuditEvent::EvidenceDownload {
+                evidence_id: item.id,
+                actor: claims.sub,
+            });
+            Ok(([(axum::http::header::CONTENT_TYPE, "audio/webm")], bytes))
+        }
+        None => Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse { error: format!("evidence {id} not found") }),
+        )),
+    }
+}
+
+/// DELETE /api/admin/evidence/:id -- consent withdrawal (irreversible, admin).
+async fn evidence_withdraw(
+    Extension(claims): Extension<JwtClaims>,
+    axum::extract::Path(id): axum::extract::Path<String>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    if crate::evidence::store().delete(&id) {
+        crate::audit::log_event(crate::audit::AuditEvent::EvidenceWithdraw {
+            evidence_id: id.clone(),
+            actor: claims.sub,
+        });
+        Ok(Json(serde_json::json!({ "deleted": id })))
+    } else {
+        Err((
+            StatusCode::NOT_FOUND,
+            Json(ErrorResponse { error: format!("evidence {id} not found") }),
+        ))
+    }
 }
 
 /// GET /api/admin/audit -- SB-5 (B6 face): recent security-ring events as JSON
@@ -1370,17 +1475,22 @@ async fn auth_middleware(
         ));
     }
     if !is_admin {
-        // H3 dispatcher: read-only views (audio rooms/status/video monitoring), no config/control.
-        let read_only = matches!(*req.method(), axum::http::Method::GET)
-            && !req.uri().path().starts_with("/api/admin/config")
-            && !req.uri().path().starts_with("/api/admin/psk");
-        if !read_only {
+        // H3 dispatcher: read-only views, no config/control. T9: evidence POST is
+        // the ONE mutation dispatchers may perform (they are the speakers who
+        // declare talk spurts; every declaration is audited).
+        let method = req.method().clone();
+        let path = req.uri().path().to_string();
+        let allowed = (matches!(method, axum::http::Method::GET)
+            && !path.starts_with("/api/admin/config")
+            && !path.starts_with("/api/admin/psk"))
+            || (matches!(method, axum::http::Method::POST) && path == "/api/admin/evidence");
+        if !allowed {
             let detail = "dispatcher role is read-only";
-            tracing::warn!("admin API denied: {detail} (path={})", req.uri().path());
+            tracing::warn!("admin API denied: {detail} (path={path})");
             crate::audit::log_event(crate::audit::AuditEvent::AuthorizationDenied {
                 action: "admin_api".into(),
                 peer_id: claims.sub.clone(),
-                detail: format!("{detail} (path={})", req.uri().path()),
+                detail: format!("{detail} (path={path})"),
             });
             return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse { error: detail.into() })));
         }
@@ -1957,6 +2067,45 @@ pub(crate) mod tests {
                 mediaservo_common::floor::FloorLimits::default(),
             ))),
         );
+    }
+
+    #[tokio::test]
+    async fn evidence_retain_list_download_delete_roundtrip() {
+        let state = make_state().await;
+        let token = admin_token(&state);
+        let app = admin_router(state);
+        let hdr = |m: Method, uri: &str| {
+            Request::builder()
+                .method(m)
+                .uri(uri)
+                .header("Authorization", format!("Bearer {token}"))
+                .body(Body::from(vec![1u8, 2, 3, 4]))
+                .unwrap()
+        };
+        // declare (consent recorded) -- unique room keeps parallel tests independent
+        let resp = app.clone().oneshot(hdr(Method::POST, "/api/admin/evidence?room_id=ev-test&label=spurt")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        let id = v["item"]["id"].as_str().unwrap().to_string();
+        assert_eq!(v["item"]["retain_until"].as_u64().unwrap() - v["item"]["ts"].as_u64().unwrap(), 7 * 24 * 3600);
+        // list shows it with the honest source mark
+        let resp = app.clone().oneshot(hdr(Method::GET, "/api/admin/evidence")).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["source"], "server-disk");
+        assert!(v["items"].as_array().unwrap().iter().any(|i| i["id"] == id.as_str()));
+        // download returns the raw bytes
+        let resp = app.clone().oneshot(hdr(Method::GET, &format!("/api/admin/evidence/{id}"))).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(resp.into_body(), 1 << 20).await.unwrap();
+        assert_eq!(&body[..], &[1u8, 2, 3, 4]);
+        // withdraw (irreversible clear)
+        let resp = app.clone().oneshot(hdr(Method::DELETE, &format!("/api/admin/evidence/{id}"))).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let resp = app.oneshot(hdr(Method::GET, &format!("/api/admin/evidence/{id}"))).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

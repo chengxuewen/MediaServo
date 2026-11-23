@@ -473,6 +473,29 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
         }
     } else {
         // ── Plain TCP mode ──
+        // T9 evidence retention (K14=B): hourly real-time purge of >7d clips;
+        // every purge lands in the audit ring. The store is a process global
+        // (audit-ring precedent); MEDIASERVO_EVIDENCE_DIR overrides the dir.
+        {
+            let dir = mediaservo_server::evidence::store().dir().to_path_buf();
+            tracing::info!("evidence store: {}", dir.display());
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(std::time::Duration::from_secs(3600));
+                loop {
+                    tick.tick().await;
+                    for item in mediaservo_server::evidence::store().sweep() {
+                        tracing::info!(evidence_id = %item.id, room = %item.room_id, "evidence expired and purged");
+                        mediaservo_server::audit::log_event(
+                            mediaservo_server::audit::AuditEvent::EvidencePurge {
+                                evidence_id: item.id,
+                                room_id: item.room_id,
+                            },
+                        );
+                    }
+                }
+            });
+        }
+
         let listener = tokio::net::TcpListener::bind(&bind_addr)
             .await
             .map_err(|e| format!("Failed to bind {}: {}", bind_addr, e))?;

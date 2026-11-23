@@ -78,6 +78,14 @@ pub enum AuditEvent {
     },
     /// Admin-plane managed-room config mutation (P4-3, O20/RM12-C): one line per create/update/remove of a rooms.yaml entry.
     RoomConfigChanged { action: String, room_id: String, actor: String, detail: String },
+    /// T9 evidence retention (K5/K14/7.3): a clip was declared (explicit consent).
+    EvidenceRetain { evidence_id: String, room_id: String, actor: String, size: u64 },
+    /// T9: a retained clip was downloaded for review.
+    EvidenceDownload { evidence_id: String, actor: String },
+    /// T9: consent withdrawn / manual delete (irreversible clear).
+    EvidenceWithdraw { evidence_id: String, actor: String },
+    /// T9: the retention sweeper purged an expired clip (K14=B).
+    EvidencePurge { evidence_id: String, room_id: String },
 }
 
 /// Emit an audit event as a structured `tracing` info-level log.
@@ -123,6 +131,40 @@ pub fn log_event(event: AuditEvent) {
                 actor = %actor,
                 detail = %detail,
                 "Managed-room config mutated (rooms.yaml)"
+            );
+        }
+        AuditEvent::EvidenceRetain { evidence_id, room_id, actor, size } => {
+            tracing::info!(
+                audit.event = "evidence_retain",
+                evidence_id = %evidence_id,
+                room_id = %room_id,
+                actor = %actor,
+                size,
+                "Evidence clip retained (7d TTL, consent recorded)"
+            );
+        }
+        AuditEvent::EvidenceDownload { evidence_id, actor } => {
+            tracing::info!(
+                audit.event = "evidence_download",
+                evidence_id = %evidence_id,
+                actor = %actor,
+                "Evidence clip downloaded"
+            );
+        }
+        AuditEvent::EvidenceWithdraw { evidence_id, actor } => {
+            tracing::warn!(
+                audit.event = "evidence_withdraw",
+                evidence_id = %evidence_id,
+                actor = %actor,
+                "Evidence clip withdrawn (irreversible clear)"
+            );
+        }
+        AuditEvent::EvidencePurge { evidence_id, room_id } => {
+            tracing::info!(
+                audit.event = "evidence_purge",
+                evidence_id = %evidence_id,
+                room_id = %room_id,
+                "Evidence clip purged by TTL sweeper"
             );
         }
         AuditEvent::RoomDestroy { room_id } => {
