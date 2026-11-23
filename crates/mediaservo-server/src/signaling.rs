@@ -62,8 +62,10 @@ pub struct SignalingServer {
     /// SB-3 roster (I3/H3): live WS membership per room -> per-peer identity.
     /// Mirrors connections, NOT the a2 retention window (ghosts are not kept).
     /// Arc-wrapped: SignalingServer is cloned per connection (all state fields
-    /// must share across clones, like `channels`).
-    pub roster: std::sync::Arc<dashmap::DashMap<String, dashmap::DashMap<String, RosterEntry>>>,
+    /// must share across clones, like `channels`). Crate-private: RosterEntry
+    /// is pub(crate) — a pub field would leak a private type (private_interfaces).
+    pub(crate) roster:
+        std::sync::Arc<dashmap::DashMap<String, dashmap::DashMap<String, RosterEntry>>>,
     /// a1 companion: the wait cap when authenticated but not yet joined (default 30s).
     pub ws_join_wait_secs: u64,
     /// a2 (S0.5): the session-retention ticket table, key = (identity_key, room). Attached at the Joined-ack
