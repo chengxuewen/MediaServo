@@ -965,3 +965,15 @@ PIT-163~169 本轮入档；Dockerfile/entrypoint setpriv 修复模式②可构�
   8. 入口：只下沉 agents/ci/mcp/verify/doctor/clean；缓存/品牌/deploy 留父仓。
 - **未决**: 25-abi 翻译 vs 白名单最终口径；ast-grep 依赖；codebuddy/trae 触发条件。
 - **验证**: 每项独立提交 + 门；不混做。
+
+## D298: 平台态 auth 契约改判——废 D57 gRPC，立 provider-agnostic OIDC 契约（2026-11-23，用户逐项亲裁 1–6）
+
+- **Decision**: 平台态认证授权契约从 D57 私有 gRPC（ValidateToken/CheckPermission）改判为**标准 OIDC 提供者契约**：hosted redirect + PKCE + 后端 exchange（承父仓 Q13=E′）；必选基线 = 短 TTL + 本地 JWKS 验签，可选增强 = back-channel logout（不支持自动退化，绝不全灭）；claims→4角色+Device scope 走**可配置翻译字典**（未知值/缺字段 fail-closed 全通道 REST+WS）；PDP 可外委、PEP 恒核心（承 Q14）。部署编排模板归本仓 docker/（全 env 化，IdP 镜像客户自备），宿主壳只管 pin。dev 参考 OP（Keycloak）替身轨先行验证契约机制，AccessBase 专属特性缺证保持 gated。
+- **Date**: 2026-11-23
+- **Supersedes**: D57（gRPC Auth Contract；记录本体已随 D1–D190 归档波移出，遗存仅 docs/modules/05-auth-permissions.md §6，本笔同段改写）。
+- **Reason**:
+  - D57 零实现（crates grep AuthProvider/ValidateToken = 0 命中），作废成本≈0；私有协议 = 每接一家平台写一份适配器，标准 OIDC = 生态适配我们（用户明示：未来不止 AccessBase，还有其他鉴权平台）。
+  - AccessBase 无 gRPC 面且源码不在盘上、API 文档未取、无 LICENSE 文件——契约不能绑死单一缺证 provider。
+  - 12h 不可吊销 JWT（admin.rs:278）违反平台态不变量④；混合吊销拿到即时吊销上限 + 宕机不全灭下限。
+- **Impact**: docs/modules/05-auth-permissions.md §1/§2/§6 与 02-deployment-modes.md §4 同笔改写（gRPC→OIDC）；父仓新轮 docs/plans/oidc-provider-contract/PLAN.md 承载裁决台账与契约细节（裁决 1=A/2=A/3=B/4=C/5=B/6=A）；PROGRAM S5 文档门语义收窄为只锁 AccessBase 专属行。实现开工门仍闭，须用户明示；B-sec 五件套为并行前置。
+- **验证**: 本笔为文档/记忆变更，零代码；契约机制实现期以 dev 参考 OP e2e 验证（source-driven 核对 OIDC/Keycloak 官方文档）。

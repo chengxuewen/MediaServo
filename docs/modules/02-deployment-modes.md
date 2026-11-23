@@ -79,11 +79,17 @@ mediaservo-client  # Starts the desktop GUI
 
 **Characteristics**:
 - Zero hard dependency on the host platform
-- User/permission management delegated to platform RBAC/LDAP
-- Communicates with the host platform via gRPC
-- Config: `auth.mode: "aude"`
+- Human authentication delegated to an external OIDC provider (PDP); MediaServo keeps
+  the PEP (claims → 4 roles + device scope, enforced locally, fail-closed)
+- Communicates with the provider via the standard OIDC provider contract
+  (D298, supersedes the D57 gRPC design; see `05-auth-permissions.md` §6)
+- LDAP/AD, when present, stays behind the provider as user federation — never direct
+- Config: `auth.mode: "aude"` (design-state; naming finalized at implementation)
+- Orchestration template ships in `docker/` fully env-driven; the provider image is
+  customer-supplied and never distributed with the product
 
-**Analogy**: like Jira installed on a Synology, using DSM's LDAP accounts.
+**Analogy**: like Jira installed on a Synology, using DSM's accounts — except the wiring
+is a standard protocol (OIDC), so any compliant identity platform can play the DSM role.
 
 ---
 
