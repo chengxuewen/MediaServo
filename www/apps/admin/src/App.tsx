@@ -11,6 +11,7 @@ import Accounts from './pages/Accounts';
 import ApiKeys from './pages/ApiKeys';
 import Intercom from './pages/Intercom';
 import IntercomSession from './pages/IntercomSession';
+import { FloorNotifProvider } from './notifications';
 import { hasToken } from './api/client';
 import { useAuth } from './hooks/useAuth';
 
@@ -29,7 +30,8 @@ function RequireAdmin({ children }: { children: ReactNode }) {
 
 export default function App() {
   return (
-    <Routes>
+    <FloorNotifProvider>
+        <Routes>
       <Route path="/login" element={<Login />} />
       <Route element={<RequireAuth><Layout /></RequireAuth>}>
         <Route path="/" element={<Dashboard />} />
@@ -43,5 +45,6 @@ export default function App() {
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
+        </FloorNotifProvider>
   );
 }

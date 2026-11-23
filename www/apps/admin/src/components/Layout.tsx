@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { clearToken } from '../api/client';
+import { FloorNotifChips, useFloorNotifs } from '../notifications';
 import './Layout.css';
 import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders, KeyRound } from 'lucide-react';
 
 export default function Layout() {
   const { role, username, canMonitor, token, isAdmin } = useAuth();
+  const { heldCount } = useFloorNotifs();
   const navigate = useNavigate();
   const location = useLocation();
   const notices = (location.state as { notice?: string } | null)?.notice;
@@ -38,6 +40,7 @@ export default function Layout() {
       <header className="header">
         <span className="logo"><Radio size={18} /> MediaServo Admin</span>
         <div className="header-right">
+          <FloorNotifChips />
           <span className="version">
             {username ? `${username}${role ? ` [${role}]` : ''} · ` : ''}v0.1.0
           </span>
@@ -60,6 +63,7 @@ export default function Layout() {
           {canMonitor && (
             <NavLink to="/intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <Radio size={15} /> Intercom
+              {heldCount > 0 && <span className="nav-badge">{heldCount}</span>}
             </NavLink>
           )}
           {canMonitor && (

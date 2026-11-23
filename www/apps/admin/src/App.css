@@ -1,3 +1,42 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--ms-color-bg); color: var(--ms-color-text)b; min-height: 100vh; }
 #root { min-height: 100vh; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--ms-color-bg); color: var(--ms-color-text)b; min-height: 100vh; }
+#root { min-height: 100vh; }
+
+/* -- cross-page floor notifications (T11, K15) -- */
+.notif-stack {
+  display: flex;
+  gap: var(--ms-space-2);
+  align-items: center;
+}
+
+.notif-chip {
+  border: 1px solid var(--ms-color-border-strong);
+  background: var(--ms-color-warning);
+  color: var(--ms-color-text);
+  font: inherit;
+  font-size: var(--ms-font-size-xs);
+  padding: var(--ms-space-1) var(--ms-space-2);
+  border-radius: var(--ms-radius-sm);
+  cursor: pointer;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notif-chip:focus-visible {
+  outline: var(--ms-focus-ring-width) solid var(--ms-focus-ring-color);
+  outline-offset: 2px;
+}
+
+.nav-badge {
+  background: var(--ms-color-danger);
+  color: var(--ms-color-text-inverse);
+  font-size: var(--ms-font-size-xs);
+  border-radius: var(--ms-radius-full);
+  padding: 0 var(--ms-space-2);
+  margin-left: var(--ms-space-1);
+}

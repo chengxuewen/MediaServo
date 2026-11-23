@@ -306,6 +306,8 @@ export function ChannelSession({
           onClick={() => {
             soundOnRef.current = !soundOnRef.current;
             setSoundOn(soundOnRef.current);
+            // shared preference: the cross-page notification host reads it
+            localStorage.setItem('mediaservo_cues_muted', soundOnRef.current ? '0' : '1');
           }}
         >
           {soundOn ? 'Sound on' : 'Sound off'}
