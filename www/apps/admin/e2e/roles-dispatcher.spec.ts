@@ -8,7 +8,9 @@ test.describe('H3 dispatcher role-aware views', () => {
     await page.goto('/');
     await expect(page.locator('.header .version')).toContainText('dispatcher [dispatcher]');
     await expect(page.locator('nav a', { hasText: 'Audio Conference' })).toBeVisible();
-    await expect(page.locator('nav a', { hasText: 'Vehicles' })).toBeVisible();
+    // D12=A: Fleet moved into the Admin hub (one Administration entry)
+    await page.locator('nav a', { hasText: 'Admin' }).click();
+    await expect(page.getByRole('tab', { name: 'Fleet' })).toBeVisible();
   });
 
   test('dispatcher admin-only REST denied, read-only allowed', async ({ page }) => {

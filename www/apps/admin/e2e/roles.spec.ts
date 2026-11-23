@@ -8,7 +8,9 @@ test.describe('H3 admin role-aware views', () => {
     await page.goto('/');
     await expect(page.locator('.header .version')).toContainText('admin [admin]');
     await expect(page.locator('nav a', { hasText: 'Audio Conference' })).toBeVisible();
-    await expect(page.locator('nav a', { hasText: 'Vehicles' })).toBeVisible();
+    // D12=A: Fleet moved into the Admin hub (one Administration entry)
+    await page.locator('nav a', { hasText: 'Admin' }).click();
+    await expect(page.getByRole('tab', { name: 'Fleet' })).toBeVisible();
   });
 
   test('admin token keeps full access (write passes auth gate)', async ({ page }) => {

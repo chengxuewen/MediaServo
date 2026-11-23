@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { clearToken } from '../api/client';
 import { FloorNotifChips, useFloorNotifs } from '../notifications';
 import './Layout.css';
-import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders, KeyRound, ListTree, FileAudio } from 'lucide-react';
+import { Radio, LayoutDashboard, Mic, MonitorCog, Users, Settings as SettingsIcon, Sliders, ListTree, FileAudio } from 'lucide-react';
 
 export default function Layout() {
   const { role, username, canMonitor, token, isAdmin } = useAuth();
@@ -38,7 +38,7 @@ export default function Layout() {
     <div className="layout">
       {notices && <div className="notice-banner">ℹ️ {notices}</div>}
       <header className="header">
-        <span className="logo"><Radio size={18} /> MediaServo Admin</span>
+        <span className="logo"><span className="logo-mark" aria-hidden="true"><Radio size={16} /></span> MediaServo</span>
         <div className="header-right">
           <FloorNotifChips />
           <span className="version">
@@ -51,57 +51,64 @@ export default function Layout() {
       </header>
       <div className="main">
         <nav className="sidebar" aria-label="primary">
-          {/* P0 shell convergence: grouped navigation (prototype language).
-              Link texts are unchanged -- role specs assert them verbatim. */}
+          <div className="nav-head">
+            <span className="nav-title">Navigation</span>
+          </div>
           <div className="nav-group">
             <span className="nav-group-label">Overview</span>
             <NavLink to="/" end className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <LayoutDashboard size={15} /> Dashboard
+              <LayoutDashboard size={15} /> Overview
             </NavLink>
           </div>
-          {canMonitor && (
-            <div className="nav-group">
-              <span className="nav-group-label">Intercom</span>
+          <div className="nav-group">
+            <span className="nav-group-label">Surveillance</span>
+            {/* D11=B: prototype shape kept; unavailable domains are disabled WITH a reason */}
+            <span className="nav-item disabled" title="Monitor: realtime wall lands in batch P3 (board B5 pending review)" aria-disabled="true">
+              <MonitorCog size={15} /> Monitor
+            </span>
+            <span className="nav-item disabled" title="Recording: deferred until recording-recon unlocks RECORDING_READY" aria-disabled="true">
+              <FileAudio size={15} /> Recording
+            </span>
+          </div>
+          <div className="nav-group">
+            <span className="nav-group-label">Communication</span>
+            {canMonitor && (
               <NavLink to="/intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                 <Radio size={15} /> Intercom
                 {heldCount > 0 && <span className="nav-badge">{heldCount}</span>}
               </NavLink>
+            )}
+            {canMonitor && (
               <NavLink to="/rooms" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                 <ListTree size={15} /> Rooms
               </NavLink>
+            )}
+            {canMonitor && (
               <NavLink to="/evidence" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                 <FileAudio size={15} /> Evidence
               </NavLink>
-              {/* W8 Audio retires in P1 (capability merges into Intercom) */}
+            )}
+            {canMonitor && (
               <NavLink to="/audio" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
                 <Mic size={15} /> Audio Conference
               </NavLink>
-            </div>
-          )}
-          {canMonitor && (
-            <div className="nav-group">
-              <span className="nav-group-label">Fleet</span>
-              <NavLink to="/vehicles" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <Car size={15} /> Vehicles
-              </NavLink>
-            </div>
-          )}
-          {isAdmin && (
-            <div className="nav-group">
-              <span className="nav-group-label">Administration</span>
-              <NavLink to="/devices" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <MonitorCog size={15} /> Device Management
-              </NavLink>
-              <NavLink to="/accounts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <Users size={15} /> Account Management
-              </NavLink>
-              <NavLink to="/apikeys" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <KeyRound size={15} /> API Keys
-              </NavLink>
-            </div>
-          )}
+            )}
+            <span className="nav-item disabled" title="Meeting: deferred (board B-M1 pending)" aria-disabled="true">
+              <Users size={15} /> Meeting
+            </span>
+          </div>
           <div className="nav-group">
-            <span className="nav-group-label">System</span>
+            <span className="nav-group-label">Control</span>
+            <span className="nav-item disabled" title="Remote: deferred (board B-R1 + B-lease server batch)" aria-disabled="true">
+              <Sliders size={15} /> Remote
+            </span>
+          </div>
+          <div className="nav-group">
+            <span className="nav-group-label">Administration</span>
+            {/* D12=A: one Admin entry; spokes live inside the hub */}
+            <NavLink to="/admin" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <SettingsIcon size={15} /> Admin
+            </NavLink>
             {showWnet && (
               <a href="/weaknet/" target="_blank" rel="noopener noreferrer"
                  className={wnet ? 'nav-item dim' : 'nav-item'}
@@ -109,10 +116,8 @@ export default function Layout() {
                 <Sliders size={15} /> Weaknet Panel
               </a>
             )}
-            <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <SettingsIcon size={15} /> Settings
-            </NavLink>
           </div>
+          <div className="nav-foot">v0.1.0 · admin</div>
         </nav>
         <main className="content">
           <Outlet />

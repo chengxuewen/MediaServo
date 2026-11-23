@@ -41,6 +41,7 @@ test('download triggers an audited blob fetch (button present, guarded when none
   await page.goto('/evidence');
   await expect(page.getByRole('heading', { name: 'Evidence' })).toBeVisible();
   // the empty state renders honestly when no clips exist
+  await page.waitForLoadState('networkidle');
   const rows = page.getByRole('row');
   const hasRows = (await rows.count()) > 1; // header row + data rows
   if (!hasRows) {

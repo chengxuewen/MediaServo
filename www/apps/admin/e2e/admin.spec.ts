@@ -6,19 +6,20 @@ test.describe('Admin Layout', () => {
   });
 
   test('renders header and sidebar navigation', async ({ page }) => {
-    await expect(page.locator('header')).toContainText('MediaServo Admin');
-    await expect(page.locator('nav a', { hasText: 'Dashboard' })).toBeVisible();
-    await expect(page.locator('nav a', { hasText: 'Settings' })).toBeVisible();
+    await expect(page.locator('header')).toContainText('MediaServo');
+    await expect(page.locator('nav a', { hasText: 'Overview' })).toBeVisible();
+    await expect(page.locator('nav a', { hasText: 'Admin' })).toBeVisible();
   });
 
   test('dashboard is the default route', async ({ page }) => {
-    await expect(page.locator('nav a.active')).toContainText('Dashboard');
+    await expect(page.locator('nav a.active')).toContainText('Overview');
   });
 
-  test('navigates to settings via sidebar', async ({ page }) => {
-    await page.locator('nav a', { hasText: 'Settings' }).click();
-    await expect(page).toHaveURL('/settings');
-    await expect(page.locator('nav a.active')).toContainText('Settings');
+  test('navigates to settings via the Admin hub (D12=A)', async ({ page }) => {
+    await page.locator('nav a', { hasText: 'Admin' }).click();
+    await expect(page).toHaveURL('/admin');
+    await page.getByRole('tab', { name: 'Settings' }).click();
+    await expect(page.getByRole('tab', { name: 'Settings' })).toHaveAttribute('aria-selected', 'true');
   });
 });
 
