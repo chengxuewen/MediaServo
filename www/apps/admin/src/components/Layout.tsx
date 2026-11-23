@@ -50,64 +50,69 @@ export default function Layout() {
         </div>
       </header>
       <div className="main">
-        <nav className="sidebar">
-          <NavLink to="/" end className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-            <LayoutDashboard size={15} /> Dashboard
-          </NavLink>
-          {/* H3: audio conference + multi-vehicle monitoring = G3 can_status roles (operator/admin/dispatcher) */}
+        <nav className="sidebar" aria-label="primary">
+          {/* P0 shell convergence: grouped navigation (prototype language).
+              Link texts are unchanged -- role specs assert them verbatim. */}
+          <div className="nav-group">
+            <span className="nav-group-label">Overview</span>
+            <NavLink to="/" end className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <LayoutDashboard size={15} /> Dashboard
+            </NavLink>
+          </div>
           {canMonitor && (
-            <NavLink to="/audio" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <Mic size={15} /> Audio Conference
-            </NavLink>
+            <div className="nav-group">
+              <span className="nav-group-label">Intercom</span>
+              <NavLink to="/intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <Radio size={15} /> Intercom
+                {heldCount > 0 && <span className="nav-badge">{heldCount}</span>}
+              </NavLink>
+              <NavLink to="/rooms" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <ListTree size={15} /> Rooms
+              </NavLink>
+              <NavLink to="/evidence" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <FileAudio size={15} /> Evidence
+              </NavLink>
+              {/* W8 Audio retires in P1 (capability merges into Intercom) */}
+              <NavLink to="/audio" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <Mic size={15} /> Audio Conference
+              </NavLink>
+            </div>
           )}
           {canMonitor && (
-            <NavLink to="/intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <Radio size={15} /> Intercom
-              {heldCount > 0 && <span className="nav-badge">{heldCount}</span>}
-            </NavLink>
-          )}
-          {canMonitor && (
-            <NavLink to="/rooms" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <ListTree size={15} /> Rooms
-            </NavLink>
-          )}
-          {canMonitor && (
-            <NavLink to="/evidence" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <FileAudio size={15} /> Evidence
-            </NavLink>
-          )}
-          {canMonitor && (
-            <NavLink to="/vehicles" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <Car size={15} /> Vehicles
-            </NavLink>
-          )}
-          {/* Devices/Accounts/ApiKeys management = admin only (matches the RequireAdmin guard) */}
-          {isAdmin && (
-            <NavLink to="/devices" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <MonitorCog size={15} /> Device Management
-            </NavLink>
-          )}
-          {isAdmin && (
-            <NavLink to="/accounts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <Users size={15} /> Account Management
-            </NavLink>
+            <div className="nav-group">
+              <span className="nav-group-label">Fleet</span>
+              <NavLink to="/vehicles" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <Car size={15} /> Vehicles
+              </NavLink>
+            </div>
           )}
           {isAdmin && (
-            <NavLink to="/apikeys" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <KeyRound size={15} /> API Keys
+            <div className="nav-group">
+              <span className="nav-group-label">Administration</span>
+              <NavLink to="/devices" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <MonitorCog size={15} /> Device Management
+              </NavLink>
+              <NavLink to="/accounts" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <Users size={15} /> Account Management
+              </NavLink>
+              <NavLink to="/apikeys" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <KeyRound size={15} /> API Keys
+              </NavLink>
+            </div>
+          )}
+          <div className="nav-group">
+            <span className="nav-group-label">System</span>
+            {showWnet && (
+              <a href="/weaknet/" target="_blank" rel="noopener noreferrer"
+                 className={wnet ? 'nav-item dim' : 'nav-item'}
+                 title={wnet === 'no-proxy' ? 'Reverse-proxy block missing (check Caddy)' : wnet === 'down' ? 'weaknet serve not running' : undefined}>
+                <Sliders size={15} /> Weaknet Panel
+              </a>
+            )}
+            <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <SettingsIcon size={15} /> Settings
             </NavLink>
-          )}
-          {/* weaknet panel = pure external link (no path added to the App.tsx route table); opens the serve panel in a new tab */}
-          {showWnet && (
-            <a href="/weaknet/" target="_blank" rel="noopener noreferrer"
-               className={wnet ? 'nav-item dim' : 'nav-item'}
-               title={wnet === 'no-proxy' ? 'Reverse-proxy block missing (check Caddy)' : wnet === 'down' ? 'weaknet serve not running' : undefined}>
-              <Sliders size={15} /> Weaknet Panel
-            </a>
-          )}
-          <NavLink to="/settings" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-            <SettingsIcon size={15} /> Settings
-          </NavLink>
+          </div>
         </nav>
         <main className="content">
           <Outlet />

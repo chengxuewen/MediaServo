@@ -14,3 +14,24 @@
 .nav-item.active { border-left-color: var(--ms-color-primary); color: var(--ms-color-primary); background: var(--ms-color-primary-soft); font-weight: 500; }
 
 .content { flex: 1; padding: 1.5rem; overflow-y: auto; }
+
+/* P0 shell convergence: grouped navigation (tokens only) */
+.nav-group {
+  display: grid;
+  gap: var(--ms-space-1);
+  padding-block: var(--ms-space-2);
+}
+
+.nav-group + .nav-group {
+  border-top: 1px solid var(--ms-color-border);
+}
+
+.nav-group-label {
+  font-size: var(--ms-font-size-xs);
+  font-weight: var(--ms-font-weight-semibold);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ms-color-text-muted);
+  padding-inline: var(--ms-space-3);
+  padding-block-end: var(--ms-space-1);
+}
