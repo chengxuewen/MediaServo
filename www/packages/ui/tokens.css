@@ -122,8 +122,8 @@
   --ms-motion-duration-fast: 0.15s;
   --ms-motion-duration-base: 0.25s;
   --ms-motion-easing: cubic-bezier(0.2, 0, 0, 1);
-  --ms-control-h-sm: 28px;
-  --ms-control-h-md: 34px;
+  --ms-control-h-sm: 30px; /* D7=A: C69 requires 30 for all admin controls */
+  --ms-control-h-md: 30px; /* D7=A: prototype wins over the kit default */
   --ms-icon-size-sm: 16px;
   --ms-icon-size-md: 18px;
   --ms-state-layer-hover: rgba(0, 0, 0, 0.08);

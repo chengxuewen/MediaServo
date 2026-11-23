@@ -12,7 +12,10 @@ import { test, expect } from '@playwright/test';
 test('admin sees the floor board with both talk rooms', async ({ page }) => {
   await page.goto('/intercom');
   await expect(page.getByRole('heading', { name: 'Intercom' })).toBeVisible();
-  await expect(page.getByRole('listitem')).toHaveCount(2);
+  // E1: containment, not an exact count -- room-mutating specs run in parallel
+  // files and would otherwise break this assertion.
+  await expect(page.getByRole('listitem').filter({ hasText: 'talk-ops' })).toBeVisible();
+  await expect(page.getByRole('listitem').filter({ hasText: 'talk-alpha' })).toBeVisible();
   await expect(page.getByText('talk-ops')).toBeVisible();
   await expect(page.getByText('talk-alpha')).toBeVisible();
   // floor registration delivers the initial scoped floor_state -> mode shows
