@@ -2002,6 +2002,14 @@ BDEOF
         echo "usage: mediaservo build:deploy <target> [--prefix DIR] [--brand NAME] [--release] [build-args...]" >&2
         exit 2
     fi
+    # build-env-hygiene L2 (D2=A, 2026-11-23): preflight the cmake build tree
+    # BEFORE any cmake step — fail-only with paste-ready fixes; a root-owned or
+    # foreign-path cache otherwise dies mid-build with a cryptic CMake error.
+    # Bypass: MSRTC_BUILD_HYGIENE_SKIP=1. (B2 single-source preserved: the check
+    # lives here, not in the parent shell.)
+    if [ -x "$ROOT/scripts/preflight-build.sh" ]; then
+        "$ROOT/scripts/preflight-build.sh" || exit $?
+    fi
     TARGET="$2"
     shift 2
     OUT_ROOT="${MSRTC_OUT_ROOT:-${OUT_ROOT:-$ROOT/out}}"   # parent-shell injection first, caller env next, repo out/ last
