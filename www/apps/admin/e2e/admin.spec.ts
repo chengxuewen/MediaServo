@@ -75,29 +75,47 @@ test.describe('Settings Page', () => {
     await page.goto('/settings');
   });
 
+  // W4: kit cards — selectors by role/region, not legacy classes
   test('has token input and save button', async ({ page }) => {
-    await expect(page.locator('h2')).toContainText('Settings');
-    await expect(page.locator('input.token-input')).toBeVisible();
-    await expect(page.locator('button', { hasText: 'Save Token' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+    const region = page.getByRole('region', { name: 'Admin bootstrap token' });
+    await expect(region.getByLabel('Admin bootstrap token')).toBeVisible();
+    await expect(region.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
   });
 
   test('save button is clickable with empty input (no-op)', async ({ page }) => {
-    const tokenSection = page.locator('.setting-group', { hasText: 'Admin Token' });
-    await tokenSection.locator('button', { hasText: 'Save Token' }).click();
+    const region = page.getByRole('region', { name: 'Admin bootstrap token' });
+    await region.getByRole('button', { name: 'Save', exact: true }).click();
     // No token status appears in the token section because input was empty
-    await expect(tokenSection.locator('.token-status')).toHaveCount(0);
+    await expect(region.getByRole('status')).toHaveCount(0);
   });
 
   test('saves and clears a token', async ({ page }) => {
-    const tokenSection = page.locator('.setting-group', { hasText: 'Admin Token' });
-    await tokenSection.locator('input.token-input').fill('test-jwt-token');
-    await tokenSection.locator('button', { hasText: 'Save Token' }).click();
-    await expect(tokenSection.locator('.token-status')).toContainText('Token saved');
-    // Clear button appears after save
-    const clearBtn = tokenSection.locator('button', { hasText: 'Clear' });
+    const region = page.getByRole('region', { name: 'Admin bootstrap token' });
+    await region.getByLabel('Admin bootstrap token').fill('test-jwt-token');
+    await region.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(region.getByRole('status')).toContainText('Token saved');
+    // Clear button appears after save; clearing goes through a kit Confirm
+    const clearBtn = region.getByRole('button', { name: 'Clear', exact: true });
     await expect(clearBtn).toBeVisible();
     await clearBtn.click();
-    await expect(tokenSection.locator('.token-status')).toHaveCount(0);
-    await expect(tokenSection.locator('button', { hasText: 'Clear' })).toHaveCount(0);
+    await page.getByRole('dialog').getByRole('button', { name: 'Clear', exact: true }).click();
+    await expect(region.getByRole('status')).toHaveCount(0);
+    await expect(region.getByRole('button', { name: 'Clear', exact: true })).toHaveCount(0);
+  });
+
+  // W4: PSK view is one-time + close-protected; rotate opens a confirm modal.
+  // The spec NEVER confirms a rotation (it would invalidate the dev PSK).
+  test('PSK card: view one-time close-protected; rotate opens confirm modal', async ({ page }) => {
+    const region = page.getByRole('region', { name: 'Pre-shared key' });
+    await expect(region).toBeVisible();
+    await region.getByRole('button', { name: 'View', exact: true }).click();
+    await expect(page.getByRole('dialog').getByLabel('PSK value')).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: 'Done' }).click();
+    await expect(page.getByRole('dialog').last().getByText('Discard the one-time PSK?')).toBeVisible();
+    await page.getByRole('dialog').last().getByRole('button', { name: 'Discard' }).click();
+    await region.getByRole('button', { name: 'Rotate', exact: true }).click();
+    await expect(page.getByRole('dialog').getByLabel('Custom value (optional)')).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
   });
 });
