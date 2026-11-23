@@ -83,3 +83,17 @@ test('session view opens from a board row and degrades honestly without a mic', 
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: 'Intercom' })).toBeVisible();
 });
+
+// P1 visual alignment (admin-prototype-restyle): prototype intercom chrome —
+// head sub + board foot legend (glyph language = row language) + usage hint.
+test('board carries the prototype chrome: sub, legend, hint', async ({ page }) => {
+  await page.goto('/intercom');
+  await expect(page.getByRole('note').filter({ hasText: 'Floor control across groups' })).toBeVisible();
+  for (const label of ['Held', 'Queued', 'Idle']) {
+    await expect(page.getByText(label, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByText('Click a group to enter · hold Space / PTT to talk · Esc back')).toBeVisible();
+  const row = page.locator('.msr-talk-row', { hasText: 'talk-ops' });
+  await expect(row.getByRole('button', { name: 'Request' })).toBeVisible();
+  await expect(row.getByRole('button', { name: 'Release' })).toBeVisible();
+});

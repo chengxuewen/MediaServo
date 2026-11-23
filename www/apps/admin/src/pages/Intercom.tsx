@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { FloorBoard } from '@mediaservo/talk-ui';
+import { StatusGlyph } from '@mediaservo/react';
 import { listManagedRooms } from '../api/client';
 import Rooms from './Rooms';
 import Evidence from './Evidence';
@@ -36,7 +37,13 @@ export default function Intercom() {
 
   return (
     <section>
-      <h1>Intercom</h1>
+      <h1 style={{ margin: 0 }}>Intercom</h1>
+      {/* W1/P1 visual alignment: prototype head sub + board foot legend
+          (glyph language matches FloorBoard rows: dot=held, seg=queued,
+          ring=idle). Tabs stay per shell v2 ruling. */}
+      <p role="note" style={{ color: 'var(--ms-color-text-muted)', fontSize: 'var(--ms-font-size-sm)', margin: 'var(--ms-space-1) 0 var(--ms-space-3)' }}>
+        Floor control across groups
+      </p>
       {error && <p role="alert">Failed to load the room list: {error}</p>}
       {rooms === null && !error && <p role="status">Loading rooms...</p>}
       <div className="hub-tabs" role="tablist" aria-label="Intercom">
@@ -51,7 +58,29 @@ export default function Intercom() {
       {tab === 'rooms' && <Rooms />}
       {tab === 'evidence' && <Evidence />}
       {tab === 'board' && rooms !== null && !error && (
-        <FloorBoard rooms={rooms} onOpenRoom={(id) => navigate(`/intercom/${id}`)} />
+        <>
+          <FloorBoard rooms={rooms} onOpenRoom={(id) => navigate(`/intercom/${id}`)} />
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: 'var(--ms-space-3)',
+              border: '1px solid var(--ms-color-border)', borderRadius: 'var(--ms-radius-md)',
+              padding: 'var(--ms-space-2) var(--ms-space-3)', marginTop: 'var(--ms-space-2)',
+              fontSize: 'var(--ms-font-size-xs)', color: 'var(--ms-color-text-tertiary)',
+            }}
+          >
+            <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--ms-space-1)' }}>
+              <StatusGlyph tone="ok" shape="dot" label="held" /> Held
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--ms-space-1)' }}>
+              <StatusGlyph tone="warn" shape="seg" label="queued" /> Queued
+            </span>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--ms-space-1)' }}>
+              <StatusGlyph tone="off" shape="ring" label="idle" /> Idle
+            </span>
+            <span style={{ flex: 1 }} />
+            <span>Click a group to enter · hold Space / PTT to talk · Esc back</span>
+          </div>
+        </>
       )}
     </section>
   );
