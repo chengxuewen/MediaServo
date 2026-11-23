@@ -145,3 +145,25 @@
     grid-template-columns: 1fr;
   }
 }
+
+.msr-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--ms-space-3);
+}
+
+.msr-volume {
+  display: flex;
+  align-items: center;
+  gap: var(--ms-space-2);
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-muted);
+}
+
+.msr-muted-tag {
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-inverse);
+  background: var(--ms-color-warning);
+  border-radius: var(--ms-radius-sm);
+  padding: 0 var(--ms-space-2);
+}

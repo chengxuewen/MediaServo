@@ -47,13 +47,58 @@ export function ChannelSession({
   >([]);
   const [now, setNow] = useState(() => Date.now());
   const [live, setLive] = useState(false);
+  const [soundOn, setSoundOn] = useState(true);
+  const [volume, setVolume] = useState(0.9);
+  const [mutedPeers, setMutedPeers] = useState<string[]>([]);
+  const [dispatchScope, setDispatchScope] = useState(false);
 
   const micRef = useRef<SfuMicProducer | null>(null);
   const floorRef = useRef<FloorClient | null>(null);
   const consumerRef = useRef<SfuConsumerClient | null>(null);
   const heldAtRef = useRef<number | null>(null);
   const audioEls = useRef(new Map<string, HTMLAudioElement>());
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const volumeRef = useRef(0.9);
+  const soundOnRef = useRef(true);
+  const selfPeerRef = useRef<string | undefined>(undefined);
+  const wasHoldingRef = useRef(false);
+  const grantsLatest = useRef<string[]>([]);
   const wsUrl = useMemo(() => wsUrlFor(), []);
+
+  // short synthesized cues (no assets; WebAudio lazily created -- browsers
+  // require a user gesture before audio may sound, so cues before the first
+  // interaction stay silent by design)
+  const cue = (kind: 'granted' | 'lost' | 'denied' | 'join') => {
+    if (!soundOnRef.current) return;
+    try {
+      if (!audioCtxRef.current) audioCtxRef.current = new AudioContext();
+      const ctx = audioCtxRef.current;
+      if (ctx.state === 'suspended') void ctx.resume();
+      const t = ctx.currentTime;
+      const tones =
+        kind === 'granted'
+          ? [[880, 0], [1320, 0.12]]
+          : kind === 'lost'
+            ? [[660, 0], [440, 0.14]]
+            : kind === 'denied'
+              ? [[220, 0]]
+              : [[700, 0]];
+      for (const [freq, at] of tones) {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = kind === 'denied' ? 'square' : 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.001, t + at);
+        gain.gain.linearRampToValueAtTime(0.08, t + at + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + at + 0.22);
+        osc.connect(gain).connect(ctx.destination);
+        osc.start(t + at);
+        osc.stop(t + at + 0.24);
+      }
+    } catch {
+      /* audio unavailable -- cues are best-effort */
+    }
+  };
 
   const holding = selfGranted(grants, selfPeer);
   const holdLeft =
@@ -79,17 +124,33 @@ export function ChannelSession({
       send: (cmd) => mic.sendFloorCommand(cmd),
       roomId,
       onEvent: (ev: FloorServerEvent) => {
-        if (ev.type === 'floor_granted') setGrants(ev.grants);
+        const applyGrants = (g: string[]) => {
+          grantsLatest.current = g;
+          setGrants(g);
+        };
+        if (ev.type === 'floor_granted') applyGrants(ev.grants);
         else if (ev.type === 'floor_state') {
-          setGrants(ev.snapshot.grants);
+          applyGrants(ev.snapshot.grants);
           setMode(ev.snapshot.mode);
-        } else if (ev.type === 'floor_idle') setGrants([]);
-        if (ev.type === 'floor_denied') setDenied(ev.reason);
+          setMutedPeers(ev.snapshot.muted);
+          // the queue rides only in dispatch-scoped snapshots (server pruning)
+          setDispatchScope(ev.snapshot.queue !== undefined);
+        } else if (ev.type === 'floor_idle') applyGrants([]);
+        if (ev.type === 'floor_denied') {
+          setDenied(ev.reason);
+          cue('denied');
+        }
+        // self-centric cues (refs: the closure predates state updates)
+        const nowHolding = selfGranted(grantsLatest.current, selfPeerRef.current);
+        if (nowHolding && !wasHoldingRef.current) cue('granted');
+        if (!nowHolding && wasHoldingRef.current) cue('lost');
+        wasHoldingRef.current = nowHolding;
       },
     });
     floorRef.current = floor;
     mic.onFloorFrame = (data: string) => {
       // roster frames ride the same ws (T6); parse them alongside floor frames
+      if (data.includes('"peer_joined"')) cue('join');
       if (data.includes('"room_peers"')) {
         try {
           const m = JSON.parse(data) as {
@@ -108,7 +169,10 @@ export function ChannelSession({
         if (disposed) return;
         await mic.produceAudio(stream.getAudioTracks()[0]);
         floor.resync();
-        if (mic.sessionPeerId) setSelfPeer(mic.sessionPeerId);
+        if (mic.sessionPeerId) {
+          selfPeerRef.current = mic.sessionPeerId;
+          setSelfPeer(mic.sessionPeerId);
+        }
         setLive(true);
       } catch (e) {
         // honest gate: mic unavailable -- floor CONTROL still works (the
@@ -129,6 +193,7 @@ export function ChannelSession({
         if (!el) {
           el = document.createElement('audio');
           el.autoplay = true;
+          el.volume = volumeRef.current;
           el.srcObject = stream;
           document.body.appendChild(el);
           el.style.display = 'none';
@@ -234,21 +299,70 @@ export function ChannelSession({
         {holding ? `TALKING - ${holdLeft ?? holdSecs}s` : 'HOLD TO TALK'}
       </button>
       <p className="msr-hint">Hold the button (or hold Space). Release to give up the floor.</p>
+      <div className="msr-controls">
+        <Button
+          size="sm"
+          aria-pressed={soundOn}
+          onClick={() => {
+            soundOnRef.current = !soundOnRef.current;
+            setSoundOn(soundOnRef.current);
+          }}
+        >
+          {soundOn ? 'Sound on' : 'Sound off'}
+        </Button>
+        <label className="msr-volume">
+          volume
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={volume}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              volumeRef.current = v;
+              setVolume(v);
+              for (const [, el] of audioEls.current) el.volume = v;
+            }}
+          />
+        </label>
+      </div>
       <div className="msr-session-grid">
         <div className="msr-session-block">
           <h3>Members</h3>
           <ul className="msr-members">
-            {members.map((m) => (
-              <li key={m.peer_id}>
-                <StatusGlyph
-                  tone={m.device_id ? 'ok' : 'off'}
-                  shape={m.device_id ? 'dot' : 'ring'}
-                  label={m.username ?? m.device_id ?? m.peer_id}
-                />
-                <span>{m.username ?? m.device_id ?? m.peer_id}</span>
-                {m.role && <span className="msr-talk-mode">{m.role}</span>}
-              </li>
-            ))}
+            {members.map((m) => {
+              const isMuted = mutedPeers.includes(m.peer_id);
+              const isSelf = m.peer_id === selfPeer;
+              return (
+                <li key={m.peer_id}>
+                  <StatusGlyph
+                    tone={m.device_id ? 'ok' : 'off'}
+                    shape={m.device_id ? 'dot' : 'ring'}
+                    label={m.username ?? m.device_id ?? m.peer_id}
+                  />
+                  <span>{m.username ?? m.device_id ?? m.peer_id}</span>
+                  {m.role && <span className="msr-talk-mode">{m.role}</span>}
+                  {isSelf && <span className="msr-talk-mode">you</span>}
+                  {isMuted && <span className="msr-muted-tag">muted</span>}
+                  {dispatchScope && !isSelf && (
+                    <Button
+                      size="sm"
+                      aria-pressed={isMuted}
+                      onClick={() =>
+                        micRef.current?.sendFloorCommand({
+                          type: 'floor_mute_set',
+                          target_peer_id: m.peer_id,
+                          muted: !isMuted,
+                        })
+                      }
+                    >
+                      {isMuted ? 'unmute' : 'mute'}
+                    </Button>
+                  )}
+                </li>
+              );
+            })}
             {!members.length && <li className="msr-hint">roster arrives with the join snapshot...</li>}
           </ul>
         </div>

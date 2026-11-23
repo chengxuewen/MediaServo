@@ -84,6 +84,9 @@ export class BoardStore {
   private readonly conns = new Map<string, RoomConn>();
   private readonly rosters = new Map<string, Map<string, WirePeerPresence>>();
   private cached: BoardSnapshot | null = null;
+  /** Set by the browser 'offline' event (or a synthetic dispatch in tests):
+   *  suppresses reconnect scheduling until 'online'. */
+  private offlineFlag = false;
   private readonly listeners = new Set<(s: BoardSnapshot) => void>();
   private version = 0;
   private readonly baseUrl: string;
@@ -97,7 +100,24 @@ export class BoardStore {
     // waiting for the next heartbeat; the backoff reconnects on 'online'.
     if (typeof window !== 'undefined') {
       window.addEventListener('offline', () => {
-        for (const conn of this.conns.values()) conn.ws?.close();
+        // flip to UNKNOWN immediately (K discipline): when the browser says
+        // offline, the board must not keep presenting connected/idle while the
+        // sockets take seconds to notice through proxies.
+        this.offlineFlag = true;
+        for (const conn of this.conns.values()) {
+          conn.state = 'reconnecting';
+          conn.peerId = null;
+          conn.ws?.close();
+        }
+        this.emit();
+      });
+      window.addEventListener('online', () => {
+        this.offlineFlag = false;
+        for (const conn of this.conns.values()) {
+          if (!conn.closedByUser && conn.state !== 'connected' && !conn.reconnectTimer) {
+            this.open(conn);
+          }
+        }
       });
     }
     this.baseUrl = opts.baseUrl ?? '';
@@ -268,6 +288,12 @@ export class BoardStore {
       conn.peerId = null;
       // discipline: a down connection is unknown, never idle — stale flag flips here
       this.emit();
+      // K discipline support: while offline, do NOT schedule retries (over
+      // loopback they would succeed instantly and flip the UI back to
+      // connected, masking the outage); the 'online' handler kicks all
+      // reconnecting rooms. Flag (not navigator.onLine) so synthetic events
+      // are testable.
+      if (this.offlineFlag) return;
       const delay = Math.min(this.reconnectBaseMs * 2 ** conn.attempt, MAX_BACKOFF_MS);
       conn.attempt += 1;
       conn.reconnectTimer = setTimeout(() => {

@@ -42,23 +42,27 @@ test('admin can request and release the floor on talk-ops (WS round-trip)', asyn
   await expect(rel).toHaveAttribute('aria-disabled', 'true');
 });
 
-test('unknown state: killing the ws flips rows to UNKNOWN with guarded actions', async ({
-  page,
-}, testInfo) => {
-  // K discipline regression: a down connection is UNKNOWN, never idle.
-  // Simulated by blocking the page's ws traffic via context offline.
+test('offline event flips rows to UNKNOWN with guarded actions, online recovers', async ({ page }) => {
+  // K discipline: a down connection is UNKNOWN, never idle. We drive the
+  // store's own offline/online listeners directly (deterministic -- chromium's
+  // setOffline emulation does not reliably drop live websockets).
   await page.goto('/intercom');
-  await expect(page.getByRole('listitem').first()).toBeVisible({ timeout: 10_000 });
-  await page.context().setOffline(true);
-  // BoardStore backoff reconnects; while down the rows must show unknown
+  await expect(page.locator('.msr-talk-state', { hasText: 'idle' }).first()).toBeVisible({
+    timeout: 10_000,
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('offline')));
   await expect(page.locator('.msr-talk-state', { hasText: 'unknown' }).first()).toBeVisible({
-    timeout: 30_000,
+    timeout: 5_000,
   });
   const row = page.locator('.msr-talk-row', { hasText: 'talk-ops' });
   await expect(row.getByRole('button', { name: 'Request' })).toHaveAttribute('aria-disabled', 'true');
-  await expect(page.context().browser()).toBeTruthy(); // keep testInfo used minimally
-  void testInfo;
+  // back online -> reconnects -> idle again
+  await page.evaluate(() => window.dispatchEvent(new Event('online')));
+  await expect(page.locator('.msr-talk-state', { hasText: 'idle' }).first()).toBeVisible({
+    timeout: 10_000,
+  });
 });
+
 
 test('session view opens from a board row and degrades honestly without a mic', async ({ page }) => {
   await page.goto('/intercom');
