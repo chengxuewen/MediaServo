@@ -59,6 +59,11 @@ pub struct SignalingServer {
     /// `floor_room_store` adds the rooms.yaml per-room overlay (attached by main).
     pub floor_global: crate::floor::policy::GlobalFloorConfig,
     pub floor_room_store: Option<std::sync::Arc<crate::room_config::RoomConfigStore>>,
+    /// SB-3 roster (I3/H3): live WS membership per room -> per-peer identity.
+    /// Mirrors connections, NOT the a2 retention window (ghosts are not kept).
+    /// Arc-wrapped: SignalingServer is cloned per connection (all state fields
+    /// must share across clones, like `channels`).
+    pub roster: std::sync::Arc<dashmap::DashMap<String, dashmap::DashMap<String, RosterEntry>>>,
     /// a1 companion: the wait cap when authenticated but not yet joined (default 30s).
     pub ws_join_wait_secs: u64,
     /// a2 (S0.5): the session-retention ticket table, key = (identity_key, room). Attached at the Joined-ack
@@ -169,6 +174,7 @@ impl SignalingServer {
             ws_psk_wait_secs: hb_env("MEDIASERVO_WS_PSK_WAIT_SECS", 10),
             floor_global: crate::floor::policy::GlobalFloorConfig::from_env(),
             floor_room_store: None,
+            roster: std::sync::Arc::new(dashmap::DashMap::new()),
             ws_join_wait_secs: hb_env("MEDIASERVO_WS_JOIN_WAIT_SECS", 30),
             resume_table: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             resume_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -212,6 +218,7 @@ impl SignalingServer {
             ws_psk_wait_secs: hb_env("MEDIASERVO_WS_PSK_WAIT_SECS", 10),
             floor_global: crate::floor::policy::GlobalFloorConfig::from_env(),
             floor_room_store: None,
+            roster: std::sync::Arc::new(dashmap::DashMap::new()),
             ws_join_wait_secs: hb_env("MEDIASERVO_WS_JOIN_WAIT_SECS", 30),
             resume_table: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             resume_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -478,6 +485,77 @@ const DEVICE_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 
 /// The deferred-queue cap for non-answer messages within the challenge window (prevents unauthenticated flooding; over the cap = disconnect WARN).
 const MAX_DEFERRED_AUTH_MSGS: usize = 16;
+
+/// SB-3 roster entry (I3): identity captured at join; username/role only exist
+/// for account sessions, device id only for device sessions.
+#[derive(Debug, Clone)]
+pub(crate) struct RosterEntry {
+    pub username: Option<String>,
+    pub role: Option<crate::roles::CockpitRole>,
+    pub device_id: Option<String>,
+}
+
+fn roster_entry_for(identity: &SessionIdentity) -> RosterEntry {
+    match identity {
+        SessionIdentity::Account(a) => RosterEntry {
+            username: Some(a.username.clone()),
+            role: Some(a.role),
+            device_id: None,
+        },
+        SessionIdentity::Device(id) => {
+            RosterEntry { username: None, role: None, device_id: Some(id.clone()) }
+        }
+        SessionIdentity::Legacy => RosterEntry { username: None, role: None, device_id: None },
+    }
+}
+
+/// Build the recipient-scoped wire presence: dispatch scope (admin/dispatcher)
+/// sees username+role; everyone sees presence and device ids (M#8/H3 pruning,
+/// mirroring floor_snapshot D12/D16).
+fn peer_presence_for(
+    peer_id: &str,
+    entry: &RosterEntry,
+    dispatch_scope: bool,
+) -> mediaservo_common::protocol::PeerPresence {
+    mediaservo_common::protocol::PeerPresence {
+        peer_id: peer_id.to_string(),
+        username: if dispatch_scope { entry.username.clone() } else { None },
+        role: if dispatch_scope { entry.role.map(|r| r.as_str().to_string()) } else { None },
+        device_id: entry.device_id.clone(),
+    }
+}
+
+#[cfg(test)]
+mod roster_tests {
+    use super::*;
+
+    fn account(role: CockpitRole) -> RosterEntry {
+        RosterEntry {
+            username: Some("carol".into()),
+            role: Some(role),
+            device_id: None,
+        }
+    }
+
+    #[test]
+    fn dispatch_scope_sees_identity_field_scopes_see_presence_only() {
+        let e = account(CockpitRole::Operator);
+        let full = peer_presence_for("carol-x", &e, true);
+        assert_eq!(full.peer_id, "carol-x");
+        assert_eq!(full.username.as_deref(), Some("carol"));
+        assert_eq!(full.role.as_deref(), Some("operator"));
+        let pruned = peer_presence_for("carol-x", &e, false);
+        assert_eq!(pruned.username, None);
+        assert_eq!(pruned.role, None);
+    }
+
+    #[test]
+    fn device_id_is_always_visible() {
+        let d = RosterEntry { username: None, role: None, device_id: Some("ms-car1".into()) };
+        assert_eq!(peer_presence_for("ms-car1-a", &d, false).device_id.as_deref(), Some("ms-car1"));
+        assert_eq!(peer_presence_for("ms-car1-a", &d, true).device_id.as_deref(), Some("ms-car1"));
+    }
+}
 
 /// B-sec fail-closed decision (web-portal-ui §3h invariant ①): does a VERIFIED
 /// JWT map to a capability principal? Returns `(code, reason)` when the token
@@ -1320,6 +1398,48 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
     }
 
     let tx = server.get_or_create_channel(&room_id);
+
+    // SB-3 roster (I3/H3): join-time snapshot (unicast to the joiner, pruned by
+    // the JOINER's role — mirrors floor_snapshot D12/D16), then upsert self, then
+    // a presence-only broadcast (RoomLeave symmetry; identity never rides the
+    // broadcast wire — talk-app §7-17 follow-up for pruned incremental events).
+    // The joiner's own rx subscribes AFTER the broadcast — no self-echo.
+    {
+        let dispatch_scope = matches!(
+            &session_identity,
+            SessionIdentity::Account(a) if matches!(a.role, CockpitRole::Admin | CockpitRole::Dispatcher)
+        );
+        let entry = roster_entry_for(&session_identity);
+        let peers: Vec<mediaservo_common::protocol::PeerPresence> = server
+            .roster
+            .get(&room_id)
+            .map(|room| {
+                room.iter()
+                    .filter(|e| e.key() != &peer_id)
+                    .map(|e| peer_presence_for(e.key(), e.value(), dispatch_scope))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let snapshot =
+            SignalingMessage::RoomPeers { room_id: room_id.clone(), peers };
+        let _ = ws_sender
+            .lock()
+            .await
+            .send(Message::Text(send_msg(&snapshot).unwrap()))
+            .await;
+        server
+            .roster
+            .entry(room_id.clone())
+            .or_default()
+            .insert(peer_id.clone(), entry.clone());
+        let joined = SignalingMessage::PeerJoined {
+            room_id: room_id.clone(),
+            peer_id: peer_id.clone(),
+            device_id: entry.device_id.clone(),
+        };
+        let _ = tx.send(serde_json::to_string(&joined).unwrap());
+    }
+
     let mut rx = tx.subscribe();
 
     // §3.5: the sender's role caps floor-request priority (entry-level ExceedsCeiling)
@@ -2733,6 +2853,13 @@ async fn disconnect_session(
 
     #[allow(unused_variables)]
     let room_removed = server.room_manager.leave_room(&relay_room, &relay_peer_id);
+    // SB-3 roster: live-membership bookkeeping (retention ghosts are not kept).
+    if let Some(room) = server.roster.get(&relay_room) {
+        room.remove(&relay_peer_id);
+    }
+    if room_removed {
+        drop(server.roster.remove(&relay_room));
+    }
 
     // G2: disconnect unbinds the connection-level identity (peer_id -> device_id valid only while the connection lives).
     if let Some(device) = server.device_bindings.remove(&relay_peer_id) {

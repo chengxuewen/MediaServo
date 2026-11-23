@@ -37,10 +37,23 @@ pub fn negotiate_protocol(claim: Option<u32>) -> u32 {
 /// Host ──WS──▶ Server ──WS──▶ Remote
 /// Remote ──WS──▶ Server ──WS──▶ Host
 /// ```
+/// SB-3 roster identity, pruned per recipient at build time (I3; M#8 fix):
+/// username/role only for dispatch-scope recipients; device_id always visible
+/// (it is the watched stream identity).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PeerPresence {
+    pub peer_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-pub enum SignalingMessage {
-    /// Request to join a room. Sent by Host or Remote to Server.
+pub enum SignalingMessage {    /// Request to join a room. Sent by Host or Remote to Server.
     RoomJoin {
         room_id: String,
         peer_role: PeerRole,
@@ -88,6 +101,30 @@ pub enum SignalingMessage {
 
     /// A peer has left the room. Broadcast by Server.
     RoomLeave { room_id: String, peer_id: String },
+
+    /// SB-3 roster (I3/H3, additive): join-time member snapshot, unicast to the
+    /// joiner. Pruned by the RECIPIENT's role at build time (mirrors the
+    /// floor_snapshot D12/D16 discipline): dispatch scope (admin/dispatcher)
+    /// receives username+role for account members; everyone receives presence
+    /// and device ids. Old clients ignore unknown message types (verified in
+    /// packages/client sfu-client handleMessage fall-through) — no dialect bump.
+    RoomPeers {
+        room_id: String,
+        /// Members already present when this joiner landed (never the joiner).
+        peers: Vec<PeerPresence>,
+    },
+
+    /// SB-3 roster (I3/H3, additive): a member joined. Broadcast, PRESENCE ONLY
+    /// (RoomLeave symmetry — no username/role on the wire in broadcasts;
+    /// dispatch consumers get identity from the join-time RoomPeers snapshot,
+    /// and account peer_ids embed the username anyway). Per-recipient pruned
+    /// incremental events are a registered follow-up (talk-app §7-17).
+    PeerJoined {
+        room_id: String,
+        peer_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        device_id: Option<String>,
+    },
 
     /// SDP offer/answer relayed through Server.
     Sdp { room_id: String, target: Option<String>, sdp: String },

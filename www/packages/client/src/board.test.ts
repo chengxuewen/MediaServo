@@ -164,4 +164,30 @@ describe('BoardStore (T3)', () => {
     expect(snap!.rooms.r1.roomId).toBe('r1');
     unsub();
   });
+
+  it('roster: room_peers snapshot lands, peer_joined upserts, room_leave removes', () => {
+    store = makeStore(['r1']);
+    const ws = FakeWS.instances[0];
+    let snap: BoardSnapshot | null = null;
+    store.subscribe((s) => (snap = s));
+    ws.open();
+    // join-time snapshot with two members (identity pruned for one, full for the other)
+    ws.msg({
+      type: 'room_peers',
+      room_id: 'r1',
+      peers: [
+        { peer_id: 'carol-a1', username: 'carol', role: 'operator' },
+        { peer_id: 'ms-car1-x', device_id: 'ms-car1' },
+      ],
+    });
+    expect(Object.keys(snap!.roster.r1)).toHaveLength(2);
+    expect(snap!.roster.r1['carol-a1']).toMatchObject({ username: 'carol', role: 'operator' });
+    expect(snap!.roster.r1['ms-car1-x']).toMatchObject({ device_id: 'ms-car1' });
+    // incremental join: presence-only (identity kept if previously known)
+    ws.msg({ type: 'peer_joined', room_id: 'r1', peer_id: 'dave-b2' });
+    expect(snap!.roster.r1['dave-b2']).toEqual({ peer_id: 'dave-b2' });
+    // leave removes
+    ws.msg({ type: 'room_leave', room_id: 'r1', peer_id: 'carol-a1' });
+    expect(snap!.roster.r1['carol-a1']).toBeUndefined();
+  });
 });

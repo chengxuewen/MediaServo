@@ -762,6 +762,78 @@ fn legacy_join(room: &str, role: PeerRole) -> SignalingMessage {
 
 /// Account JWT auth + RoomJoin (token via sec-websocket-protocol -- same as the production browser).
 /// Returns (ws, response text); the caller holds ws to keep the session alive.
+/// SB-3 roster test helper: raw account join that KEEPS the readable ws (no
+/// keepalive wrapper) so later server frames (room_peers / peer_joined) can be
+/// received directly.
+async fn raw_account_join(
+    ws_url: &str,
+    token: &str,
+    room: &str,
+) -> tokio_tungstenite::WebSocketStream<
+    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+> {
+    let mut req = ws_url.into_client_request().expect("valid ws url");
+    req.headers_mut()
+        .insert("Sec-WebSocket-Protocol", token.parse().expect("token header"));
+    let (mut ws, _) = tokio_tungstenite::connect_async(req).await.unwrap();
+    let ack = ws.next().await.unwrap().unwrap();
+    assert!(ack.to_text().unwrap().contains("authenticated"));
+    let join = SignalingMessage::RoomJoin {
+        room_id: room.into(),
+        peer_role: PeerRole::Consumer,
+        stream_id: None,
+        device_id: None,
+        device_secret: None,
+        device_pubkey: None,
+        protocol: None,
+        client_version: None,
+        resume: None,
+    };
+    use futures_util::SinkExt;
+    ws.send(WsMsg::Text(serde_json::to_string(&join).unwrap())).await.unwrap();
+    // wait for the join ack so the server-side roster insert (a few lines past
+    // the ack in the join handler) has landed before the next assertion joins
+    let ack = ws.next().await.unwrap().unwrap();
+    assert!(ack.to_text().unwrap().contains("room_joined"), "join ack");
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    ws
+}
+
+/// Drain frames until one contains `needle` (bounded by count + per-frame timeout).
+async fn recv_until<S>(ws: &mut S, needle: &str, max: usize) -> String
+where
+    S: futures_util::Stream<Item = Result<WsMsg, tokio_tungstenite::tungstenite::Error>> + Unpin,
+{
+    for _ in 0..max {
+        let Ok(Some(Ok(msg))) = tokio::time::timeout(std::time::Duration::from_secs(2), ws.next()).await
+        else {
+            break;
+        };
+        if let WsMsg::Text(t) = msg {
+            if t.contains(needle) {
+                return t;
+            }
+        }
+    }
+    format!("<{needle} never arrived>")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn roster_snapshot_and_join_broadcast() {
+    let (_server, ws_url) = spawn_server_g3(&two_devices_yaml()).await;
+    // dave (operator) joins first — his frames stay unread until the broadcast assert
+    let mut ws_dave = raw_account_join(&ws_url, &account_token("dave", "operator", &[]), "car1-room").await;
+    // admin carol joins second: her unicast room_peers snapshot must carry dave's
+    // identity (admin = dispatch scope), and dave must get a PRESENCE-ONLY broadcast.
+    let mut ws_carol = raw_account_join(&ws_url, &account_token("carol", "admin", &["ms-car1"]), "car1-room").await;
+    let snap = recv_until(&mut ws_carol, "room_peers", 6).await;
+    assert!(snap.contains("dave"), "admin snapshot must list dave: {snap}");
+    assert!(snap.contains("operator"), "admin snapshot must carry roles: {snap}");
+    let joined = recv_until(&mut ws_dave, "peer_joined", 6).await;
+    assert!(joined.contains("carol"), "presence broadcast for carol: {joined}");
+    assert!(!joined.contains("username"), "broadcasts stay presence-only: {joined}");
+}
+
 async fn account_join(
     ws_url: &str,
     token: &str,
@@ -1005,15 +1077,24 @@ async fn g3_config_push_inbound_rejected() {
         actor: None,
     };
     veh_ws.send(WsMsg::Text(serde_json::to_string(&cfg).unwrap())).await.unwrap();
-    let resp = tokio::time::timeout(std::time::Duration::from_secs(3), veh_ws.next())
-        .await
-        .unwrap()
-        .unwrap()
-        .unwrap();
+    // SB-3: the join-time roster snapshot may be queued on this ws before the
+    // denial — drain frames until the ConfigPush denial arrives (bounded).
+    let mut resp_text = String::new();
+    for _ in 0..8 {
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(3), veh_ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        resp_text = frame.to_text().unwrap().to_string();
+        if resp_text.contains(r#""code":4031"#) {
+            break;
+        }
+    }
     assert!(
-        resp.to_text().unwrap().contains(r#""code":4031"#),
+        resp_text.contains(r#""code":4031"#),
         "an inbound ConfigPush must be denied: {}",
-        resp.to_text().unwrap()
+        resp_text
     );
     assert!(
         has_denial(&mediaservo_server::audit::recent(), "config_push"),
