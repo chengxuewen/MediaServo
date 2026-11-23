@@ -131,6 +131,11 @@ pub fn admin_router(state: AdminState) -> Router {
         .route("/api/admin/apikeys", get(list_api_keys).post(register_api_key))
         .route("/api/admin/apikeys/:key_id", delete(revoke_api_key))
         .route("/api/admin/psk", get(get_psk).post(rotate_psk))
+        // SB-5 (B6 face): the in-memory security ring as JSON. Read gate = the
+        // auth_middleware default (admin + dispatcher GET), matching floor GET.
+        // source 标 is honest: core-in-memory, NOT persisted (invariant ③
+        // append-only persistence is a registered follow-up).
+        .route("/api/admin/audit", get(audit_list))
         // Floor REST (P4-1, archived §3.6): GET = admin + dispatcher;
         // mutations = admin-only (auth_middleware denies non-GET for non-admin).
         // axum 0.7 / matchit 0.7 = :param syntax ({param} is axum 0.8+ and would
@@ -716,6 +721,28 @@ pub struct UpdateAccountRequest {
     pub vehicles: Option<Vec<String>>,
     #[serde(default)]
     pub new_password: Option<String>,
+}
+
+/// GET /api/admin/audit -- SB-5 (B6 face): recent security-ring events as JSON
+/// (`kind`-tagged, unix-second `ts`). Honest source 标: core-in-memory — the
+/// ring is capped at 256 entries and NOT persisted across restarts (invariant
+/// ③ append-only persistence is a registered follow-up, not faked here).
+async fn audit_list() -> Json<serde_json::Value> {
+    let events: Vec<serde_json::Value> = crate::audit::recent_with_ts()
+        .into_iter()
+        .map(|(ts, ev)| {
+            let mut v = serde_json::to_value(&ev).unwrap_or(serde_json::Value::Null);
+            v["ts"] = serde_json::json!(ts);
+            v
+        })
+        .collect();
+    let count = events.len();
+    Json(serde_json::json!({
+        "events": events,
+        "count": count,
+        "source": "core-in-memory",
+        "retention": "server lifetime, ring cap 256 (not persisted)",
+    }))
 }
 
 /// GET /api/admin/accounts -- account listing (no password hashes).
@@ -1930,6 +1957,35 @@ pub(crate) mod tests {
                 mediaservo_common::floor::FloorLimits::default(),
             ))),
         );
+    }
+
+    #[tokio::test]
+    async fn audit_list_returns_recent_events() {
+        let state = make_state().await;
+        let token = admin_token(&state);
+        let app = admin_router(state);
+        crate::audit::log_event(crate::audit::AuditEvent::AuthFailure {
+            peer_id: "p-x".into(),
+            reason: "probe".into(),
+        });
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/api/admin/audit")
+                    .header("Authorization", format!("Bearer {token}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 1 << 20).await.unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(v["source"], "core-in-memory");
+        assert!(v["events"].as_array().unwrap().iter().any(|e| {
+            e["kind"] == "auth_failure" && e["reason"] == "probe" && e["ts"].is_u64()
+        }));
     }
 
     #[tokio::test]

@@ -12,7 +12,9 @@
 //! - `ConsumerJoin` / `ConsumerLeave` — stream consumer lifecycle
 
 /// Audit event variants covering all security-relevant server operations.
-#[derive(Debug, Clone, PartialEq)]
+/// SB-5: Serialize (tagged `kind`, snake_case) feeds the /api/admin/audit face.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
 pub enum AuditEvent {
     /// S4/a4: cockpit emergency-stop WS audit copy (the DC fast path bypasses the server; this copy is best-effort).
     EstopAudit { room_id: String, seq: u64, cmd: String, sig_present: bool },
@@ -86,7 +88,11 @@ pub fn log_event(event: AuditEvent) {
     // Bounded ring buffer (ops/tests read recent events; tracing logs remain the main channel)
     {
         let mut ring = recent_sink().lock().unwrap_or_else(|e| e.into_inner());
-        ring.push_back(event.clone());
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        ring.push_back((ts, event.clone()));
         while ring.len() > AUDIT_RING_CAP {
             ring.pop_front();
         }
@@ -321,14 +327,21 @@ pub fn log_event(event: AuditEvent) {
 
 const AUDIT_RING_CAP: usize = 256;
 
-fn recent_sink() -> &'static std::sync::Mutex<std::collections::VecDeque<AuditEvent>> {
-    static RECENT: std::sync::OnceLock<std::sync::Mutex<std::collections::VecDeque<AuditEvent>>> =
+type AuditRing = std::collections::VecDeque<(u64, AuditEvent)>;
+
+fn recent_sink() -> &'static std::sync::Mutex<AuditRing> {
+    static RECENT: std::sync::OnceLock<std::sync::Mutex<AuditRing>> =
         std::sync::OnceLock::new();
     RECENT.get_or_init(|| std::sync::Mutex::new(std::collections::VecDeque::new()))
 }
 
 /// Recent audit events (bounded ring, newest at the tail; used by tests and ops queries).
 pub fn recent() -> Vec<AuditEvent> {
+    recent_with_ts().into_iter().map(|(_, ev)| ev).collect()
+}
+
+/// SB-5 (B6 face): recent events with their unix-second timestamps.
+pub fn recent_with_ts() -> Vec<(u64, AuditEvent)> {
     recent_sink().lock().unwrap_or_else(|e| e.into_inner()).iter().cloned().collect()
 }
 
@@ -351,18 +364,18 @@ mod tests {
         let mut ring = recent_sink().lock().unwrap_or_else(|e| e.into_inner());
         ring.clear();
         for i in 0..300 {
-            ring.push_back(AuditEvent::AuthorizationDenied {
+            ring.push_back((i as u64, AuditEvent::AuthorizationDenied {
                 action: "test".into(),
                 peer_id: format!("p{i}"),
                 detail: "d".into(),
-            });
+            }));
             if ring.len() > AUDIT_RING_CAP {
                 ring.pop_front();
             }
         }
         assert_eq!(ring.len(), AUDIT_RING_CAP, "ring must be capped");
         assert_eq!(
-            ring[0],
+            ring[0].1,
             AuditEvent::AuthorizationDenied {
                 action: "test".into(),
                 peer_id: "p44".into(),
@@ -371,7 +384,7 @@ mod tests {
             "oldest event evicted (300 - 256 = 44)"
         );
         assert_eq!(
-            ring.back(),
+            ring.back().map(|e| &e.1),
             Some(&AuditEvent::AuthorizationDenied {
                 action: "test".into(),
                 peer_id: "p299".into(),
