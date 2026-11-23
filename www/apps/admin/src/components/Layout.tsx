@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { clearToken } from '../api/client';
 import { FloorNotifChips, useFloorNotifs } from '../notifications';
 import './Layout.css';
-import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders, KeyRound } from 'lucide-react';
+import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders, KeyRound, ListTree } from 'lucide-react';
 
 export default function Layout() {
   const { role, username, canMonitor, token, isAdmin } = useAuth();
@@ -64,6 +64,11 @@ export default function Layout() {
             <NavLink to="/intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <Radio size={15} /> Intercom
               {heldCount > 0 && <span className="nav-badge">{heldCount}</span>}
+            </NavLink>
+          )}
+          {canMonitor && (
+            <NavLink to="/rooms" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <ListTree size={15} /> Rooms
             </NavLink>
           )}
           {canMonitor && (

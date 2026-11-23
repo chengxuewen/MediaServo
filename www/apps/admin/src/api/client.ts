@@ -61,14 +61,45 @@ export async function getStats(): Promise<StatsResponse> {
 
 // SB-3/T5 (talk-app): managed rooms drive the intercom board's room list
 // (kind=talk rooms are the designated floor rooms).
+export interface FloorOverrideEntry {
+  max_peers?: number;
+  max_queue?: number;
+  hold_timeout_secs?: number;
+}
+
 export interface ManagedRoomEntry {
   id: string;
   kind: string;
   video?: boolean | null;
+  /** SB-2 per-room floor limits overlay (absent = global resolution). */
+  floor?: FloorOverrideEntry | null;
 }
 
 export async function listManagedRooms(): Promise<{ rooms: ManagedRoomEntry[]; count: number }> {
   return request('/managed-rooms');
+}
+
+export async function createManagedRoom(body: {
+  id: string;
+  kind: string;
+  video?: boolean | null;
+  floor?: FloorOverrideEntry | null;
+}): Promise<{ room: ManagedRoomEntry }> {
+  return request('/managed-rooms', { method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function updateManagedRoom(
+  id: string,
+  body: { kind?: string; video?: boolean | null; floor?: FloorOverrideEntry | null },
+): Promise<{ room: ManagedRoomEntry }> {
+  return request(`/managed-rooms/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteManagedRoom(id: string): Promise<void> {
+  await request(`/managed-rooms/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export async function deleteRoom(roomId: string): Promise<void> {

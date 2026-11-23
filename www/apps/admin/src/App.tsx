@@ -11,6 +11,7 @@ import Accounts from './pages/Accounts';
 import ApiKeys from './pages/ApiKeys';
 import Intercom from './pages/Intercom';
 import IntercomSession from './pages/IntercomSession';
+import Rooms from './pages/Rooms';
 import { FloorNotifProvider } from './notifications';
 import { hasToken } from './api/client';
 import { useAuth } from './hooks/useAuth';
@@ -41,6 +42,7 @@ export default function App() {
         <Route path="/audio" element={<Audio />} />
         <Route path="/intercom" element={<Intercom />} />
         <Route path="/intercom/:roomId" element={<IntercomSession />} />
+        <Route path="/rooms" element={<Rooms />} />
         <Route path="/vehicles" element={<Vehicles />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
