@@ -7,3 +7,4 @@ export * from './auth';
 export * from './types';
 export * from './floor';
 export * from './board';
+export * from './replay';

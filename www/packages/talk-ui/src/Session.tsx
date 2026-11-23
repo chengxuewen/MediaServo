@@ -7,9 +7,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   FloorClient,
+  ReplayBuffer,
   SfuConsumerClient,
   SfuMicProducer,
   getToken,
+  mixStreams,
   type FloorServerEvent,
 } from '@mediaservo/client';
 import { Button, StatusGlyph, type GlyphShape, type GlyphTone } from '@mediaservo/react';
@@ -51,6 +53,8 @@ export function ChannelSession({
   const [volume, setVolume] = useState(0.9);
   const [mutedPeers, setMutedPeers] = useState<string[]>([]);
   const [dispatchScope, setDispatchScope] = useState(false);
+  const [replayRecording, setReplayRecording] = useState(false);
+  const [replayEnabled, setReplayEnabled] = useState(true);
 
   const micRef = useRef<SfuMicProducer | null>(null);
   const floorRef = useRef<FloorClient | null>(null);
@@ -63,6 +67,8 @@ export function ChannelSession({
   const selfPeerRef = useRef<string | undefined>(undefined);
   const wasHoldingRef = useRef(false);
   const grantsLatest = useRef<string[]>([]);
+  const replayRef = useRef<ReplayBuffer | null>(null);
+  const mixRef = useRef<ReturnType<typeof mixStreams>>(null);
   const wsUrl = useMemo(() => wsUrlFor(), []);
 
   // short synthesized cues (no assets; WebAudio lazily created -- browsers
@@ -169,6 +175,7 @@ export function ChannelSession({
         if (disposed) return;
         await mic.produceAudio(stream.getAudioTracks()[0]);
         floor.resync();
+        mixRef.current?.add(stream);
         if (mic.sessionPeerId) {
           selfPeerRef.current = mic.sessionPeerId;
           setSelfPeer(mic.sessionPeerId);
@@ -188,6 +195,7 @@ export function ChannelSession({
       token,
       {
       onTrack: (stream, meta) => {
+        mixRef.current?.add(stream);
         const key = meta?.producerId ?? `unknown-${Math.random()}`;
         let el = audioEls.current.get(key);
         if (!el) {
@@ -218,9 +226,26 @@ export function ChannelSession({
         /* receive side degrades gracefully; PTT is independent */
       }
     })();
+    // T7 replay rolling buffer (K3/K5/K9): mixes mic + remote audio into one
+    // recorder; WIPED on exit by cleanup below (privacy default). Separate
+    // from the T9 evidence buffer by design.
+    const mix = mixStreams();
+    if (mix) {
+      mixRef.current = mix;
+      const replay = new ReplayBuffer({ seconds: 60 });
+      replayRef.current = replay;
+      replay.onStateChange = () => setReplayRecording(replay.recording);
+      try {
+        replay.attach(mix.stream);
+      } catch {
+        /* MediaRecorder unavailable -- the toggle renders guarded */
+      }
+    }
     return () => {
       disposed = true;
       mic.close();
+      replayRef.current?.detach(); // 退出即清 (K9)
+      mixRef.current?.close();
       for (const [, el] of audioEls.current) el.remove();
       audioEls.current.clear();
     };
@@ -312,6 +337,36 @@ export function ChannelSession({
         >
           {soundOn ? 'Sound on' : 'Sound off'}
         </Button>
+        <span className="msr-replay">
+          <StatusGlyph
+            tone={replayRecording ? 'ok' : 'off'}
+            shape={replayRecording ? 'dot' : 'ring'}
+            label={replayRecording ? 'replay buffer recording (cleared on exit)' : 'replay buffer off'}
+          />
+          replay
+          <Button
+            size="sm"
+            aria-pressed={replayEnabled}
+            disabled={!mixRef.current}
+            disabledReason="no audio source yet"
+            onClick={() => {
+              const replay = replayRef.current;
+              if (!replay) return;
+              const next = !replayEnabled;
+              setReplayEnabled(next);
+              replay.setEnabled(next);
+              if (next && mixRef.current) {
+                try {
+                  replay.attach(mixRef.current.stream);
+                } catch {
+                  /* MediaRecorder unavailable */
+                }
+              }
+            }}
+          >
+            {replayEnabled ? 'on' : 'off'}
+          </Button>
+        </span>
         <label className="msr-volume">
           volume
           <input

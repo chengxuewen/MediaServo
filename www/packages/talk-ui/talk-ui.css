@@ -167,3 +167,11 @@
   border-radius: var(--ms-radius-sm);
   padding: 0 var(--ms-space-2);
 }
+
+.msr-replay {
+  display: flex;
+  align-items: center;
+  gap: var(--ms-space-2);
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-muted);
+}
