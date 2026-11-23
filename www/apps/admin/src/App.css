@@ -5,6 +5,18 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--ms-color-bg); color: var(--ms-color-text)b; min-height: 100vh; }
 #root { min-height: 100vh; }
 
+/* -- shared page primitives (relocated from Dashboard.css in
+   admin-prototype-restyle W1; consumed by Devices/Accounts/Vehicles/ApiKeys
+   and the ActiveDevices wall) -- */
+.section-title { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: var(--ms-color-text)b; }
+.empty { color: var(--ms-color-text-faint); font-size: 0.9rem; }
+.loading, .error { padding: 2rem; text-align: center; color: var(--ms-color-text-muted); }
+.error { color: var(--ms-color-danger); }
+.btn-sm { padding: 0.25rem 0.75rem; font-size: 0.75rem; border: 1px solid var(--ms-color-danger); background: none; color: var(--ms-color-danger); border-radius: 4px; cursor: pointer; }
+.btn-sm:hover { background: var(--ms-color-danger); color: var(--ms-color-text-inverse); }
+.status-badge { font-size: 0.8rem; display: flex; align-items: center; gap: 4px; }
+.status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+
 /* -- cross-page floor notifications (T11, K15) -- */
 .notif-stack {
   display: flex;

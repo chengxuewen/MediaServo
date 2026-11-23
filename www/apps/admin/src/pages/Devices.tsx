@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { getAdminDevices, registerDevice, revokeDevice, resetDeviceSecret, getPendingDevices, approvePendingDevice } from '../api/client';
 import type { AdminDevice, PendingDevice } from '../api/client';
 import Modal from '../components/Modal';
+import ActiveDevices from '../components/ActiveDevices';
 import './Devices.css';
 import { MonitorCog, AlertTriangle, Check, Inbox } from 'lucide-react';
 
@@ -263,6 +264,10 @@ export default function Devices() {
           </div>
         </Modal>
       )}
+
+      {/* W1 relocation: the overview is a health summary; the live device
+          tree + playback wall lives here (behavior unchanged). */}
+      <ActiveDevices />
     </div>
   );
 }

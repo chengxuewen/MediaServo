@@ -19,7 +19,9 @@
  * Deferred (documented, not forgotten): layout size tokens (--ms-size-*)
  * keep admin's current values until the B-shell batch restyles the shell
  * (prototype --nav-w 230px / --top-h 54px land there, not here); *-ink
- * (text-on-tint) and --ms-color-info are candidates awaiting a real consumer.
+ * (text-on-tint) remains a candidate awaiting a real consumer.
+ * --ms-color-accent / --ms-color-info landed with admin-prototype-restyle W1
+ * (shell v2 introduced real consumers; PIT-258 guard must stay green).
  */
 
 :root {
@@ -58,6 +60,8 @@
   --ms-color-success-soft: #e6f7ee;
   --ms-color-warning: #c97a00;                /* prototype light --warn */
   --ms-color-warning-soft: #fdf3e2;
+  --ms-color-accent: var(--ms-palette-blue);  /* prototype --accent (brand alias) */
+  --ms-color-info: #0e7c86;                   /* prototype light --info */
 
   /* ---- color: text ---- */
   --ms-color-text: #141821;                   /* prototype --tx1 */
@@ -151,6 +155,8 @@
   --ms-color-success-soft: var(--ms-palette-green-tint);
   --ms-color-warning: var(--ms-palette-amber);
   --ms-color-warning-soft: var(--ms-palette-amber-tint);
+  --ms-color-accent: var(--ms-palette-blue);
+  --ms-color-info: var(--ms-palette-cyan);    /* prototype dark --info */
 
   --ms-color-text: #e7ecf5;                   /* --tx1 */
   --ms-color-text-secondary: #a7b2c5;         /* --tx2 */

@@ -195,6 +195,26 @@ export async function getFloorSnapshot(roomId: string): Promise<FloorSnapshot> {
 export async function getVehicleStatus(): Promise<VehicleStatusResponse> {
   return request('/status');
 }
+
+// ── Security audit ring (SB-5; GET = admin + dispatcher) ──────────────────
+// Wire shape: tagged `kind` (snake_case) + per-variant fields + ts (unix secs).
+// Core-in-memory ring (cap 256, not persisted) — consumers filter by kind/ts.
+export interface AuditEventEntry {
+  kind: string;
+  ts: number;
+  [field: string]: unknown;
+}
+
+export interface AuditListResponse {
+  events: AuditEventEntry[];
+  count: number;
+  source: string;
+  retention: string;
+}
+
+export async function getAuditEvents(): Promise<AuditListResponse> {
+  return request('/audit');
+}
 // ── Device management (AdminState) ──────────────────────────────────────
 export async function getAdminDevices(): Promise<AdminDeviceListResponse> {
   return request('/devices');

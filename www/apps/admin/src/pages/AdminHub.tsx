@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import Devices from './Devices';
 import Accounts from './Accounts';
 import ApiKeys from './ApiKeys';
@@ -21,8 +22,12 @@ const TABS = [
 
 export default function AdminHub() {
   const { isAdmin } = useAuth();
+  const location = useLocation();
   const visible = TABS.filter((t) => !t.admin || isAdmin);
-  const [tab, setTab] = useState(visible[0]?.id ?? 'settings');
+  // deep link: overview cards navigate here with { tab } (fleet lens / device wall)
+  const requested = (location.state as { tab?: string } | null)?.tab;
+  const initial = visible.some((t) => t.id === requested) ? requested! : visible[0]?.id ?? 'settings';
+  const [tab, setTab] = useState(initial);
   const active = visible.find((t) => t.id === tab) ?? visible[0];
   return (
     <section>
