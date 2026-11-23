@@ -15,6 +15,7 @@ import {
   type FloorServerEvent,
 } from '@mediaservo/client';
 import { Button, StatusGlyph, type GlyphShape, type GlyphTone } from '@mediaservo/react';
+import { MON_CAP, useRoomScan } from './scan';
 
 export interface ChannelSessionProps {
   roomId: string;
@@ -23,6 +24,8 @@ export interface ChannelSessionProps {
   /** Roster presence from the board's BoardStore (peer_id -> presence). */
   roster?: Record<string, { peer_id: string; username?: string; role?: string; device_id?: string }>;
   onBack?: () => void;
+  /** All managed talk rooms (drives the scan listener, MON_CAP cap). */
+  scanRooms?: string[];
   className?: string;
 }
 
@@ -38,6 +41,7 @@ export function ChannelSession({
   roomId,
   holdSecs = 30,
   onBack,
+  scanRooms,
   className = '',
 }: ChannelSessionProps) {
   const [selfPeer, setSelfPeer] = useState<string | undefined>(undefined);
@@ -55,6 +59,8 @@ export function ChannelSession({
   const [dispatchScope, setDispatchScope] = useState(false);
   const [replayRecording, setReplayRecording] = useState(false);
   const [replayEnabled, setReplayEnabled] = useState(true);
+  const [scanOn, setScanOn] = useState(false);
+  const [armedUntil, setArmedUntil] = useState<number | null>(null);
 
   const micRef = useRef<SfuMicProducer | null>(null);
   const floorRef = useRef<FloorClient | null>(null);
@@ -70,6 +76,7 @@ export function ChannelSession({
   const replayRef = useRef<ReplayBuffer | null>(null);
   const mixRef = useRef<ReturnType<typeof mixStreams>>(null);
   const wsUrl = useMemo(() => wsUrlFor(), []);
+  useRoomScan(scanRooms ?? [], roomId, scanOn, wsUrl);
 
   // short synthesized cues (no assets; WebAudio lazily created -- browsers
   // require a user gesture before audio may sound, so cues before the first
@@ -262,6 +269,33 @@ export function ChannelSession({
     floorRef.current?.release();
   };
 
+  // armed double-click (K16 category 2: second-degree irreversible = armed)
+  useEffect(() => {
+    if (armedUntil === null) return;
+    const t = setTimeout(() => setArmedUntil(null), Math.max(0, armedUntil - Date.now()));
+    return () => clearTimeout(t);
+  }, [armedUntil]);
+  const emergencyPress = () => {
+    const nowMs = Date.now();
+    if (armedUntil !== null && nowMs < armedUntil) {
+      setArmedUntil(null);
+      floorRef.current?.request(undefined, true); // preempt leg (server applies)
+      return;
+    }
+    setArmedUntil(nowMs + 3000);
+  };
+  const armed = armedUntil !== null && Date.now() < armedUntil;
+
+  const replayNow = () => {
+    const clip = replayRef.current?.exportClip(15_000);
+    if (!clip) return;
+    const url = URL.createObjectURL(clip);
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    audio.onerror = () => URL.revokeObjectURL(url);
+    void audio.play().catch(() => URL.revokeObjectURL(url));
+  };
+
   // keyboard PTT: hold Space (keydown w/o repeat), release on keyup; Esc = back
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
@@ -366,7 +400,36 @@ export function ChannelSession({
           >
             {replayEnabled ? 'on' : 'off'}
           </Button>
+          <Button
+            size="sm"
+            disabled={!replayRecording}
+            disabledReason="nothing buffered yet"
+            onClick={replayNow}
+          >
+            replay 15s
+          </Button>
         </span>
+        <Button
+          size="sm"
+          aria-pressed={scanOn}
+          disabled={(scanRooms ?? []).length <= 1}
+          disabledReason="no other talk rooms to scan"
+          onClick={() => setScanOn((v) => !v)}
+        >
+          scan {scanOn ? 'on' : 'off'} ({(scanRooms ?? []).length > MON_CAP ? `${Math.min((scanRooms ?? []).length, MON_CAP)}/${MON_CAP}` : `${(scanRooms ?? []).length}/${MON_CAP}`})
+        </Button>
+        {dispatchScope && (
+          <Button
+            size="sm"
+            variant={armed ? 'danger' : 'secondary'}
+            aria-pressed={armed}
+            disabled={holding || !live}
+            disabledReason={holding ? 'you already hold the floor' : !live ? 'connecting' : undefined}
+            onClick={emergencyPress}
+          >
+            {armed ? 'ARMED — click again' : 'emergency preempt'}
+          </Button>
+        )}
         <label className="msr-volume">
           volume
           <input

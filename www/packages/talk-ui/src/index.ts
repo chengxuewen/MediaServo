@@ -22,5 +22,6 @@ export { FloorBoard } from './Board';
 export type { FloorBoardProps } from './Board';
 export { useBoardStore } from './hooks';
 export { ChannelSession } from './Session';
+export { useRoomScan, MON_CAP } from './scan';
 export type { ChannelSessionProps } from './Session';
 export type { BoardBinding } from './hooks';

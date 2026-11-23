@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChannelSession } from '@mediaservo/talk-ui';
-import { getFloorSnapshot } from '../api/client';
+import { getFloorSnapshot, listManagedRooms } from '../api/client';
 
 /**
  * Intercom session page (talk-app T11): level-2 hold-to-talk for one room.
@@ -12,6 +12,7 @@ export default function IntercomSession() {
   const { roomId = '' } = useParams();
   const navigate = useNavigate();
   const [holdSecs, setHoldSecs] = useState<number | null>(null);
+  const [scanRooms, setScanRooms] = useState<string[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -24,6 +25,11 @@ export default function IntercomSession() {
       .catch(() => {
         /* limits stay at the default 30 s */
       });
+    listManagedRooms()
+      .then((r) => {
+        if (alive) setScanRooms(r.rooms.filter((x) => x.kind === 'talk').map((x) => x.id));
+      })
+      .catch(() => {});
     return () => {
       alive = false;
     };
@@ -34,6 +40,7 @@ export default function IntercomSession() {
       <ChannelSession
         roomId={roomId}
         holdSecs={holdSecs ?? 30}
+        scanRooms={scanRooms}
         onBack={() => navigate('/intercom')}
       />
     </section>
