@@ -14,7 +14,7 @@ import {
   mixStreams,
   type FloorServerEvent,
 } from '@mediaservo/client';
-import { Button, StatusGlyph, type GlyphShape, type GlyphTone } from '@mediaservo/react';
+import { Button, Confirm, StatusGlyph, type GlyphShape, type GlyphTone } from '@mediaservo/react';
 import { MON_CAP, useRoomScan } from './scan';
 
 export interface ChannelSessionProps {
@@ -26,6 +26,8 @@ export interface ChannelSessionProps {
   onBack?: () => void;
   /** All managed talk rooms (drives the scan listener, MON_CAP cap). */
   scanRooms?: string[];
+  /** T9: upload a retained clip (explicit consent happens in the modal). */
+  onRetain?: (clip: Blob) => Promise<unknown>;
   className?: string;
 }
 
@@ -42,6 +44,7 @@ export function ChannelSession({
   holdSecs = 30,
   onBack,
   scanRooms,
+  onRetain,
   className = '',
 }: ChannelSessionProps) {
   const [selfPeer, setSelfPeer] = useState<string | undefined>(undefined);
@@ -59,6 +62,8 @@ export function ChannelSession({
   const [dispatchScope, setDispatchScope] = useState(false);
   const [replayRecording, setReplayRecording] = useState(false);
   const [replayEnabled, setReplayEnabled] = useState(true);
+  const [retainOpen, setRetainOpen] = useState(false);
+  const [retainMsg, setRetainMsg] = useState<string | null>(null);
   const [scanOn, setScanOn] = useState(false);
   const [armedUntil, setArmedUntil] = useState<number | null>(null);
 
@@ -408,7 +413,47 @@ export function ChannelSession({
           >
             replay 15s
           </Button>
+          {onRetain && (
+            <Button
+              size="sm"
+              disabled={!replayRecording}
+              disabledReason="nothing buffered yet"
+              onClick={() => {
+                setRetainMsg(null);
+                setRetainOpen(true);
+              }}
+            >
+              retain 15s
+            </Button>
+          )}
         </span>
+        {retainMsg && (
+          <p className="msr-hint" role="status">
+            {retainMsg}
+          </p>
+        )}
+        {retainOpen && (
+          <Confirm
+            open
+            title="Retain the last 15 s?"
+            message="Saves the recent audio to the server with 7-day retention. Every retain / download / withdraw is audited. Nothing is uploaded without this explicit consent."
+            confirmLabel="Retain"
+            onConfirm={() => {
+              setRetainOpen(false);
+              const clip = replayRef.current?.exportClip(15_000);
+              if (!clip || !onRetain) {
+                setRetainMsg('nothing buffered yet');
+                return;
+              }
+              onRetain(clip)
+                .then(() => setRetainMsg('retained — see Evidence (7-day retention, audited)'))
+                .catch((e: unknown) =>
+                  setRetainMsg(`retain failed: ${e instanceof Error ? e.message : String(e)}`),
+                );
+            }}
+            onCancel={() => setRetainOpen(false)}
+          />
+        )}
         <Button
           size="sm"
           aria-pressed={scanOn}

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChannelSession } from '@mediaservo/talk-ui';
-import { getFloorSnapshot, listManagedRooms } from '../api/client';
+import { getFloorSnapshot, listManagedRooms, retainEvidence } from '../api/client';
 
 /**
  * Intercom session page (talk-app T11): level-2 hold-to-talk for one room.
@@ -41,6 +41,7 @@ export default function IntercomSession() {
         roomId={roomId}
         holdSecs={holdSecs ?? 30}
         scanRooms={scanRooms}
+        onRetain={(clip) => retainEvidence(clip, roomId)}
         onBack={() => navigate('/intercom')}
       />
     </section>

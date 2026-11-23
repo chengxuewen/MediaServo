@@ -4,7 +4,7 @@ import { useAuth } from '../hooks/useAuth';
 import { clearToken } from '../api/client';
 import { FloorNotifChips, useFloorNotifs } from '../notifications';
 import './Layout.css';
-import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders, KeyRound, ListTree } from 'lucide-react';
+import { Radio, LayoutDashboard, Mic, Car, MonitorCog, Users, Settings as SettingsIcon, Sliders, KeyRound, ListTree, FileAudio } from 'lucide-react';
 
 export default function Layout() {
   const { role, username, canMonitor, token, isAdmin } = useAuth();
@@ -69,6 +69,11 @@ export default function Layout() {
           {canMonitor && (
             <NavLink to="/rooms" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
               <ListTree size={15} /> Rooms
+            </NavLink>
+          )}
+          {canMonitor && (
+            <NavLink to="/evidence" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <FileAudio size={15} /> Evidence
             </NavLink>
           )}
           {canMonitor && (

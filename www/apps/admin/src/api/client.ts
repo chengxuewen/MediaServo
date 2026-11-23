@@ -102,6 +102,73 @@ export async function deleteManagedRoom(id: string): Promise<void> {
   await request(`/managed-rooms/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
+// T9 evidence retention (K5/K14/7.3): declare (consent + audited), list,
+// download (audited), withdraw (admin-only, irreversible). Raw audio body.
+export interface EvidenceItemEntry {
+  id: string;
+  room_id: string;
+  actor: string;
+  label?: string;
+  ts: number;
+  retain_until: number;
+  size: number;
+}
+
+export async function retainEvidence(
+  blob: Blob,
+  roomId: string,
+  label = '',
+): Promise<{ item: EvidenceItemEntry }> {
+  const token = getToken();
+  const res = await fetch(
+    `${BASE}/evidence?room_id=${encodeURIComponent(roomId)}&label=${encodeURIComponent(label)}`,
+    {
+      method: 'POST',
+      headers: token
+        ? { Authorization: `Bearer ${token}`, 'Content-Type': 'audio/webm' }
+        : { 'Content-Type': 'audio/webm' },
+      body: blob,
+    },
+  );
+  if (res.status === 401) {
+    clearToken();
+    throw new Error('Authentication required');
+  }
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j?.error) msg = j.error;
+    } catch {
+      /* keep status text */
+    }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+export async function listEvidence(): Promise<{
+  items: EvidenceItemEntry[];
+  count: number;
+  retention_secs: number;
+  source: string;
+}> {
+  return request('/evidence');
+}
+
+export async function fetchEvidenceBlob(id: string): Promise<Blob> {
+  const token = getToken();
+  const res = await fetch(`${BASE}/evidence/${encodeURIComponent(id)}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.blob();
+}
+
+export async function deleteEvidence(id: string): Promise<void> {
+  await request(`/evidence/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
 export async function deleteRoom(roomId: string): Promise<void> {
   await request(`/rooms/${roomId}`, { method: 'DELETE' });
 }
