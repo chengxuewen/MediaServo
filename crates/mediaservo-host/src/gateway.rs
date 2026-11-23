@@ -352,6 +352,9 @@ fn msg_room_id(msg: &SignalingMessage) -> Option<&str> {
         RoomJoin { room_id, .. }
         | RoomJoined { room_id, .. }
         | RoomLeave { room_id, .. }
+        // SB-3 roster (§7-20): same room folding as the other union messages
+        | RoomPeers { room_id, .. }
+        | PeerJoined { room_id, .. }
         | Sdp { room_id, .. }
         | RTCIceCandidate { room_id, .. }
         | CreateWebRtcTransport { room_id, .. }
@@ -444,7 +447,9 @@ fn rewrite_room(msg: &mut SignalingMessage, room: &str) {
         | FloorDenied { .. }
         | FloorQueued { .. }
         | FloorIdle { .. }
-        | FloorState { .. } => {}
+        | FloorState { .. }
+        | RoomPeers { .. }
+        | PeerJoined { .. } => {}
         // O18 media plane: routes by consumer_id (ownership checked
         // server-side); no room field, so no rewrite. NOT a floor command
         // (protocol.rs: no kind gate, no dispatcher role).

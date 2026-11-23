@@ -486,26 +486,42 @@ const DEVICE_AUTH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(
 /// The deferred-queue cap for non-answer messages within the challenge window (prevents unauthenticated flooding; over the cap = disconnect WARN).
 const MAX_DEFERRED_AUTH_MSGS: usize = 16;
 
+/// Per-connection write half (shared like `ws_sender` in handle_socket).
+pub(crate) type WsSender = std::sync::Arc<
+    tokio::sync::Mutex<
+        futures_util::stream::SplitSink<axum::extract::ws::WebSocket, axum::extract::ws::Message>,
+    >,
+>;
+
 /// SB-3 roster entry (I3): identity captured at join; username/role only exist
 /// for account sessions, device id only for device sessions.
+///
+/// `sender` (accounts only) delivers roster events DIRECTLY -- roster frames
+/// never ride the room broadcast channel: strict Rust clients (the 11-19
+/// host-legacy build) hard-fail on unknown variants (serde enum without a
+/// catch-all) and deployed binaries cannot be updated on our schedule (§7-20).
 #[derive(Debug, Clone)]
 pub(crate) struct RosterEntry {
     pub username: Option<String>,
     pub role: Option<crate::roles::CockpitRole>,
     pub device_id: Option<String>,
+    pub sender: Option<WsSender>,
 }
 
-fn roster_entry_for(identity: &SessionIdentity) -> RosterEntry {
+fn roster_entry_for(identity: &SessionIdentity, sender: Option<WsSender>) -> RosterEntry {
     match identity {
         SessionIdentity::Account(a) => RosterEntry {
             username: Some(a.username.clone()),
             role: Some(a.role),
             device_id: None,
+            sender,
         },
         SessionIdentity::Device(id) => {
-            RosterEntry { username: None, role: None, device_id: Some(id.clone()) }
+            RosterEntry { username: None, role: None, device_id: Some(id.clone()), sender: None }
         }
-        SessionIdentity::Legacy => RosterEntry { username: None, role: None, device_id: None },
+        SessionIdentity::Legacy => {
+            RosterEntry { username: None, role: None, device_id: None, sender: None }
+        }
     }
 }
 
@@ -534,6 +550,7 @@ mod roster_tests {
             username: Some("carol".into()),
             role: Some(role),
             device_id: None,
+            sender: None,
         }
     }
 
@@ -551,7 +568,12 @@ mod roster_tests {
 
     #[test]
     fn device_id_is_always_visible() {
-        let d = RosterEntry { username: None, role: None, device_id: Some("ms-car1".into()) };
+        let d = RosterEntry {
+            username: None,
+            role: None,
+            device_id: Some("ms-car1".into()),
+            sender: None,
+        };
         assert_eq!(peer_presence_for("ms-car1-a", &d, false).device_id.as_deref(), Some("ms-car1"));
         assert_eq!(peer_presence_for("ms-car1-a", &d, true).device_id.as_deref(), Some("ms-car1"));
     }
@@ -1409,35 +1431,60 @@ async fn handle_socket(socket: WebSocket, server: SignalingServer, jwt_token: Op
             &session_identity,
             SessionIdentity::Account(a) if matches!(a.role, CockpitRole::Admin | CockpitRole::Dispatcher)
         );
-        let entry = roster_entry_for(&session_identity);
-        let peers: Vec<mediaservo_common::protocol::PeerPresence> = server
-            .roster
-            .get(&room_id)
-            .map(|room| {
-                room.iter()
-                    .filter(|e| e.key() != &peer_id)
-                    .map(|e| peer_presence_for(e.key(), e.value(), dispatch_scope))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let snapshot =
-            SignalingMessage::RoomPeers { room_id: room_id.clone(), peers };
-        let _ = ws_sender
-            .lock()
-            .await
-            .send(Message::Text(send_msg(&snapshot).unwrap()))
-            .await;
+        let entry = roster_entry_for(
+            &session_identity,
+            Some(std::sync::Arc::clone(&ws_sender)),
+        );
+        // Snapshot goes ONLY to account sessions: strict deployed device
+        // clients (host-legacy 11-19 build) hard-fail on unknown variants.
+        if matches!(&session_identity, SessionIdentity::Account(_)) {
+            let peers: Vec<mediaservo_common::protocol::PeerPresence> = server
+                .roster
+                .get(&room_id)
+                .map(|room| {
+                    room.iter()
+                        .filter(|e| e.key() != &peer_id)
+                        .map(|e| peer_presence_for(e.key(), e.value(), dispatch_scope))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let snapshot =
+                SignalingMessage::RoomPeers { room_id: room_id.clone(), peers };
+            let _ = ws_sender
+                .lock()
+                .await
+                .send(Message::Text(send_msg(&snapshot).unwrap()))
+                .await;
+        }
         server
             .roster
             .entry(room_id.clone())
             .or_default()
             .insert(peer_id.clone(), entry.clone());
+        // PeerJoined: direct delivery to ACCOUNT connections only -- never the
+        // room broadcast channel (strict old device clients would crash; §7-20).
         let joined = SignalingMessage::PeerJoined {
             room_id: room_id.clone(),
             peer_id: peer_id.clone(),
             device_id: entry.device_id.clone(),
         };
-        let _ = tx.send(serde_json::to_string(&joined).unwrap());
+        let wire = serde_json::to_string(&joined).unwrap();
+        let targets: Vec<WsSender> = server
+            .roster
+            .get(&room_id)
+            .map(|room| {
+                room.iter()
+                    .filter(|e| e.key() != &peer_id && e.value().username.is_some())
+                    .filter_map(|e| e.value().sender.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for sender in targets {
+            let wire = wire.clone();
+            tokio::spawn(async move {
+                let _ = sender.lock().await.send(Message::Text(wire)).await;
+            });
+        }
     }
 
     let mut rx = tx.subscribe();

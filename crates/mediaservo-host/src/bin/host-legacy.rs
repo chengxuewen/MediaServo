@@ -216,8 +216,16 @@ async fn main() -> anyhow::Result<()> {
         let (transport_id, ice_parameters, dtls_parameters, ice_candidates) = loop {
             match ws_receiver.next().await {
                 Some(Ok(Message::Text(text))) => {
-                    let msg: SignalingMessage = serde_json::from_str(&text)
-                        .map_err(|e| anyhow::anyhow!("SFU parse: {}", e))?;
+                    // H3 tolerance: unknown/additive variants must not kill the
+                    // producer (§7-20 -- the 11-19 build crashed on room_peers;
+                    // skip anything this build cannot parse).
+                    let msg: SignalingMessage = match serde_json::from_str(&text) {
+                        Ok(m) => m,
+                        Err(e) => {
+                            tracing::debug!("SFU parse skip: {e}");
+                            continue;
+                        }
+                    };
                     match msg {
                         SignalingMessage::WebRtcTransportCreated {
                             room_id: _,
