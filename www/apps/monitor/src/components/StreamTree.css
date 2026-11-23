@@ -1,0 +1,19 @@
+/* P3 slice ③a stream tree — tokens only (no raw values; PIT-258 guard). */
+.stream-tree { display: flex; flex-direction: column; gap: var(--ms-space-2); max-width: 720px; }
+.st-state { color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-sm); padding: var(--ms-space-4); background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); }
+.st-error { color: var(--ms-color-danger); }
+.st-group { background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); overflow: hidden; }
+.st-device { display: flex; align-items: center; gap: var(--ms-space-2); width: 100%; padding: var(--ms-space-2) var(--ms-space-3); background: none; border: 0; font: inherit; font-size: var(--ms-font-size-sm); color: var(--ms-color-text); cursor: pointer; }
+.st-device:hover { background: var(--ms-color-surface-hover); }
+.st-chevron { display: inline-flex; transition: transform .15s; color: var(--ms-color-text-tertiary); }
+.st-chevron.open { transform: rotate(90deg); }
+.st-device-name { font-weight: var(--ms-font-weight-semibold); }
+.st-count { margin-left: auto; color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-xs); }
+.st-streams { display: flex; flex-direction: column; border-top: 1px solid var(--ms-color-border); }
+.st-stream { display: flex; align-items: center; gap: var(--ms-space-2); width: 100%; padding: var(--ms-space-2) var(--ms-space-3); background: none; border: 0; font: inherit; font-size: var(--ms-font-size-sm); color: var(--ms-color-text-secondary); cursor: pointer; }
+.st-stream:hover { background: var(--ms-color-surface-hover); }
+.st-stream.active { color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
+.st-kind { display: inline-flex; color: var(--ms-color-text-tertiary); }
+.st-stream-name { flex: 1; text-align: left; }
+.st-score { color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-xs); }
+.st-play { display: inline-flex; align-items: center; gap: var(--ms-space-1); color: var(--ms-color-accent); font-size: var(--ms-font-size-xs); }

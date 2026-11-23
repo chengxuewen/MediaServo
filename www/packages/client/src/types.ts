@@ -45,6 +45,39 @@ export interface SfuStats {
   score: number;
 }
 
+// P3 slice ③a (B5 corrected contract): GET /api/admin/sfu/stats WITHOUT params returns
+// the full live producer/consumer list ({ streams: [...] }) — distinct from the
+// single-stream SfuStats shape above (?producer_id / ?consumer_id). Wire mirror of
+// server sfu.rs stream_stat_row + transport observation fields. "In the table = alive":
+// a row is present only when its transport has a selected ICE tuple; unmeasured
+// transport fields stay present as null (never absent). No paused/label field exists
+// on this surface — liveness = presence; stream-label addressing comes from the device
+// registry (/rooms streams) for registered devices.
+export interface SfuStreamStatRow {
+  room: string;
+  /** registered device id; null = ownerless room (e.g. a PSK host room). */
+  owner: string | null;
+  peer_id: string;
+  role: 'producer' | 'consumer';
+  /** producer/consumer uuid — single-stream metrics address (?producer_id=<id>). */
+  id: string;
+  kind: 'audio' | 'video' | 'data';
+  byte_count: number;
+  packet_count: number;
+  /** 0-10 transport score. */
+  score: number;
+  transport_id: string;
+  local_port: number | null;
+  remote_ip: string | null;
+  remote_port: number | null;
+  /** fractionLost 0-1 ratio (never integer-truncated). */
+  rtp_packet_loss_sent: number | null;
+  rtp_packet_loss_received: number | null;
+  available_outgoing_bitrate: number | null;
+  available_incoming_bitrate: number | null;
+}
+export interface SfuStatsListResponse { streams: SfuStreamStatRow[]; }
+
 // H3: multi-vehicle status report (StatusReport wire mirror — E3).
 export interface TopicFlow { topic: string; fps: number; bps: number; last_ts_mono_ns: number; frames: number; stalled: boolean; }
 export interface StreamFlow { id: string; bytes_sent: number; frames_encoded: number; frame_width: number; frame_height: number; connected: boolean; }

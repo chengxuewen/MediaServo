@@ -15,10 +15,10 @@ export default defineConfig({
       testMatch: /guard\.spec\.ts/,
       use: { baseURL: 'http://localhost:5176' },
     },
-    // authenticated shell smoke (admin storageState from globalSetup)
+    // authenticated shell smoke + single-stream wall (admin storageState from globalSetup)
     {
       name: 'monitor-admin',
-      testMatch: /shell\.spec\.ts/,
+      testMatch: /(shell|wall)\.spec\.ts/,
       use: { baseURL: 'http://localhost:5176', storageState: '.auth/admin.json' },
     },
   ],
