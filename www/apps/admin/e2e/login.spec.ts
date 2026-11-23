@@ -38,11 +38,11 @@ test.describe('Auth Guard', () => {
 test.describe('Login Page', () => {
   test('wrong password shows error and stays on login', async ({ page }) => {
     await page.goto('/login');
-    await page.locator('input.login-input[placeholder="username"]').fill('admin');
-    await page.locator('input.login-input[placeholder="password"]').fill('wrong-password');
-    await page.locator('button', { hasText: 'Login' }).click();
+    await page.getByPlaceholder('username').fill('admin');
+    await page.getByPlaceholder('password').fill('wrong-password');
+    await page.getByRole('button', { name: 'Login', exact: true }).click();
 
-    await expect(page.locator('.token-status.error')).toBeVisible();
+    await expect(page.getByRole('alert')).toBeVisible();
     await expect(page).toHaveURL(/\/login$/);
     const token = await page.evaluate((key) => localStorage.getItem(key), TOKEN_KEY);
     expect(token).toBeNull();

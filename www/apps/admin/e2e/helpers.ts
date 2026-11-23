@@ -9,9 +9,10 @@ export interface Creds { username: string; password: string; role: string; }
 export async function login(page: Page, creds: Creds, attempts = 4): Promise<void> {
   for (let i = 0; i < attempts; i++) {
     await page.goto('http://localhost:5173/login');
-    await page.locator('input.login-input[placeholder="username"]').fill(creds.username);
-    await page.locator('input.login-input[placeholder="password"]').fill(creds.password);
-    await page.locator('button', { hasText: 'Login' }).click();
+    // W5: kit Input/Button — selectors by placeholder/role, not legacy classes
+    await page.getByPlaceholder('username').fill(creds.username);
+    await page.getByPlaceholder('password').fill(creds.password);
+    await page.getByRole('button', { name: 'Login', exact: true }).click();
 
     // Poll: token in localStorage = success; error indicator = failure (rate-limit/credentials) → retry
     for (let t = 0; t < 40; t++) {
@@ -20,7 +21,7 @@ export async function login(page: Page, creds: Creds, attempts = 4): Promise<voi
         await expect(page.locator('.header .version')).toContainText(`[${creds.role}]`);
         return;
       }
-      const errorCount = await page.locator('.token-status.error').count();
+      const errorCount = await page.getByRole('alert').count();
       if (errorCount > 0) break;
       await page.waitForTimeout(150);
     }

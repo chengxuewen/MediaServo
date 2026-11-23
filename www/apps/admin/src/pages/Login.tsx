@@ -1,9 +1,14 @@
 import { useState, type FormEvent } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
+import { Button, Input } from '@mediaservo/react';
 import { login, setToken, hasToken } from '../api/client';
-import './Login.css';
 
-/** Login page — reuses the Settings login form styles (.login-input/.btn/.token-status). */
+/**
+ * W5 (admin-prototype-restyle): login card in the prototype language
+ * (Settings "Account Login" card: title + cockpit-account note + inputs +
+ * primary action + alert row). The real auth flow is unchanged — the
+ * prototype's in-Settings session switch is simulated and stays out.
+ */
 export default function Login() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -31,31 +36,52 @@ export default function Login() {
   };
 
   return (
-    <div className="login-page">
-      <form className="login-card" onSubmit={handleSubmit}>
-        <h1 className="login-title">MediaServo Admin</h1>
-        <p className="login-subtitle">Sign in with a cockpit account</p>
-        <input
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--ms-color-bg)' }}>
+      <form
+        onSubmit={handleSubmit}
+        style={{
+          width: 320,
+          background: 'var(--ms-color-surface)',
+          border: '1px solid var(--ms-color-border)',
+          borderRadius: 'var(--ms-radius-md)',
+          padding: 'var(--ms-space-6)',
+          boxShadow: 'var(--ms-shadow-1)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 'var(--ms-space-3)',
+        }}
+      >
+        <h1 style={{ fontSize: 'var(--ms-font-size-md)', fontWeight: 'var(--ms-font-weight-semibold)', textAlign: 'center', margin: 0 }}>
+          Account Login
+        </h1>
+        <p role="note" style={{ fontSize: 'var(--ms-font-size-xs)', color: 'var(--ms-color-text-tertiary)', textAlign: 'center', margin: 0 }}>
+          Sign in with a cockpit account (viewer / operator / dispatcher / admin).
+        </p>
+        <Input
           type="text"
-          className="login-input"
           placeholder="username"
+          aria-label="Username"
           value={username}
           onChange={(e) => setUsername(e.target.value)}
           autoComplete="username"
           autoFocus
         />
-        <input
+        <Input
           type="password"
-          className="login-input"
           placeholder="password"
+          aria-label="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           autoComplete="current-password"
         />
-        {error && <p className="token-status error">{error}</p>}
-        <button type="submit" className="btn" disabled={loggingIn}>
+        {error && (
+          <p role="alert" style={{ color: 'var(--ms-color-danger)', fontSize: 'var(--ms-font-size-sm)', margin: 0 }}>
+            {error}
+          </p>
+        )}
+        <Button variant="primary" type="submit" disabled={loggingIn} disabledReason="Signing in…">
           {loggingIn ? 'Signing in...' : 'Login'}
-        </button>
+        </Button>
       </form>
     </div>
   );
