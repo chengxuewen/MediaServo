@@ -4,7 +4,13 @@ import { SfuConsumerClient, type StreamMetrics } from '@mediaservo/client';
 import './VideoPlayer.css';
 import { X, VolumeX, Pause, Maximize, Zap, Package, Clapperboard } from 'lucide-react';
 
-interface Props {
+// P3 slice ③a (admin-prototype-restyle): extracted verbatim from apps/admin
+// components/VideoPlayer.tsx so admin + monitor share ONE player (reuse-first).
+// The component was already decoupled from admin (SDK + lucide + CSS only); the
+// react package already ships portal/DOM components (Modal, PIT-269), so D4
+// headless-friendly is not a blocker. Behavior unchanged.
+
+export interface VideoPlayerProps {
   roomId: string;
   serverUrl: string;
   token: string;
@@ -29,7 +35,7 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
   error: '#e74c3c',
 };
 
-export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand }: Props) {
+export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

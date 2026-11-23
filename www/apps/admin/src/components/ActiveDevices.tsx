@@ -6,7 +6,7 @@ import { deleteRoom } from '../api/client';
 import { useState, useCallback } from 'react';
 import type { DeviceSnapshot, StreamSnapshot } from '../api/client';
 import StreamDetail from './StreamDetail';
-import VideoPlayer from './VideoPlayer';
+import { VideoPlayer } from '@mediaservo/react';
 import './ActiveDevices.css';
 import { ChevronRight, Play, Video, Eye } from 'lucide-react';
 

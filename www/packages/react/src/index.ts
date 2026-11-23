@@ -25,4 +25,8 @@ export type { ModalProps } from './Modal';
 export { Confirm } from './Confirm';
 export type { ConfirmProps } from './Confirm';
 
+// P3 slice ③a: shared SFU video player (extracted from admin; admin + monitor consume one source).
+export { default as VideoPlayer } from './VideoPlayer';
+export type { VideoPlayerProps } from './VideoPlayer';
+
 export const VERSION = '0.1.0';

@@ -8,7 +8,7 @@ import {
   getAdminDevices, getPendingDevices, listManagedRooms, getVehicleStatus, getAuditEvents,
 } from '../api/client';
 import type { AuditEventEntry, StatusReport } from '../api/client';
-import VideoPlayer from '../components/VideoPlayer';
+import { VideoPlayer } from '@mediaservo/react';
 import { fleetCounts } from '../fleet';
 import './Dashboard.css';
 import { RefreshCw } from 'lucide-react';
