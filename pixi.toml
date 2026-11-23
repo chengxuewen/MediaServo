@@ -69,9 +69,10 @@ build-server = "sh -c 'scripts/docker-cargo.sh build -p mediaservo-server --feat
 test-server = "sh -c 'scripts/docker-cargo.sh test -p mediaservo-server --features sfu-mediasoup'"
 
 # mediaservo-server — native build (unset MESON_ARGS/MESON: conda gcc injects -Dbuildtype=release which conflicts with tasks.py --buildtype; unsetting MESON lets tasks.py fall back to the official pip-managed meson==1.11.2+ninja — first run needs network for pip, cached afterwards)
-check-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo check -p mediaservo-server'"
+# MEDIASOUP_LOCAL_DEV=1 (SB-1, 11-23): skips the worker `meson subprojects purge` clean step, which hangs indefinitely in this offline env (stale purge pairs from 11-16..11-20 held the build lock for days). Upstream's official escape hatch; the worker build itself is unaffected.
+check-server-native = "sh -c 'unset MESON_ARGS; unset MESON; export MEDIASOUP_LOCAL_DEV=1; cargo check -p mediaservo-server'"
 build-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo build -p mediaservo-server'"
-test-server-native = "sh -c 'unset MESON_ARGS; unset MESON; cargo test -p mediaservo-server'"
+test-server-native = "sh -c 'unset MESON_ARGS; unset MESON; export MEDIASOUP_LOCAL_DEV=1; cargo test -p mediaservo-server'"
 
 
 # Tooling (unchanged)
