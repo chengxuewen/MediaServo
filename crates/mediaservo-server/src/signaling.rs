@@ -2524,6 +2524,9 @@ pub(crate) async fn apply_floor_event(
     // private `no_media` denial, and a superseded round's collective signals
     // are replaced by one authoritative state announcement.
     let mut pending: Vec<FloorEvent> = vec![event];
+    // SB-4 (spike ③, §0 exception): floor_mode_set used to reply to the sender
+    // only — every other member kept a stale mode until they re-joined.
+    let original_was_mode_change = matches!(pending[0], FloorEvent::ModeChange { .. });
     let mut out_signals: Vec<FloorSignal> = Vec::new();
     let mut no_media_peers: Vec<String> = Vec::new();
     let mut superseded = false;
@@ -2685,6 +2688,14 @@ pub(crate) async fn apply_floor_event(
         } else {
             let _ = server.floor_registry.broadcast_room(room_id, &msg);
         }
+    }
+    // SB-4: one authoritative BASE state announcement per mode change (no queue
+    // on the broadcast wire — field scopes never see it; dispatchers refresh
+    // their scoped view via resync/join). Granted/Taken/Idle already broadcast
+    // above; mute/queue-priority staleness is a registered follow-up.
+    if original_was_mode_change {
+        let msg = floor_snapshot_msg(server, room_id, None).await;
+        let _ = server.floor_registry.broadcast_room(room_id, &msg);
     }
     // P4-2: one FloorChanged per mutation on the admin events channel (final
     // truth, after the reconcile cascade; same second-level-refresh discipline

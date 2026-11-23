@@ -719,6 +719,11 @@ async fn spawn_server_g3(devices_yaml: &str) -> (SignalingServer, String) {
     let mut server =
         SignalingServer::new(65536, Some(mediaservo_common::auth::JwtAuth::new(JWT_SECRET)));
     server.ws_ping_secs = 0; // the a1 heartbeat has its dedicated pins in heartbeat_e2e
+    // SB-4 test hook: floor master switch via env — MUST be set before this call
+    // (the router gets a clone; plain-bool field writes after the clone are lost).
+    server.floor_enabled = std::env::var("MEDIASERVO_FLOOR_ENABLED")
+        .map(|v| v == "1" || v == "true")
+        .unwrap_or(false);
     server.device_registry = std::sync::Arc::new(registry);
     let mut server = server;
     server.psk_state = std::sync::Arc::new(std::sync::RwLock::new(Some(PSK.into())));
@@ -785,7 +790,8 @@ async fn raw_account_join(
         device_id: None,
         device_secret: None,
         device_pubkey: None,
-        protocol: None,
+        // dialect 4: floor registration requires negotiated >= PROTOCOL_MIN_FLOOR
+        protocol: Some(4),
         client_version: None,
         resume: None,
     };
@@ -832,6 +838,34 @@ async fn roster_snapshot_and_join_broadcast() {
     let joined = recv_until(&mut ws_dave, "peer_joined", 6).await;
     assert!(joined.contains("carol"), "presence broadcast for carol: {joined}");
     assert!(!joined.contains("username"), "broadcasts stay presence-only: {joined}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn floor_mode_set_broadcasts_to_room() {
+    // floor gates (P2): master switch (env, BEFORE spawn — the router holds a
+    // clone) + room designation via the seed env
+    unsafe { std::env::set_var("MEDIASERVO_FLOOR_ROOMS", "car1-room") };
+    unsafe { std::env::set_var("MEDIASERVO_FLOOR_ENABLED", "1") };
+    let (server, ws_url) = spawn_server_g3(&two_devices_yaml()).await;
+    drop(server);
+    let mut ws_dave = raw_account_join(&ws_url, &account_token("dave", "operator", &[]), "car1-room").await;
+    let mut ws_carol = raw_account_join(&ws_url, &account_token("carol", "admin", &["ms-car1"]), "car1-room").await;
+    // drain both join-time roster snapshots AND the registration floor_state so
+    // the next reads are the mode-change frames
+    let _ = recv_until(&mut ws_carol, "room_peers", 6).await;
+    let _ = recv_until(&mut ws_dave, "room_peers", 6).await;
+    let _ = recv_until(&mut ws_carol, "floor_state", 6).await;
+    let _ = recv_until(&mut ws_dave, "floor_state", 6).await;
+    // SB-4: a mode change must broadcast the new state to the whole room (the
+    // old behavior replied to the setter only — everyone else stayed stale).
+    let set = serde_json::json!({"type": "floor_mode_set", "mode": "open"}).to_string();
+    use futures_util::SinkExt;
+    ws_carol.send(WsMsg::Text(set)).await.unwrap();
+    let reply = recv_until(&mut ws_carol, "\"mode\":\"open\"", 6).await;
+    assert!(reply.contains("\"mode\":\"open\""), "setter sees the new mode: {reply}");
+    let bcast = recv_until(&mut ws_dave, "\"mode\":\"open\"", 8).await;
+    assert!(bcast.contains("\"mode\":\"open\""), "members must see the new mode: {bcast}");
+    assert!(!bcast.contains("queue"), "field scopes never see the queue: {bcast}");
 }
 
 async fn account_join(
