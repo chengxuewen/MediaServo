@@ -1,12 +1,16 @@
 {
   "name": "@mediaservo/talk-ui",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "MediaServo intercom React components (talk-app T0; design authority = monitor-center K1-K16). Layering: @mediaservo/client (logic) -> @mediaservo/ui (tokens) -> @mediaservo/react (primitives) -> this package. Consumers: admin today; other React apps / Tauri / H5 tomorrow (L3).",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./talk-ui.css": "./talk-ui.css"
   },
+  "files": [
+    "talk-ui.css"
+  ],
   "scripts": {
     "lint": "tsc --noEmit"
   },

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import App from './App';
 import '@mediaservo/ui/tokens.css';
 import '@mediaservo/react/react.css';
+import '@mediaservo/talk-ui/talk-ui.css';
 import './App.css';
 
 // When served at /admin, set basename for proper routing

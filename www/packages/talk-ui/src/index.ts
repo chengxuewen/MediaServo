@@ -15,4 +15,10 @@
 // contract); behavior lives in @mediaservo/client (BoardStore) — this package
 // is React rendering + local view state only (headless-friendly, D4).
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.2.0';
+
+// T5: level-1 floor board
+export { FloorBoard } from './Board';
+export type { FloorBoardProps } from './Board';
+export { useBoardStore } from './hooks';
+export type { BoardBinding } from './hooks';

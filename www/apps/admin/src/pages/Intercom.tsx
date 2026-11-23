@@ -1,34 +1,40 @@
-import { Button, Guard, StatusGlyph } from '@mediaservo/react';
-import { VERSION as TALK_UI_VERSION } from '@mediaservo/talk-ui';
+import { useEffect, useState } from 'react';
+import { FloorBoard } from '@mediaservo/talk-ui';
+import { listManagedRooms } from '../api/client';
 
 /**
- * Intercom placeholder (talk-app T0).
- * Proves the package chain admin -> talk-ui -> react -> ui tokens.
- * The real floor board and channel session land with talk-app batches
- * T5 (board rows) and T11 (session view) — see docs/plans/talk-app.
+ * Intercom board page (talk-app T5): one row per designated talk room --
+ * hue+shape state, holder, mode, queue, guarded Request/Release.
+ * Disconnected rooms render UNKNOWN, never idle (K discipline).
+ *
+ * Room list source: managed-rooms kind=talk (admin + dispatcher readable).
+ * The channel session (level 2) lands with batches T11/T12.
  */
 export default function Intercom() {
+  const [rooms, setRooms] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    listManagedRooms()
+      .then((r) => {
+        if (!alive) return;
+        setRooms(r.rooms.filter((x) => x.kind === 'talk').map((x) => x.id));
+      })
+      .catch((e: unknown) => {
+        if (alive) setError(e instanceof Error ? e.message : String(e));
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   return (
     <section>
       <h1>Intercom</h1>
-      <p>
-        Placeholder — the floor board and channel session arrive with talk-app
-        batches T5/T11 (talk-ui v{TALK_UI_VERSION}). State legend preview:
-      </p>
-      <p>
-        <StatusGlyph tone="ok" shape="dot" label="held" /> held{' '}
-        <StatusGlyph tone="warn" shape="seg" label="queued" /> queued{' '}
-        <StatusGlyph tone="off" shape="ring" label="idle" /> idle{' '}
-        <StatusGlyph tone="unknown" shape="triangle" label="unknown — reconnecting" /> unknown
-      </p>
-      <p>
-        <Guard reason="Board actions land with batch T5 (floor capability: dispatcher + admin)">
-          <Button variant="primary">Grant (preview)</Button>
-        </Guard>{' '}
-        <Button variant="secondary" disabled disabledReason="Session view lands with batch T11">
-          Join (preview)
-        </Button>
-      </p>
+      {error && <p role="alert">Failed to load the room list: {error}</p>}
+      {rooms === null && !error && <p role="status">Loading rooms...</p>}
+      {rooms !== null && !error && <FloorBoard rooms={rooms} />}
     </section>
   );
 }

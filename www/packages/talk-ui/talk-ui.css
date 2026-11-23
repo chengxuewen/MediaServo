@@ -1,0 +1,67 @@
+/* talk-ui board styles (T5) -- tokens-only, import AFTER ui tokens.css and
+ * react/react.css. Every value comes from --ms-* (see @mediaservo/ui TOKENS.md). */
+
+.msr-board {
+  display: grid;
+  gap: var(--ms-space-2);
+}
+
+.msr-talk-row {
+  display: grid;
+  grid-template-columns: auto 1fr minmax(0, auto) auto auto;
+  align-items: center;
+  gap: var(--ms-space-3);
+  padding: var(--ms-space-2) var(--ms-space-3);
+  background: var(--ms-color-surface);
+  border: 1px solid var(--ms-color-border);
+  border-radius: var(--ms-radius-md);
+}
+
+.msr-talk-id {
+  display: grid;
+  gap: var(--ms-space-1);
+  min-width: 0;
+}
+
+.msr-talk-name {
+  font-size: var(--ms-font-size-base);
+  font-weight: var(--ms-font-weight-semibold);
+  color: var(--ms-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.msr-talk-mode {
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-muted);
+}
+
+.msr-talk-state {
+  font-size: var(--ms-font-size-sm);
+  color: var(--ms-color-text-secondary);
+  white-space: nowrap;
+}
+
+.msr-talk-queue {
+  font-size: var(--ms-font-size-xs);
+  color: var(--ms-color-text-muted);
+  border: 1px solid var(--ms-color-border-strong);
+  border-radius: var(--ms-radius-sm);
+  padding: 0 var(--ms-space-2);
+  white-space: nowrap;
+}
+
+.msr-talk-actions {
+  display: flex;
+  gap: var(--ms-space-2);
+}
+
+.msr-board-empty {
+  padding: var(--ms-space-4);
+  font-size: var(--ms-font-size-sm);
+  color: var(--ms-color-text-muted);
+  background: var(--ms-color-surface);
+  border: 1px dashed var(--ms-color-border-strong);
+  border-radius: var(--ms-radius-md);
+}

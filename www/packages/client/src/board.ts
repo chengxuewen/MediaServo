@@ -83,6 +83,7 @@ const MAX_BACKOFF_MS = 8000;
 export class BoardStore {
   private readonly conns = new Map<string, RoomConn>();
   private readonly rosters = new Map<string, Map<string, WirePeerPresence>>();
+  private cached: BoardSnapshot | null = null;
   private readonly listeners = new Set<(s: BoardSnapshot) => void>();
   private version = 0;
   private readonly baseUrl: string;
@@ -162,6 +163,12 @@ export class BoardStore {
   }
 
   snapshot(): BoardSnapshot {
+    // cached between emits — useSyncExternalStore requires a stable reference
+    if (!this.cached) this.cached = this.build();
+    return this.cached;
+  }
+
+  private build(): BoardSnapshot {
     const rooms: Record<string, BoardRoomSnapshot> = {};
     for (const conn of this.conns.values()) {
       rooms[conn.roomId] = {
@@ -265,7 +272,7 @@ export class BoardStore {
 
   private emit(): void {
     this.version += 1;
-    const snap = this.snapshot();
-    for (const l of this.listeners) l(snap);
+    this.cached = this.build();
+    for (const l of this.listeners) l(this.cached);
   }
 }

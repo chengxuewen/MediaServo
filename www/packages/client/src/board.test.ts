@@ -165,6 +165,17 @@ describe('BoardStore (T3)', () => {
     unsub();
   });
 
+  it('snapshot() is referentially stable between events (useSyncExternalStore contract)', () => {
+    store = makeStore(['r1']);
+    const a = store.snapshot();
+    const b = store.snapshot();
+    expect(a).toBe(b);
+    FakeWS.instances[0].open();
+    FakeWS.instances[0].msg({ type: 'room_joined', room_id: 'r1', peer_id: 'p-x', protocol: 4 });
+    expect(store.snapshot()).not.toBe(a);
+    expect(store.snapshot().version).toBeGreaterThan(a.version);
+  });
+
   it('roster: room_peers snapshot lands, peer_joined upserts, room_leave removes', () => {
     store = makeStore(['r1']);
     const ws = FakeWS.instances[0];

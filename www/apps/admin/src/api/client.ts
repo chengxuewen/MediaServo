@@ -59,6 +59,18 @@ export async function getStats(): Promise<StatsResponse> {
   return request('/stats');
 }
 
+// SB-3/T5 (talk-app): managed rooms drive the intercom board's room list
+// (kind=talk rooms are the designated floor rooms).
+export interface ManagedRoomEntry {
+  id: string;
+  kind: string;
+  video?: boolean | null;
+}
+
+export async function listManagedRooms(): Promise<{ rooms: ManagedRoomEntry[]; count: number }> {
+  return request('/managed-rooms');
+}
+
 export async function deleteRoom(roomId: string): Promise<void> {
   await request(`/rooms/${roomId}`, { method: 'DELETE' });
 }
