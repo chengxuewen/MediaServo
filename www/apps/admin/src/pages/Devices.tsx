@@ -1,10 +1,26 @@
+// W2 (admin-prototype-restyle, B3 approved real credentials face): enrollment
+// + approval + credentials lifecycle in the prototype language on the current
+// list layout (drawer/config-draft/vision-switch deferred per adjudication 3).
+// Reject/Restore/Re-approve have no server endpoint -> not drawn (honest).
+// Revoke/reset carry semantics cards grounded in devices.yaml truth; one-time
+// secrets are close-protected (discard confirm when not copied).
 import { useCallback, useEffect, useState } from 'react';
+import {
+  Button,
+  Confirm,
+  Input,
+  Modal,
+  Table,
+  TBody,
+  TD,
+  TH,
+  THead,
+  TR,
+} from '@mediaservo/react';
 import { getAdminDevices, registerDevice, revokeDevice, resetDeviceSecret, getPendingDevices, approvePendingDevice } from '../api/client';
 import type { AdminDevice, PendingDevice } from '../api/client';
-import Modal from '../components/Modal';
 import ActiveDevices from '../components/ActiveDevices';
-import './Devices.css';
-import { MonitorCog, AlertTriangle, Check, Inbox } from 'lucide-react';
+import { AlertTriangle, Check, Plus } from 'lucide-react';
 
 // first-seen time → relative time (scale mirrors Vehicles fmtUptime)
 function fmtAgo(firstSeenMs: number): string {
@@ -14,11 +30,17 @@ function fmtAgo(firstSeenMs: number): string {
   return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m ago`;
 }
 
+const monoStyle = { fontFamily: 'var(--ms-font-family-mono)' } as const;
+
+const REVOKE_SEMANTICS = 'Revoke deletes the credential: new connections are refused immediately; established sessions live until disconnect. This cannot be undone.';
+const RESET_SEMANTICS = 'Reset issues a new secret and invalidates the old one for new connections. The new value is shown once — copy it before closing.';
+
 export default function Devices() {
   const [devices, setDevices] = useState<AdminDevice[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionMsg, setActionMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [query, setQuery] = useState('');
 
   // register-form modal
   const [registerOpen, setRegisterOpen] = useState(false);
@@ -31,8 +53,11 @@ export default function Devices() {
   const [secretModal, setSecretModal] = useState<{ title: string; secret: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const [discardOpen, setDiscardOpen] = useState(false);
 
-  // row currently being revoked/reset (guards double clicks)
+  // confirm targets (kit Confirm replaces window.confirm) + double-click guard
+  const [revoking, setRevoking] = useState<string | null>(null);
+  const [resetting, setResetting] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
   // device-enroll: pending approval queue (manual mode; in-memory table D-E5, cleared on restart)
@@ -99,30 +124,36 @@ export default function Devices() {
     }
   };
 
-  const handleRevoke = async (deviceId: string) => {
-    if (!window.confirm(`Revoke device ${deviceId}? This cannot be undone.`)) return;
+  const handleRevoke = async () => {
+    if (!revoking) return;
+    const deviceId = revoking;
     setBusy(deviceId);
     try {
       await revokeDevice(deviceId);
       setActionMsg({ type: 'success', text: `Device ${deviceId} revoked` });
+      setRevoking(null);
       fetchDevices();
     } catch (e) {
       setActionMsg({ type: 'error', text: e instanceof Error ? e.message : 'Revoke failed' });
+      setRevoking(null);
     } finally {
       setBusy(null);
     }
   };
 
-  const handleResetSecret = async (deviceId: string) => {
-    if (!window.confirm(`Reset the secret for ${deviceId}?`)) return;
+  const handleResetSecret = async () => {
+    if (!resetting) return;
+    const deviceId = resetting;
     setBusy(deviceId);
     try {
       const resp = await resetDeviceSecret(deviceId);
       setSecretModal({ title: `New key for ${resp.device_id}`, secret: resp.secret });
       setCopied(false);
       setCopyError(null);
+      setResetting(null);
     } catch (e) {
       setActionMsg({ type: 'error', text: e instanceof Error ? e.message : 'Reset failed' });
+      setResetting(null);
     } finally {
       setBusy(null);
     }
@@ -154,120 +185,240 @@ export default function Devices() {
     }
   };
 
+  // close protection: an uncopied one-time secret needs an explicit discard
+  const requestSecretClose = () => {
+    if (copied) setSecretModal(null);
+    else setDiscardOpen(true);
+  };
+
+  const q = query.trim().toLowerCase();
+  const rows = devices.filter((d) => !q || d.device_id.toLowerCase().includes(q));
+
   if (loading) return <div className="loading">Loading...</div>;
   if (error && devices.length === 0) return <div className="error">{error}</div>;
 
   return (
-    <div className="devices">
-      <div className="pending-card">
-        <h2 className="section-title"><Inbox size={14} /> Pending Devices</h2>
-        {pendingError && <p className="token-status error">{pendingError}</p>}
-        {pending.length === 0 ? (
-          <p className="empty">No pending devices</p>
-        ) : (
-          <div className="pending-list">
-            {pending.map((p) => (
-              <div key={p.device_id} className="pending-row">
-                <span className="pending-id">{p.device_id}</span>
-                <span className="pending-seen">Seen {fmtAgo(p.first_seen_ms)}</span>
-                <input
-                  className="pending-name-input"
-                  placeholder="Name (optional)"
-                  value={pendingNames[p.device_id] ?? ''}
-                  onChange={(e) => setPendingNames((prev) => ({ ...prev, [p.device_id]: e.target.value }))}
-                />
-                <button
-                  className="btn-secret"
-                  disabled={pendingBusy === p.device_id}
-                  onClick={() => handleApprove(p.device_id)}
-                >Approve</button>
-              </div>
-            ))}
-          </div>
-        )}
+    <section>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--ms-space-3)' }}>
+        <h1 style={{ margin: 0 }}>Devices</h1>
+        <span style={{ flex: 1 }} />
+        <Input
+          placeholder="Search devices…"
+          aria-label="Search devices"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ flex: '0 0 220px' }}
+        />
+        <Button variant="primary" onClick={openRegister}><Plus size={12} /> Register device</Button>
       </div>
+      <p role="note" style={{ color: 'var(--ms-color-text-muted)', fontSize: 'var(--ms-font-size-sm)', margin: 'var(--ms-space-2) 0 var(--ms-space-3)' }}>
+        Enrollment, approval & audit
+      </p>
 
-      <div className="devices-head">
-        <h2 className="section-title">Registered Devices</h2>
-        <button className="btn" onClick={openRegister}>+ Register Device</button>
-      </div>
+      {actionMsg && (
+        <p role={actionMsg.type === 'success' ? 'status' : 'alert'}
+          style={{ color: actionMsg.type === 'success' ? 'var(--ms-color-success)' : 'var(--ms-color-danger)', fontSize: 'var(--ms-font-size-sm)' }}>
+          {actionMsg.text}
+        </p>
+      )}
 
-      {actionMsg && <p className={`token-status ${actionMsg.type === 'success' ? 'saved' : 'error'}`}>{actionMsg.text}</p>}
-      {error && <p className="token-status error">{error}</p>}
-
-      {devices.length === 0 ? (
-        <p className="empty">No devices registered</p>
+      <h2 style={{ fontSize: 'var(--ms-font-size-sm)', fontWeight: 'var(--ms-font-weight-semibold)', margin: '0 0 var(--ms-space-2)' }}>
+        Pending Devices
+      </h2>
+      {pendingError && (
+        <p role="alert" style={{ display: 'flex', alignItems: 'center', gap: 'var(--ms-space-2)' }}>
+          {pendingError} <Button size="sm" onClick={fetchPending}>Retry</Button>
+        </p>
+      )}
+      {pending.length === 0 ? (
+        <p role="status" style={{ color: 'var(--ms-color-text-muted)', fontSize: 'var(--ms-font-size-sm)' }}>No pending devices</p>
       ) : (
-        <div className="device-admin-list">
-          {devices.map((d) => (
-            <div key={d.device_id} className="device-admin-row">
-              <span className="device-admin-name"><MonitorCog size={14} /> {d.device_id}</span>
-              <span className="device-admin-actions">
-                <button className="btn-secret" disabled={busy === d.device_id} onClick={() => handleResetSecret(d.device_id)}>Reset Secret</button>
-                <button className="btn-sm" disabled={busy === d.device_id} onClick={() => handleRevoke(d.device_id)}>Revoke</button>
-              </span>
-            </div>
-          ))}
-        </div>
+        <Table>
+          <THead>
+            <TR>
+              <TH>Device</TH>
+              <TH>First seen</TH>
+              <TH>Name (optional)</TH>
+              <TH style={{ textAlign: 'right' }}>Actions</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {pending.map((p) => (
+              <TR key={p.device_id}>
+                <TD><b style={monoStyle}>{p.device_id}</b></TD>
+                <TD>{fmtAgo(p.first_seen_ms)}</TD>
+                <TD>
+                  <Input
+                    aria-label={`Name for ${p.device_id}`}
+                    placeholder="Name (optional)"
+                    value={pendingNames[p.device_id] ?? ''}
+                    onChange={(e) => setPendingNames((prev) => ({ ...prev, [p.device_id]: e.target.value }))}
+                  />
+                </TD>
+                <TD>
+                  <span style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                    <Button size="sm" variant="primary" disabled={pendingBusy === p.device_id} disabledReason="Approving…" onClick={() => handleApprove(p.device_id)}>
+                      Approve
+                    </Button>
+                  </span>
+                </TD>
+              </TR>
+            ))}
+          </TBody>
+        </Table>
+      )}
+
+      <h2 style={{ fontSize: 'var(--ms-font-size-sm)', fontWeight: 'var(--ms-font-weight-semibold)', margin: 'var(--ms-space-4) 0 var(--ms-space-2)' }}>
+        Registered Devices
+      </h2>
+      {error && <p role="alert">{error}</p>}
+      {devices.length === 0 ? (
+        <p role="status" style={{ color: 'var(--ms-color-text-muted)', fontSize: 'var(--ms-font-size-sm)' }}>No devices registered</p>
+      ) : (
+        <Table>
+          <THead>
+            <TR>
+              <TH>Device</TH>
+              <TH style={{ textAlign: 'right' }}>Actions</TH>
+            </TR>
+          </THead>
+          <TBody>
+            {rows.map((d) => (
+              <TR key={d.device_id}>
+                <TD><b style={monoStyle}>{d.device_id}</b></TD>
+                <TD>
+                  <span style={{ display: 'flex', gap: 'var(--ms-space-2)', justifyContent: 'flex-end' }}>
+                    <Button size="sm" disabled={busy === d.device_id} disabledReason="Working…" onClick={() => setResetting(d.device_id)}>
+                      Reset secret
+                    </Button>
+                    <Button size="sm" variant="danger" disabled={busy === d.device_id} disabledReason="Working…" onClick={() => setRevoking(d.device_id)}>
+                      Revoke
+                    </Button>
+                  </span>
+                </TD>
+              </TR>
+            ))}
+            {rows.length === 0 && (
+              <TR>
+                <TD colSpan={2}>
+                  <span style={{ color: 'var(--ms-color-text-muted)' }}>No devices match.</span>
+                </TD>
+              </TR>
+            )}
+          </TBody>
+        </Table>
+      )}
+
+      {revoking && (
+        <Confirm
+          open
+          title={`Revoke ${revoking}?`}
+          message={REVOKE_SEMANTICS}
+          confirmLabel="Revoke"
+          tone="danger"
+          onConfirm={handleRevoke}
+          onCancel={() => setRevoking(null)}
+        />
+      )}
+
+      {resetting && (
+        <Confirm
+          open
+          title={`Reset secret for ${resetting}?`}
+          message={RESET_SEMANTICS}
+          confirmLabel="Reset"
+          tone="danger"
+          onConfirm={handleResetSecret}
+          onCancel={() => setResetting(null)}
+        />
       )}
 
       {registerOpen && (
-        <Modal title="Register Device" onClose={() => setRegisterOpen(false)}>
-          <div className="form-row">
-            <label className="form-label" htmlFor="device-id">Device ID</label>
-            <input
-              id="device-id"
-              className="form-field"
-              value={newDeviceId}
-              onChange={(e) => setNewDeviceId(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleRegister(); }}
-              placeholder="vehicle-01"
-            />
-          </div>
-          <div className="form-row">
-            <label className="form-label" htmlFor="device-secret">
-              Secret <span className="form-hint">(optional — blank = server generates)</span>
-            </label>
-            <input
-              id="device-secret"
-              className="form-field"
-              type="password"
-              value={providedSecret}
-              onChange={(e) => setProvidedSecret(e.target.value)}
-              placeholder="leave blank for auto-generate"
-            />
-          </div>
-          {registerError && <p className="form-error">{registerError}</p>}
-          <div className="form-actions">
-            <button className="btn btn-outline" onClick={() => setRegisterOpen(false)}>Cancel</button>
-            <button className="btn" onClick={handleRegister} disabled={registering}>
-              {registering ? 'Registering...' : 'Register'}
-            </button>
-          </div>
+        <Modal
+          open
+          title="Register device"
+          onClose={() => setRegisterOpen(false)}
+          actions={
+            <>
+              <Button onClick={() => setRegisterOpen(false)}>Cancel</Button>
+              <Button variant="primary" disabled={registering} disabledReason="Registering…" onClick={handleRegister}>
+                {registering ? 'Registering...' : 'Register'}
+              </Button>
+            </>
+          }
+        >
+          <Input
+            label="Device ID"
+            id="device-id"
+            value={newDeviceId}
+            onChange={(e) => setNewDeviceId(e.target.value)}
+            placeholder="ms-0a1b2c3d4e5f"
+          />
+          <Input
+            label="Secret"
+            id="device-secret"
+            type="password"
+            value={providedSecret}
+            onChange={(e) => setProvidedSecret(e.target.value)}
+            placeholder="leave blank for auto-generate"
+            hint="Optional — configure the host first, then register with the same secret; blank = server generates."
+          />
+          {registerError && <p role="alert">{registerError}</p>}
         </Modal>
       )}
 
       {secretModal && (
-        <Modal title={secretModal.title} onClose={() => setSecretModal(null)}>
-          <p className="secret-warning"><AlertTriangle size={14} /> This secret is shown only once — save it now.</p>
+        <Modal
+          open
+          title={secretModal.title}
+          onClose={requestSecretClose}
+          actions={
+            <>
+              <Button variant="primary" onClick={handleCopy}>{copied ? <><Check size={12} /> Copied</> : 'Copy'}</Button>
+              <Button onClick={requestSecretClose}>Done</Button>
+            </>
+          }
+        >
+          <p role="alert" style={{ color: 'var(--ms-color-warning)', fontSize: 'var(--ms-font-size-sm)' }}>
+            <AlertTriangle size={14} /> This secret is shown only once — save it now.
+          </p>
           <textarea
-            className="secret-box"
             readOnly
             value={secretModal.secret}
             rows={3}
             onFocus={(e) => e.target.select()}
+            aria-label="Device secret"
+            style={{
+              width: '100%',
+              ...monoStyle,
+              fontSize: 'var(--ms-font-size-sm)',
+              padding: 'var(--ms-space-2) var(--ms-space-3)',
+              border: '1px solid var(--ms-color-border)',
+              borderRadius: 'var(--ms-radius-sm)',
+              resize: 'vertical',
+              background: 'var(--ms-color-surface-subtle)',
+              color: 'var(--ms-color-text)',
+            }}
           />
-          {copyError && <p className="form-error">{copyError}</p>}
-          <div className="form-actions">
-            <button className="btn" onClick={handleCopy}>{copied ? <><Check size={12} /> Copied</> : 'Copy'}</button>
-            <button className="btn btn-outline" onClick={() => setSecretModal(null)}>Done</button>
-          </div>
+          {copyError && <p role="alert">{copyError}</p>}
         </Modal>
+      )}
+
+      {discardOpen && (
+        <Confirm
+          open
+          title="Discard the one-time secret?"
+          message="It was not copied. Closing loses it forever — reset the secret later to issue a new one."
+          confirmLabel="Discard"
+          tone="danger"
+          onConfirm={() => { setDiscardOpen(false); setSecretModal(null); }}
+          onCancel={() => setDiscardOpen(false)}
+        />
       )}
 
       {/* W1 relocation: the overview is a health summary; the live device
           tree + playback wall lives here (behavior unchanged). */}
       <ActiveDevices />
-    </div>
+    </section>
   );
 }

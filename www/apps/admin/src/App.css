@@ -22,6 +22,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-
 .btn { padding: 0.5rem 1rem; font-size: 0.85rem; border: none; border-radius: 4px; cursor: pointer; background: var(--ms-color-primary); color: var(--ms-color-text-inverse); }
 .btn:hover { background: var(--ms-color-primary-hover); }
 .btn:disabled { opacity: 0.6; cursor: default; }
+.btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-outline { background: none; border: 1px solid var(--ms-color-border); color: #666; }
 .btn-outline:hover { background: var(--ms-color-surface-hover); }
 
