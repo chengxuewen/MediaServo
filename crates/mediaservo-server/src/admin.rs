@@ -1198,6 +1198,9 @@ struct ManagedRoomCreateRequest {
     kind: String,
     #[serde(default)]
     video: Option<bool>,
+    /// SB-2 (J3=C): optional per-room floor limits overlay.
+    #[serde(default)]
+    floor: Option<crate::floor::policy::FloorOverride>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1205,6 +1208,9 @@ struct ManagedRoomUpdateRequest {
     kind: Option<String>,
     /// absent = leave unchanged; present = set (null clears the flag)
     video: Option<Option<bool>>,
+    /// absent = leave unchanged; present = set (null clears the override)
+    #[serde(default)]
+    floor: Option<Option<crate::floor::policy::FloorOverride>>,
 }
 
 async fn managed_rooms_list(State(state): State<AdminState>) -> Json<serde_json::Value> {
@@ -1237,7 +1243,7 @@ async fn managed_rooms_create(
         ));
     }
     let entry =
-        crate::room_config::ManagedRoom { id: id.clone(), kind: req.kind, video: req.video };
+        crate::room_config::ManagedRoom { id: id.clone(), kind: req.kind, video: req.video, floor: req.floor };
     state.room_config.create(entry).map_err(|e| {
         (StatusCode::CONFLICT, Json(ErrorResponse { error: e.to_string() }))
     })?;
@@ -1267,7 +1273,7 @@ async fn managed_rooms_update(
     }
     let entry = state
         .room_config
-        .update(&id, req.kind, req.video)
+        .update(&id, req.kind, req.video, req.floor)
         .map_err(|e| (StatusCode::NOT_FOUND, Json(ErrorResponse { error: e.to_string() })))?;
     crate::audit::log_event(crate::audit::AuditEvent::RoomConfigChanged {
         action: "update".into(),
@@ -1997,7 +2003,10 @@ pub(crate) mod tests {
         assert_eq!(v["mode"], "exclusive");
         assert_eq!(v["grants"], serde_json::json!([]));
         assert!(v["generation"].is_u64());
-        assert_eq!(v["limits"]["max_peers"], serde_json::json!(1));
+        // SB-2 (J3=C): dispatch design defaults — hybrid cap 2 / queue 8 / hold 30 s
+        assert_eq!(v["limits"]["max_peers"], serde_json::json!(2));
+        assert_eq!(v["limits"]["max_queue"], serde_json::json!(8));
+        assert_eq!(v["limits"]["max_hold_secs"], serde_json::json!(30));
     }
 
     #[tokio::test]
@@ -2177,6 +2186,9 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn managed_rooms_crud_lifecycle_and_live_resolve() {
+        // SB-2: serialize against room_config tests — set_managed_rooms is a
+        // process-global REPLACE and parallel stores race the live-resolve asserts.
+        let _rooms_guard = crate::room_config::ROOM_SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let state = make_state().await;
         let token = admin_token(&state);
         let app = admin_router(state);

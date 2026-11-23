@@ -25,6 +25,10 @@ pub struct ManagedRoom {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video: Option<bool>,
+    /// SB-2 (J3=C): optional per-room floor limits overlay; absent = keep the
+    /// global resolution (old rooms.yaml loads unchanged).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floor: Option<crate::floor::policy::FloorOverride>,
 }
 
 /// Label validation shared by load and CRUD (a bad label in the FILE is
@@ -102,6 +106,7 @@ impl RoomConfigStore {
         id: &str,
         kind: Option<String>,
         video: Option<Option<bool>>,
+        floor: Option<Option<crate::floor::policy::FloorOverride>>,
     ) -> Result<ManagedRoom, CoreError> {
         let canonical_kind =
             kind.map(|k| parse_kind_label(&k).map(|k| k.as_str().to_string())).transpose()?;
@@ -115,6 +120,9 @@ impl RoomConfigStore {
             }
             if let Some(v) = video {
                 entry.video = v;
+            }
+            if let Some(f) = floor {
+                entry.floor = f;
             }
             entry.clone()
         };
@@ -193,6 +201,12 @@ impl RoomConfigStore {
     }
 }
 
+/// SB-2: `room::set_managed_rooms` is a process-global REPLACE — tests that
+/// mutate a RoomConfigStore race the global resolver under the parallel lib
+/// runner (surfaced by the floor-field serialization delta). Serialize them.
+#[cfg(test)]
+pub(crate) static ROOM_SYNC_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -203,6 +217,7 @@ mod tests {
 
     #[test]
     fn refuse_on_corrupt_and_persist_across_restart() {
+        let _rooms_guard = super::ROOM_SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let path = tmp_path("corrupt");
         std::fs::write(&path, "rooms: [ { id: broken, kind: ").unwrap();
         // refuse-on-corrupt: a corrupt EXISTING file is an Err, not an empty store
@@ -213,13 +228,14 @@ mod tests {
         std::fs::remove_file(&path).ok();
         let store = RoomConfigStore::empty_with_path(&path);
         store
-            .create(ManagedRoom { id: "talk-ops".into(), kind: "talk".into(), video: None })
+            .create(ManagedRoom { id: "talk-ops".into(), kind: "talk".into(), video: None, floor: None })
             .unwrap();
         store
             .create(ManagedRoom {
                 id: "meet-voice".into(),
                 kind: "meet".into(),
                 video: Some(false),
+                floor: None,
             })
             .unwrap();
 
@@ -234,21 +250,22 @@ mod tests {
 
     #[test]
     fn create_duplicate_fails_without_state_change() {
+        let _rooms_guard = super::ROOM_SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let path = tmp_path("dup");
         let store = RoomConfigStore::empty_with_path(&path);
         store
-            .create(ManagedRoom { id: "fleet1".into(), kind: "view".into(), video: None })
+            .create(ManagedRoom { id: "fleet1".into(), kind: "view".into(), video: None, floor: None })
             .unwrap();
         assert!(
             store
-                .create(ManagedRoom { id: "fleet1".into(), kind: "talk".into(), video: None })
+                .create(ManagedRoom { id: "fleet1".into(), kind: "talk".into(), video: None, floor: None })
                 .is_err()
         );
         assert_eq!(store.get("fleet1").unwrap().kind, "view", "memory unchanged");
         // bad kind label maps to 400-shaped Err at the store boundary too
         assert!(
             store
-                .create(ManagedRoom { id: "x".into(), kind: "banana".into(), video: None })
+                .create(ManagedRoom { id: "x".into(), kind: "banana".into(), video: None, floor: None })
                 .is_err()
         );
         std::fs::remove_file(&path).ok();

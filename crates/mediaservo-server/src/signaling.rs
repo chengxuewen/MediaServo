@@ -54,6 +54,11 @@ pub struct SignalingServer {
     pub ws_pong_miss: u32,
     /// a1 companion: the bare-wait cap after connecting but before PSK auth (default 10s; hardening of the previously bare await).
     pub ws_psk_wait_secs: u64,
+    /// SB-2 (J3=C two-tier floor config): global limits = design defaults +
+    /// MEDIASERVO_FLOOR_{MAX_PEERS,QUEUE_MAX,HOLD_SECS} env (parsed once);
+    /// `floor_room_store` adds the rooms.yaml per-room overlay (attached by main).
+    pub floor_global: crate::floor::policy::GlobalFloorConfig,
+    pub floor_room_store: Option<std::sync::Arc<crate::room_config::RoomConfigStore>>,
     /// a1 companion: the wait cap when authenticated but not yet joined (default 30s).
     pub ws_join_wait_secs: u64,
     /// a2 (S0.5): the session-retention ticket table, key = (identity_key, room). Attached at the Joined-ack
@@ -104,6 +109,43 @@ pub struct SignalingServer {
 }
 
 impl SignalingServer {
+    /// SB-2 (J3=C): two-tier resolution for one room — global (design+env)
+    /// overlaid with the room's rooms.yaml `floor` override when a store is
+    /// attached; global-only otherwise (tests / pre-wiring).
+    pub fn floor_limits_for(&self, room_id: &str) -> mediaservo_common::floor::FloorLimits {
+        let base = self.floor_global.limits;
+        match &self.floor_room_store {
+            Some(store) => crate::floor::policy::resolve_limits(
+                base,
+                store.get(room_id).and_then(|r| r.floor),
+            ),
+            None => base,
+        }
+    }
+
+    /// Re-bake limits onto already-seeded floor rooms after main attaches the
+    /// rooms.yaml store (env-seeded rooms are created before the store exists;
+    /// call once, before listening).
+    pub fn refresh_floor_limits(&self) {
+        let ids: Vec<String> = self.floor_rooms.iter().map(|e| e.key().clone()).collect();
+        for id in ids {
+            let Some(mode) = self
+                .floor_rooms
+                .get(&id)
+                .and_then(|a| a.value().try_lock().ok().map(|g| g.state().mode()))
+            else {
+                continue;
+            };
+            if let Some(mut e) = self.floor_rooms.get_mut(&id) {
+                *e.value_mut() = Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
+                    id.clone(),
+                    mode,
+                    self.floor_limits_for(&id),
+                )));
+            }
+        }
+    }
+
     #[cfg(feature = "sfu-mediasoup")]
     pub fn new(
         _sfu: Arc<crate::sfu::SfuManager>,
@@ -125,6 +167,8 @@ impl SignalingServer {
             ws_ping_secs: hb_env("MEDIASERVO_WS_PING_SECS", 5),
             ws_pong_miss: (hb_env("MEDIASERVO_WS_PONG_MISS", 2) as u32).max(1),
             ws_psk_wait_secs: hb_env("MEDIASERVO_WS_PSK_WAIT_SECS", 10),
+            floor_global: crate::floor::policy::GlobalFloorConfig::from_env(),
+            floor_room_store: None,
             ws_join_wait_secs: hb_env("MEDIASERVO_WS_JOIN_WAIT_SECS", 30),
             resume_table: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             resume_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -166,6 +210,8 @@ impl SignalingServer {
             ws_ping_secs: hb_env("MEDIASERVO_WS_PING_SECS", 5),
             ws_pong_miss: (hb_env("MEDIASERVO_WS_PONG_MISS", 2) as u32).max(1),
             ws_psk_wait_secs: hb_env("MEDIASERVO_WS_PSK_WAIT_SECS", 10),
+            floor_global: crate::floor::policy::GlobalFloorConfig::from_env(),
+            floor_room_store: None,
             ws_join_wait_secs: hb_env("MEDIASERVO_WS_JOIN_WAIT_SECS", 30),
             resume_table: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
             resume_seq: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -2197,7 +2243,7 @@ async fn floor_snapshot_msg(
         Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
             room_id.to_string(),
             mediaservo_common::floor::FloorMode::Exclusive,
-            mediaservo_common::floor::FloorLimits::default(),
+            server.floor_limits_for(room_id),
         )))
     });
     let room = Arc::clone(&arc);
@@ -2250,7 +2296,9 @@ fn seed_floor_rooms() -> dashmap::DashMap<String, Arc<tokio::sync::Mutex<crate::
                 Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
                     id,
                     mediaservo_common::floor::FloorMode::Exclusive,
-                    mediaservo_common::floor::FloorLimits::default(),
+                    // seed-time: env-only resolution (the rooms.yaml store is
+                    // attached later by main, which then calls refresh_floor_limits)
+                    crate::floor::policy::GlobalFloorConfig::from_env().limits,
                 ))),
             );
         }
@@ -2281,7 +2329,7 @@ async fn floor_current_generation(server: &SignalingServer, room_id: &str) -> u6
         Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
             room_id.to_string(),
             mediaservo_common::floor::FloorMode::Exclusive,
-            mediaservo_common::floor::FloorLimits::default(),
+            server.floor_limits_for(room_id),
         )))
     });
     let room = Arc::clone(&arc);
@@ -2321,7 +2369,7 @@ pub(crate) async fn apply_floor_event(
         Arc::new(tokio::sync::Mutex::new(crate::floor::FloorRoom::new(
             room_id.to_string(),
             mediaservo_common::floor::FloorMode::Exclusive,
-            mediaservo_common::floor::FloorLimits::default(),
+            server.floor_limits_for(room_id),
         )))
     });
     let room = Arc::clone(&arc);

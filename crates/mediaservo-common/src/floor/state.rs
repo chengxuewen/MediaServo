@@ -36,12 +36,13 @@ pub struct FloorLimits {
 
 impl Default for FloorLimits {
     fn default() -> Self {
-        // modules/01 defaults: exclusive=1/hybrid=2 grants; queue depth 16 at PoC;
-        // dispatch profile hold 45 s / media grace 2 s (§3.2)
+        // SB-2 (J3=C two-tier floor config): dispatch design defaults — hybrid
+        // cap 2 / queue 8 / hold 30 s (supersedes the PoC 16/45 s). Overlay via
+        // MEDIASERVO_FLOOR_* env, then rooms.yaml `ManagedRoom.floor` per room.
         Self {
-            max_peers: 1,
-            max_queue: 16,
-            max_hold_secs: 45,
+            max_peers: 2,
+            max_queue: 8,
+            max_hold_secs: 30,
             media_grace_secs: 2,
             rate_limit_per_min: 30,
             priority_ceiling: 100,
@@ -174,10 +175,12 @@ impl FloorState {
         self.queue.iter().position(|p| &p.peer == peer)
     }
 
-    fn capacity(&self) -> usize {
+    fn capacity(&self, limits: &FloorLimits) -> usize {
         match self.mode {
             FloorMode::Exclusive => 1,
-            FloorMode::Hybrid => 2,
+            // SB-2: the hybrid cap is live config (K2 default 2) — the old
+            // hardcode ignored limits.max_peers (dead field).
+            FloorMode::Hybrid => limits.max_peers.max(1),
             FloorMode::Open => usize::MAX,
         }
     }
@@ -245,7 +248,7 @@ impl FloorState {
                 }
 
                 // capacity check
-                if self.grants.len() < self.capacity() {
+                if self.grants.len() < self.capacity(limits) {
                     next.grants.push(peer.clone());
                     next.grant_priority.push(*priority);
                     next.generation += 1;
@@ -314,7 +317,7 @@ impl FloorState {
                 next.grants.remove(idx);
                 next.grant_priority.remove(idx);
                 next.generation += 1;
-                Self::promote_or_idle(&mut next, &mut out);
+                Self::promote_or_idle(&mut next, &mut out, limits);
                 (next, out)
             }
 
@@ -343,7 +346,7 @@ impl FloorState {
                     return (next, out);
                 }
                 next.generation += 1;
-                Self::promote_or_idle(&mut next, &mut out);
+                Self::promote_or_idle(&mut next, &mut out, limits);
                 (next, out)
             }
 
@@ -356,7 +359,7 @@ impl FloorState {
                 next.grants.remove(idx);
                 next.grant_priority.remove(idx);
                 next.generation += 1;
-                Self::promote_or_idle(&mut next, &mut out);
+                Self::promote_or_idle(&mut next, &mut out, limits);
                 (next, out)
             }
 
@@ -415,7 +418,7 @@ impl FloorState {
                     // Open → tighter: keep first-cap grants, rest queue in order
                     (FloorMode::Exclusive, FloorMode::Open)
                     | (FloorMode::Hybrid, FloorMode::Open) => {
-                        let cap = next.capacity();
+                        let cap = next.capacity(limits);
                         if self.grants.len() > cap {
                             let demoted: Vec<PeerId> = self.grants[cap..].to_vec();
                             let demoted_prio: Vec<u8> = self.grant_priority[cap..].to_vec();
@@ -432,7 +435,7 @@ impl FloorState {
                     }
                     (FloorMode::Exclusive, FloorMode::Hybrid) => {
                         // cap drops 2 → 1: demote the tail
-                        let cap = next.capacity();
+                        let cap = next.capacity(limits);
                         if self.grants.len() > cap {
                             let demoted: Vec<PeerId> = self.grants[cap..].to_vec();
                             next.grants = self.grants[..cap].to_vec();
@@ -450,7 +453,7 @@ impl FloorState {
                         }
                     }
                     (FloorMode::Hybrid, FloorMode::Exclusive) => {
-                        let cap = next.capacity();
+                        let cap = next.capacity(limits);
                         if self.grants.len() > cap {
                             let demoted: Vec<PeerId> = self.grants[cap..].to_vec();
                             next.grants = self.grants[..cap].to_vec();
@@ -494,7 +497,7 @@ impl FloorState {
                         next.generation += 1;
                         // freed capacity promotes the queue head; promote_or_idle carries
                         // the PIT-21 shrink rebroadcast so every mirror converges.
-                        Self::promote_or_idle(&mut next, &mut out);
+                        Self::promote_or_idle(&mut next, &mut out, limits);
                     } else if let Some(pos) = next.queue.iter().position(|p| p.peer == *peer) {
                         next.queue.remove(pos);
                         next.generation += 1;
@@ -540,8 +543,8 @@ impl FloorState {
 
     /// R2: after grants shrink — auto-promote queue head, or FloorIdle when
     /// everything is empty (promote emits FloorGranted ONLY per modules/01).
-    fn promote_or_idle(next: &mut FloorState, out: &mut Vec<FloorSignal>) {
-        if next.grants.len() < next.capacity() && !next.queue.is_empty() {
+    fn promote_or_idle(next: &mut FloorState, out: &mut Vec<FloorSignal>, limits: &FloorLimits) {
+        if next.grants.len() < next.capacity(limits) && !next.queue.is_empty() {
             let head = next.queue.remove(0);
             next.grants.push(head.peer);
             next.grant_priority.push(head.priority);

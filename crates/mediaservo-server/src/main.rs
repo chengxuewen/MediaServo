@@ -330,6 +330,9 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
                 srv.allow_dev_enroll =
                     std::sync::Arc::new(std::sync::atomic::AtomicBool::new(allow_dev_enroll));
                 srv.devices_path = std::sync::Arc::from(devices_path.as_str());
+                // SB-2 (J3=C): rooms.yaml per-room floor overlay (then re-bake seeded rooms)
+                srv.floor_room_store = Some(std::sync::Arc::clone(&room_config));
+                srv.refresh_floor_limits();
                 // psk-admin-management: config first + env fallback (dead-config fix -- server.yaml psk formally wired into auth)
                 let merged_psk =
                     config.psk.clone().or_else(|| std::env::var("MEDIASERVO_PSK").ok());
@@ -346,6 +349,9 @@ async fn run_server(argv: Vec<String>) -> Result<(), Box<dyn std::error::Error>>
     let mut signaling_server = {
         let mut srv = signaling::SignalingServer::new(config.ws_max_message_size, jwt_auth);
         srv.device_registry = std::sync::Arc::clone(&device_registry);
+        // SB-2 (J3=C): rooms.yaml per-room floor overlay (then re-bake seeded rooms)
+        srv.floor_room_store = Some(std::sync::Arc::clone(&room_config));
+        srv.refresh_floor_limits();
         srv.allow_dev_enroll =
             std::sync::Arc::new(std::sync::atomic::AtomicBool::new(allow_dev_enroll));
         srv.devices_path = std::sync::Arc::from(devices_path.as_str());
