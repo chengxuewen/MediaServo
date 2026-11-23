@@ -5,9 +5,11 @@
   "scripts": {
     "dev": "turbo run dev",
     "dev:admin": "turbo run dev --filter=@mediaservo/admin",
+    "dev:monitor": "turbo run dev --filter=@mediaservo/monitor",
     "build": "turbo run build",
     "build:admin": "turbo run build --filter=@mediaservo/admin",
     "build:voice": "turbo run build --filter=@mediaservo/voice",
+    "build:monitor": "turbo run build --filter=@mediaservo/monitor",
     "lint": "turbo run lint"
   },
   "devDependencies": {

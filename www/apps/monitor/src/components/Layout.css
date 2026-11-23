@@ -1,0 +1,10 @@
+/* P3 slice ① thin-shell topbar — tokens only (no raw values; PIT-258 guard). */
+.monitor-shell { display: flex; flex-direction: column; min-height: 100vh; }
+.header { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--ms-space-6); height: 48px; background: var(--ms-color-text); color: var(--ms-color-text-inverse); }
+.header .logo { display: inline-flex; align-items: center; font-size: var(--ms-font-size-md); font-weight: var(--ms-font-weight-semibold); }
+.logo-mark { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: var(--ms-radius-md); background: linear-gradient(135deg, var(--ms-color-accent), var(--ms-color-info)); color: var(--ms-color-text-inverse); margin-inline-end: var(--ms-space-2); }
+.header-right { display: flex; align-items: center; gap: var(--ms-space-3); }
+.version { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-inverse); }
+.logout-btn { background: none; border: 1px solid var(--ms-color-text-secondary); color: var(--ms-color-text-faint); font-size: var(--ms-font-size-xs); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-sm); cursor: pointer; }
+.logout-btn:hover { color: var(--ms-color-text-inverse); border-color: var(--ms-color-text-muted); }
+.monitor-content { flex: 1; padding: var(--ms-space-6); overflow-y: auto; }

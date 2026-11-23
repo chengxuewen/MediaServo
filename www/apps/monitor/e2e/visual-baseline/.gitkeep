@@ -1,0 +1,4 @@
+# P3 monitor independent visual-baseline directory (G6).
+# Baseline PNGs (<page>-<viewport>.png) are produced by the S4/S13 acceptance
+# passes once the realtime wall lands (slice ②③). Kept separate from the admin
+# baseline dir and from the design-session docs/ui/prototypes/.harness/ ledger.
