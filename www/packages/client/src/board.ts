@@ -189,7 +189,10 @@ export class BoardStore {
   // ── internals ────────────────────────────────────────────────────────────
 
   private open(conn: RoomConn): void {
-    const base = this.baseUrl.replace(/\/+$/, '');
+    // Empty baseUrl = same origin — derive from location (WebSocket URLs must
+    // be absolute; a relative "/ws" throws and the socket never connects).
+    const origin = this.baseUrl || (typeof location !== 'undefined' ? location.origin : '');
+    const base = origin.replace(/\/+$/, '');
     const wsUrl = `${base.replace(/^http/, 'ws')}/ws`;
     const ws = this.wsFactory(wsUrl, [this.token as string]);
     conn.ws = ws;
