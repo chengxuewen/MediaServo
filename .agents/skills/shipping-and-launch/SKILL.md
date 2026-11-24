@@ -33,8 +33,31 @@ description: "MediaServo release checklist: full gates, version/tag policy, chan
 | Weak network | the agreed profile/scenario, if the release changes media behavior |
 | Tree state | clean worktree; no untracked artifacts |
 | Submodule pin | the pointer matches the intended commit |
+| **Product entry** | the feature is reachable from the REAL product navigation/entry (not a disabled placeholder), verified by clicking through on the target deployment |
+| **Target deployment** | the build is actually deployed to the machine the user tests on; the served route/bundle is the new one (curl title/asset + browser click), not just local dev/e2e |
 | Changelog | entry added or an explicit "no user-facing change" |
 | Version | follows the project policy; no tag from a dirty tree |
+
+## Product-Entry & Deployment Acceptance (hard gate, 2026-11-24 lesson)
+
+> A feature is NOT "done/delivered" because isolated dev servers + e2e are green.
+> It is done only when a user can reach it **through the real product entry on the
+> machine they actually use**.
+
+Before claiming any feature complete or handing off:
+1. **Entry wired.** The product navigation/entry point leads to the feature (no
+   disabled placeholder, no dead link). Verify by clicking the real nav.
+2. **Deployed to the target.** Rebuild AND redeploy to the user's test/production
+   machine; confirm the served route + bundle are the new build (curl the route
+   title/asset, then browser click-through). Local dev/e2e alone is NOT acceptance.
+3. **Config regenerated.** Deploy-time generated config (e.g. Caddyfile) may be
+   "never overwrite if present" — a new route can be silently absent. Diff the
+   deployed config against the template and patch/reload explicitly.
+4. **Evidence on the target.** Screenshot/snapshot of the feature reached via the
+   product entry on the target machine, stored with the plan.
+
+If any of 1–3 is missing, the correct status is "implemented but not reachable /
+not deployed", NOT "delivered".
 
 ## Release Workflow
 
@@ -73,6 +96,8 @@ description: "MediaServo release checklist: full gates, version/tag policy, chan
 | No rollback path | Define it before the tag. |
 | Canary with no success signal | Define the metric and threshold first. |
 | Artifact and pin from different commits | Rebuild from the tagged commit. |
+| "e2e green = delivered" while the product nav is a dead placeholder / the target runs an old build | Wire the entry + redeploy + click-through on the target before claiming done. |
+| New route missing because deploy config is "never overwrite" | Diff deployed config vs template; patch + reload explicitly. |
 
 ## Exit Criteria
 
