@@ -132,6 +132,28 @@ fn report_of_pid(pid: u32) -> Option<ConflictReport> {
     Some(ConflictReport { pid, exe, cmd, deleted, parent })
 }
 
+/// Pid-level takeover decision (server-port-residue-takeover, 2026-11-24 user ruling A).
+///
+/// The 11-24 incident shape: a direct-spawned dev/e2e daemon (bare mode, config outside the
+/// instance layout, no oxmgr registration) survives its parent and holds the port with a
+/// deleted binary. Every dir/registry/signature path misses it, yet THIS module has already
+/// attributed it by hard evidence (socket-inode ownership + exe). When the occupant set is
+/// exactly one report, its exe carries the deleted marker, and the basename belongs to this
+/// product's server/weaknet name set -> Some(pid): the interactive takeover may reap that pid
+/// directly without an instance dir. Anything else (multiple occupants / not deleted / alien
+/// binary) -> None -- the PIT-155 refusal stands (never fight unattributed live processes).
+/// Pure judgment, no IO; the kill itself stays in the caller behind the explicit `y` gate.
+pub fn residue_takeover_pid(reports: &[ConflictReport]) -> Option<u32> {
+    let [r] = reports else { return None };
+    if !r.deleted {
+        return None;
+    }
+    let exe = r.exe.strip_suffix(" (deleted)").unwrap_or(&r.exe);
+    let name = std::path::Path::new(exe).file_name()?.to_str()?;
+    (super::reap::SERVER_NAMES.contains(&name) || super::reap::WEAKNET_NAMES.contains(&name))
+        .then_some(r.pid)
+}
+
 /// Plain-language report output (eprintln; offers handling advice when an occupant carries upgrade residue, F1 attribute-don't-kill).
 pub fn print_report(reports: &[ConflictReport], port: u16) {
     if reports.is_empty() {
@@ -201,5 +223,58 @@ mod tests {
                 && line.contains("upgrade residue")
         );
         assert!(line.contains("oxmgr daemon run(7)"));
+    }
+
+    // -- pid-level takeover decision (server-port-residue-takeover ruling A) --
+
+    fn residue_report(pid: u32, exe: &str, deleted: bool) -> ConflictReport {
+        ConflictReport {
+            pid,
+            exe: exe.into(),
+            cmd: "mediaservo-server".into(),
+            deleted,
+            parent: Some((1, "/sbin/init".into())),
+        }
+    }
+
+    #[test]
+    fn single_deleted_product_residue_yields_pid() {
+        // the 11-24 incident shape: orphaned dev binary, either brand, server or weaknet
+        for exe in [
+            "/home/u/ms/target/debug/mediaservo-server (deleted)",
+            "/opt/x/bin/msrtc-server (deleted)",
+            "/opt/x/bin/msrtc-weaknet (deleted)",
+            "/home/u/ms/target/debug/mediaservo-weaknet (deleted)",
+        ] {
+            let reports = [residue_report(4165443, exe, true)];
+            assert_eq!(residue_takeover_pid(&reports), Some(4165443), "{exe}");
+        }
+    }
+
+    #[test]
+    fn non_deleted_occupant_never_yields_pid() {
+        // a LIVE product binary of unknown provenance may be another legitimate instance
+        let reports = [residue_report(7, "/opt/x/bin/msrtc-server", false)];
+        assert_eq!(residue_takeover_pid(&reports), None);
+    }
+
+    #[test]
+    fn alien_deleted_binary_never_yields_pid() {
+        let reports = [residue_report(7, "/usr/bin/python3 (deleted)", true)];
+        assert_eq!(residue_takeover_pid(&reports), None);
+        // look-alike basename is not an exact name-set hit
+        let lookalike = [residue_report(8, "/opt/x/bin/msrtc-server-2 (deleted)", true)];
+        assert_eq!(residue_takeover_pid(&lookalike), None);
+    }
+
+    #[test]
+    fn multiple_occupants_or_empty_yield_none() {
+        // killing one of several holders cannot free the port -- keep the refusal
+        let two = [
+            residue_report(1, "/opt/x/bin/msrtc-server (deleted)", true),
+            residue_report(2, "/opt/x/bin/msrtc-server (deleted)", true),
+        ];
+        assert_eq!(residue_takeover_pid(&two), None);
+        assert_eq!(residue_takeover_pid(&[]), None);
     }
 }

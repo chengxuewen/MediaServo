@@ -101,8 +101,11 @@ pub(super) fn caddy_marker_ok(config: &Path) -> bool {
     SERVER_NAMES.iter().any(|n| root.join("bin").join(n).is_file())
 }
 
-const SERVER_NAMES: &[&str] = &["msrtc-server", "mediaservo-server"];
-const WEAKNET_NAMES: &[&str] = &["msrtc-weaknet", "mediaservo-weaknet"];
+// pub(super): the conflict-side pid-level takeover decision reuses the SAME name set
+// (single source -- a residue occupant may carry either brand; the 11-24 incident was a
+// mediaservo-server dev residue holding a msrtc-server deployment's port).
+pub(super) const SERVER_NAMES: &[&str] = &["msrtc-server", "mediaservo-server"];
+pub(super) const WEAKNET_NAMES: &[&str] = &["msrtc-weaknet", "mediaservo-weaknet"];
 
 // -- Reap plan (S2.2 pure shape: via which daemon / direct kill) -------------------------------
 

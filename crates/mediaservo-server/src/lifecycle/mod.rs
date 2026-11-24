@@ -218,7 +218,11 @@ fn init_instance(dir: &Path) -> Result<(), String> {
         println!(
             "generated {} ({}, 0600)",
             cfg_path.display(),
-            if pinned { "PSK pinned from MEDIASERVO_PSK, JWT generated" } else { "PSK/JWT bootstrap" }
+            if pinned {
+                "PSK pinned from MEDIASERVO_PSK, JWT generated"
+            } else {
+                "PSK/JWT bootstrap"
+            }
         );
     }
 
@@ -660,11 +664,15 @@ fn apply_oxfile(dir: &Path, oxfile: &Path, no_web: bool, verb: &str) -> i32 {
 }
 
 /// Port occupied -> locate the old server instance -> interactive takeover (stop the old cluster) / non-tty exit (host PIT-155 pattern).
+/// Pid-level branch (server-port-residue-takeover ruling A): when no instance dir/registry entry
+/// exists but the occupant is hard-attributed as a single deleted product binary (e2e/dev residue
+/// shape), `y` reaps exactly that pid instead of refusing -- PIT-155 still guards the unattributed case.
 fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) -> i32 {
     eprintln!("{verb}: {what} {port} is occupied -- another process is listening");
     // start-conflict-doctor T2: occupant attribution (pid/exe/deleted/parent daemon) -- attribute, do not kill (F1).
     let reports = conflict::diagnose_port(port);
     conflict::print_report(&reports, port);
+    let residue = conflict::residue_takeover_pid(&reports);
     let old = inspect::find_other_server_dir(dir);
     match &old {
         Some(od) => eprintln!("  old instance dir: {}", od.display()),
@@ -684,9 +692,16 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
                     // global-reap T4: text loop closed -- after the T5 attribution, offer a one-command exit
                     eprintln!("  use msrtc-server stop -g to reap (globally by process identity)");
                 }
-                None => eprintln!(
-                    "  (could not locate the old instance dir -- the port may be held by another program)"
-                ),
+                None => {
+                    eprintln!(
+                        "  (could not locate the old instance dir -- the port may be held by another program)"
+                    );
+                    if let Some(pid) = residue {
+                        eprintln!(
+                            "  upgrade residue attributed by pid {pid} (deleted product binary) -- y will reap that pid directly"
+                        );
+                    }
+                }
             }
         }
     }
@@ -696,9 +711,14 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
         );
         return 1;
     }
-    eprint!(
-        "  enter y to take over (stop the old instance and start this one) / any other key to exit: "
-    );
+    match (&old, residue) {
+        (None, Some(pid)) => eprint!(
+            "  enter y to reap residue pid {pid} and start this one / any other key to exit: "
+        ),
+        _ => eprint!(
+            "  enter y to take over (stop the old instance and start this one) / any other key to exit: "
+        ),
+    }
     let _ = std::io::stdout().flush();
     let mut ans = String::new();
     let _ = std::io::stdin().read_line(&mut ans);
@@ -706,6 +726,24 @@ fn contention_flow(verb: &str, dir: &Path, what: &str, port: u16, no_web: bool) 
         return 1;
     }
     let Some(od) = old else {
+        // Pid-level takeover: the attribution is hard evidence (port socket inode + deleted
+        // product binary), so no instance dir is needed. Reap exactly that pid, re-verify the
+        // port, then apply -- never a wider kill (PIT-155 still guards unattributed occupants).
+        if let Some(pid) = residue {
+            eprintln!("takeover: reaping upgrade residue pid {pid} (deleted product binary)");
+            kill_and_wait(pid);
+            if pid_alive(pid) {
+                eprintln!("takeover failed: pid {pid} still alive -- refusing to start");
+                return 1;
+            }
+            if inspect::port_in_use(port) {
+                eprintln!(
+                    "takeover: pid {pid} reaped but port {port} is still occupied -- rerun start to re-attribute"
+                );
+                return 1;
+            }
+            return apply_oxfile(dir, &dir.join("run").join("oxfile.toml"), no_web, verb);
+        }
         eprintln!(
             "takeover aborted: old instance dir not located -- continuing would fight live processes (PIT-155 lesson)"
         );
