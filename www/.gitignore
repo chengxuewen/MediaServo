@@ -2,3 +2,9 @@ node_modules
 dist
 .turbo
 *.log
+
+# Visual baselines are on-demand artifacts (D3=A/N5 amended 2026-11-24, user ruling).
+# No automated gate consumes them — the real visual gate is structural assertions
+# (playwright) + overview-parity machine compare (diffs=0). Regenerate via
+# baseline-refresh.mjs for human/MCP review; do not commit (stops non-delta PNG history growth).
+apps/*/e2e/visual-baseline/*.png
