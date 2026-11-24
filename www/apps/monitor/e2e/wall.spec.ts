@@ -50,4 +50,23 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
       .poll(async () => video.evaluate((v) => (v as HTMLVideoElement).readyState), { timeout: 30000, intervals: [500] })
       .toBeGreaterThanOrEqual(2);
   });
+
+  test('close a tile removes it; Play All restores (wall lifecycle)', async ({ page, hostProducer }) => {
+    await page.goto('/');
+    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+
+    await page.locator('.st-play-all').first().click();
+    const tile = page.locator('.wall-grid .video-player');
+    await expect(tile).toHaveCount(1, { timeout: 15000 });
+
+    await page.locator('.wall-grid .vp-close').first().click();
+    await expect(tile).toHaveCount(0);
+
+    await page.locator('.st-play-all').first().click();
+    await expect(tile).toHaveCount(1, { timeout: 15000 });
+    const video = page.locator('.wall-grid .video-player video').first();
+    await expect
+      .poll(async () => video.evaluate((v) => (v as HTMLVideoElement).readyState), { timeout: 30000, intervals: [500] })
+      .toBeGreaterThanOrEqual(2);
+  });
 });
