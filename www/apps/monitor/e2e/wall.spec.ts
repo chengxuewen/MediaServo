@@ -29,8 +29,10 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
 
     await page.locator('.st-preview').first().click();
 
-    const video = page.locator('.video-player-overlay:not(.tile) video');
+    const video = page.locator('.vp-modal-wide video');
     await expect(video).toBeVisible({ timeout: 15000 });
+    // H3: the expand window is now a real dialog (kit Modal — role/Esc/trap).
+    await expect(page.locator('.vp-modal-wide[role="dialog"]')).toBeVisible();
     await expect
       .poll(async () => video.evaluate((v) => (v as HTMLVideoElement).readyState), { timeout: 30000, intervals: [500] })
       .toBeGreaterThanOrEqual(2);

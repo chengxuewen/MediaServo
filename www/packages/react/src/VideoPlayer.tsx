@@ -1,8 +1,9 @@
 import { useRef, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { SfuConsumerClient, type StreamMetrics } from '@mediaservo/client';
+import { Modal } from './Modal';
 import './VideoPlayer.css';
-import { X, VolumeX, Pause, Maximize, Zap, Package, Clapperboard } from 'lucide-react';
+import { X, VolumeX, Volume2, Pause, Maximize, Zap, Package, Clapperboard } from 'lucide-react';
 
 // P3 slice ③a (admin-prototype-restyle): extracted verbatim from apps/admin
 // components/VideoPlayer.tsx so admin + monitor share ONE player (reuse-first).
@@ -47,6 +48,8 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   const [metrics, setMetrics] = useState<StreamMetrics | null>(null);
   const [showStats, setShowStats] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  // C1: audio-monitor mute is a real control (video starts muted for autoplay).
+  const [muted, setMuted] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
   const [popPos, setPopPos] = useState<{ left: number; top: number } | null>(null);
@@ -143,12 +146,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   const isDisconnected = status === 'disconnected' || status === 'error';
 
   const isTile = variant === 'tile';
-  return (
-    <>
-    <div
-      className={`video-player-overlay${isTile ? ' tile' : ''}`}
-      onClick={isTile ? undefined : onClose}
-    >
+  const playerInner = (
       <div
         ref={rootRef}
         className={`video-player ${isDisconnected ? 'disconnected' : ''}${isTile ? ' tile' : ''}`}
@@ -180,8 +178,8 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         {/* Controls (hover) */}
         {showControls && !isDisconnected && (
           <div className="vp-controls">
-            <button title="Mute"><VolumeX size={16} /></button>
-            <button title="Pause"><Pause size={16} /></button>
+            <button title={muted ? 'Unmute audio monitor' : 'Mute audio monitor'} aria-pressed={!muted} onClick={() => { const v = videoRef.current; if (v) { v.muted = !v.muted; setMuted(v.muted); } }}>{muted ? <VolumeX size={16} /> : <Volume2 size={16} />}</button>
+            <button title="Live stream — pause unavailable" aria-disabled="true" className="vp-ctrl-disabled"><Pause size={16} /></button>
             <button title="Fullscreen" onClick={() => videoRef.current?.requestFullscreen()}><Maximize size={16} /></button>
           </div>
         )}
@@ -196,7 +194,17 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         )}
 
       </div>
-    </div>
+  );
+
+  // H3: modal variant uses the kit Modal (role=dialog / Esc / focus trap / LIFO
+  // restore, PIT-269) styled cinema-wide; tile variant stays a grid cell.
+  return (
+    <>
+      {isTile ? (
+        <div className="video-player-overlay tile">{playerInner}</div>
+      ) : (
+        <Modal open onClose={onClose} className="vp-modal-wide">{playerInner}</Modal>
+      )}
       {showStats && metrics && createPortal(
         <div
           ref={popRef}
@@ -211,15 +219,15 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
             <div><label>Actual encoder</label><span>{metrics.encoderImplementation || metrics.encoderBackend || '—'}</span></div>
             <div><label>Encode format</label><span>{metrics.codec ? metrics.codec.replace('video/', '') : '—'}</span></div>
             <div><label>Decoder</label><span>{metrics.decoderImplementation || metrics.decoderCodec || '—'}</span></div>
-            <div><label>Chroma</label><span>4:2:0</span></div>
-            <div><label>HDR</label><span>Off</span></div>
+            <div><label>Chroma</label><span>—</span></div>
+            <div><label>HDR</label><span>—</span></div>
           </div>
           <h5>System performance</h5>
           <div className="stats-grid">
             <div><label>Host FPS</label><span>{metrics.hostFps ? `${metrics.hostFps}fps` : '—'}</span></div>
             <div><label>Host resolution</label><span>{metrics.hostResolution || '—'}</span></div>
             <div><label>Avg encode time</label><span>{metrics.avgEncodeMs != null ? `${metrics.avgEncodeMs.toFixed(1)}ms/frame` : '—'}</span></div>
-            <div><label>CPU/GPU</label><span>Pending P3</span></div>
+            <div><label>CPU/GPU</label><span>—</span></div>
           </div>
           <button className="vp-stats-close" onClick={() => setShowStats(false)}><X size={14} /></button>
         </div>, document.body)}

@@ -151,7 +151,8 @@ export default function Home() {
               // stays recoverable without a page refresh.
               if (!p) return (
                 <div className="wall-offline" key={id}>
-                  <span>Stream offline</span>
+                  <span className="wo-title">SIGNAL LOST</span>
+                  <span className="wo-reason">Producer left — stream ended or device offline</span>
                   <button className="wo-close" onClick={() => closeTile(id)}>Close</button>
                 </div>
               );

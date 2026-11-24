@@ -59,7 +59,7 @@
 
 /* Detail popover (portal→document.body, fixed floating beside the card — product option 1, 2026-09-02) */
 .vp-stats-pop {
-  position: fixed; z-index: 300; width: 260px;
+  position: fixed; z-index: 1100; width: 260px;
   background: rgba(0,0,0,.78); border-radius: 6px; padding: .45rem .65rem .5rem;
   backdrop-filter: blur(2px);
   color: #ccc; font-size: 11px; line-height: 1.35;
@@ -121,3 +121,20 @@
 }
 .vp-discon-title { color: var(--ms-color-danger); font-size: 1rem; font-weight: 600; }
 .vp-discon-sub { color: rgba(255,160,150,.75); font-size: .75rem; margin-top: 4px; }
+
+/* B0 (M4): honor prefers-reduced-motion — the disconnect border pulse is a loop
+   that vestibular-sensitive users must be able to opt out of (a11y floor). */
+@media (prefers-reduced-motion: reduce) {
+  .video-player.disconnected { animation: none; }
+  .video-player { transition: none; }
+}
+
+/* B0 (C1): guarded control (live stream cannot pause) — honest disabled state. */
+.vp-controls button.vp-ctrl-disabled { opacity: .4; cursor: not-allowed; }
+.vp-controls button.vp-ctrl-disabled:hover { background: none; }
+
+/* B0 (H3): modal variant rides the kit Modal (dialog/Esc/trap) styled cinema-wide
+   so the viewing experience matches the old overlay (dark player, no light chrome). */
+.vp-modal-wide { width: min(92vw, 1240px); background: #111; border: none; }
+.vp-modal-wide .msr-modal__body { padding: 0; }
+.vp-modal-wide .video-player { width: 100%; box-shadow: none; }
