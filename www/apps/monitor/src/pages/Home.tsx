@@ -250,10 +250,12 @@ export default function Home() {
                         serverUrl={wsServerUrl()}
                         token={getToken() ?? ''}
                         variant="tile"
+                        nvr
+                        onZoom={() => setZoomedId(id)}
+                        onRemove={() => closeTile(id)}
                         onExpand={() => setModal({ room: p.room, producerId: p.id, kind: p.kind })}
                         onClose={() => closeTile(id)}
                       />
-                      {!zoomedId && <button className="wc-zoom" onClick={() => setZoomedId(id)} title="Zoom this stream" aria-label="Zoom this stream">⤢</button>}
                     </div>
                   );
                 })}

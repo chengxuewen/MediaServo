@@ -109,6 +109,24 @@
 .ms-k { opacity: .55; }
 .ms-v, .ms-vals { color: #cfe3ff; }
 
+/* V1 (monitor-nvr-visual-parity): NVR PlayerTile chrome — additive, admin default
+   unaffected. Right-angle "small TV" + 1px border + constant-black letterbox island,
+   hover top-right actions, LIVE badge, mono stats, container-query stats hide. */
+.video-player.nvr { border-radius: 0; border: 1px solid var(--ms-color-border); }
+.video-player.nvr:hover { border-color: var(--ms-color-border-strong); }
+.video-player.nvr .vp-top-bar { background: linear-gradient(180deg, rgba(0,0,0,.6), transparent); }
+.video-player.nvr .vp-body { container-type: inline-size; }
+.video-player.nvr .vp-mini-stats { font-family: var(--ms-font-family-mono); background: rgba(8,12,20,.58); border: 1px solid rgba(255,255,255,.08); border-radius: 4px; }
+@container (max-width: 160px) { .video-player.nvr .vp-mini-stats { display: none; } }
+.video-player.nvr .tile-actions { position: absolute; top: 4px; right: 4px; display: flex; gap: 4px; opacity: 0; transition: opacity .12s; z-index: 12; }
+.video-player.nvr:hover .tile-actions, .video-player.nvr:focus-within .tile-actions { opacity: 1; }
+.video-player.nvr .tile-btn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.22); background: rgba(0,0,0,.55); color: rgba(255,255,255,.85); border-radius: 4px; cursor: pointer; }
+.video-player.nvr .tile-btn:hover { background: rgba(0,0,0,.8); color: #fff; }
+.video-player.nvr .tile-del:hover { background: rgba(200,45,45,.9); }
+.video-player.nvr .tile-live { position: absolute; left: 6px; bottom: 6px; z-index: 11; font-size: 10px; font-weight: 600; letter-spacing: .5px; padding: 1px 6px; border-radius: 3px; }
+.video-player.nvr .tile-live.live { background: var(--ms-color-success); color: #04140c; }
+.video-player.nvr .tile-live.off { background: rgba(0,0,0,.4); color: var(--ms-palette-video-ok); border: 1px solid var(--ms-color-success); }
+
 /* Disconnect overlay (T7 dual-state): covers the video area but not the top bar — ✕/reopen paths stay clickable */
 .vp-discon-overlay {
   position: absolute; inset: 0; z-index: 20;

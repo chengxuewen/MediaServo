@@ -23,6 +23,13 @@ export interface VideoPlayerProps {
   variant?: 'modal' | 'tile';
   /** tile: double-click the video → open the large window externally (product option 2, 2026-09-02) */
   onExpand?: () => void;
+  /** V1/K9 (additive): NVR tile chrome — radius0/1px border/letterbox, hover top-right
+   *  actions, LIVE badge, mono stats. Default off; admin unaffected. */
+  nvr?: boolean;
+  /** V1/K9: wall-internal single-stream zoom (nvr tile action). */
+  onZoom?: () => void;
+  /** V1/K9: remove this stream from the wall (nvr tile action). */
+  onRemove?: () => void;
 }
 
 type ConnectionStatus = 'connecting' | 'connected' | 'playing' | 'stalled' | 'disconnected' | 'error';
@@ -36,7 +43,7 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
   error: '#e74c3c',
 };
 
-export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand }: VideoPlayerProps) {
+export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand, nvr = false, onZoom, onRemove }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -149,7 +156,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   const playerInner = (
       <div
         ref={rootRef}
-        className={`video-player ${isDisconnected ? 'disconnected' : ''}${isTile ? ' tile' : ''}`}
+        className={`video-player ${isDisconnected ? 'disconnected' : ''}${isTile ? ' tile' : ''}${nvr && isTile ? ' nvr' : ''}`}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={isTile ? onExpand : undefined}
         onMouseMove={handleMouseMove}
@@ -171,6 +178,15 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           {status === 'connecting' && <div className="vp-status-msg">Connecting…</div>}
           {isTile && (status === 'connected' || status === 'playing' || status === 'stalled') && (
             <MiniStatsCard status={status} metrics={metrics} onExpand={() => setShowStats(true)} />
+          )}
+          {nvr && isTile && (
+            <div className="tile-actions">
+              {onZoom && <button className="tile-btn" title="Zoom this stream" aria-label="Zoom this stream" onClick={(e) => { e.stopPropagation(); onZoom(); }}><Maximize size={12} /></button>}
+              {onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><X size={12} /></button>}
+            </div>
+          )}
+          {nvr && isTile && (
+            <span className={`tile-live${status === 'playing' ? ' live' : ' off'}`}>{status === 'playing' ? '■ LIVE' : '□ OFF'}</span>
           )}
           {isDisconnected && <DisconnectedOverlay status={status} />}
         </div>

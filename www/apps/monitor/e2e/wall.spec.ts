@@ -93,7 +93,8 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
     await page.locator('.st-play-all').first().click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
 
-    await page.locator('.wc-zoom').first().click();
+    await page.locator('.wall-grid .video-player').first().hover();
+    await page.locator('.tile-actions [aria-label="Zoom this stream"]').first().click();
     await expect(page.locator('.wt-exit-zoom')).toBeVisible();
     const cols = await page.locator('.wall-grid').evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
     expect(cols).toBe(1);
