@@ -1,27 +1,22 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--ms-color-bg); color: var(--ms-color-text)b; min-height: 100vh; }
-#root { min-height: 100vh; }
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--ms-color-bg); color: var(--ms-color-text)b; min-height: 100vh; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--ms-color-bg); color: var(--ms-color-text); min-height: 100vh; }
 #root { min-height: 100vh; }
 
 /* -- shared page primitives (relocated from Dashboard.css in
    admin-prototype-restyle W1; consumed by Devices/Accounts/Vehicles/ApiKeys
    and the ActiveDevices wall) -- */
-.section-title { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: var(--ms-color-text)b; }
+.section-title { font-size: 1rem; font-weight: 600; margin-bottom: 1rem; color: var(--ms-color-text); }
 .empty { color: var(--ms-color-text-faint); font-size: 0.9rem; }
 .loading, .error { padding: 2rem; text-align: center; color: var(--ms-color-text-muted); }
 .error { color: var(--ms-color-danger); }
-.btn-sm { padding: 0.25rem 0.75rem; font-size: 0.75rem; border: 1px solid var(--ms-color-danger); background: none; color: var(--ms-color-danger); border-radius: 4px; cursor: pointer; }
-.btn-sm:hover { background: var(--ms-color-danger); color: var(--ms-color-text-inverse); }
 .status-badge { font-size: 0.8rem; display: flex; align-items: center; gap: 4px; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-/* legacy .btn family relocated from Login.css (W5) — shared by Devices/
-   Accounts/Settings until their restyle batches; values verbatim (the #666
-   outline ink is B8-part-2 migration backlog, not a new value). */
-.btn { padding: 0.5rem 1rem; font-size: 0.85rem; border: none; border-radius: 4px; cursor: pointer; background: var(--ms-color-primary); color: var(--ms-color-text-inverse); }
-.btn:hover { background: var(--ms-color-primary-hover); }
-.btn:disabled { opacity: 0.6; cursor: default; }
+/* P4 (D4=A): legacy .btn base family removed — Devices/Accounts/Settings restyled
+   to the W0 kit, zero className="btn" references remain. .btn-sm / .btn-outline
+   stay: still used by ActiveDevices (Close/Stop) + StreamDetail (Kick). The #666
+   outline ink is B8-part-2 migration backlog, not a new value. */
+.btn-sm { padding: 0.25rem 0.75rem; font-size: 0.75rem; border: 1px solid var(--ms-color-danger); background: none; color: var(--ms-color-danger); border-radius: 4px; cursor: pointer; }
+.btn-sm:hover { background: var(--ms-color-danger); color: var(--ms-color-text-inverse); }
 .btn-sm:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-outline { background: none; border: 1px solid var(--ms-color-border); color: #666; }
 .btn-outline:hover { background: var(--ms-color-surface-hover); }
