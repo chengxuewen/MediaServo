@@ -1,0 +1,11 @@
+/* P3 slice ③c realtime timeline — tokens only (no raw color/spacing; PIT-258 guard). */
+.timeline { display: flex; flex-direction: column; gap: var(--ms-space-2); max-width: 720px; }
+.tl-title { font-size: var(--ms-font-size-sm); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); display: flex; align-items: baseline; gap: var(--ms-space-2); }
+.tl-count { font-size: var(--ms-font-size-xs); font-weight: var(--ms-font-weight-medium); color: var(--ms-color-text-tertiary); }
+.tl-state { font-size: var(--ms-font-size-sm); color: var(--ms-color-text-tertiary); }
+.tl-error { color: var(--ms-color-danger); }
+.tl-list { list-style: none; display: flex; flex-direction: column; gap: var(--ms-space-1); max-height: 320px; overflow-y: auto; border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); padding: var(--ms-space-2); background: var(--ms-color-surface); }
+.tl-entry { display: flex; align-items: baseline; gap: var(--ms-space-2); font-size: var(--ms-font-size-xs); }
+.tl-time { color: var(--ms-color-text-tertiary); font-variant-numeric: tabular-nums; flex: none; }
+.tl-kind { font-weight: var(--ms-font-weight-medium); color: var(--ms-color-text-secondary); flex: none; }
+.tl-summary { color: var(--ms-color-text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

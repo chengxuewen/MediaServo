@@ -3,7 +3,7 @@
 // so consumer import paths stay stable); request()/REST helpers are monitor-local
 // glue mirroring admin api/client.ts. No SDK re-creation.
 import { getToken, isTokenExpired, clearToken } from '@mediaservo/client';
-import type { DeviceListResponse, SfuRoomsResponse, SfuStats, SfuStatsListResponse } from '@mediaservo/client';
+import type { AuditListResponse, DeviceListResponse, SfuRoomsResponse, SfuStats, SfuStatsListResponse } from '@mediaservo/client';
 
 export * from '@mediaservo/client';
 
@@ -54,6 +54,11 @@ export async function getSfuStats(producerId?: string, consumerId?: string): Pro
   if (consumerId) params.set('consumer_id', consumerId);
   const qs = params.toString();
   return request(`/sfu/stats${qs ? `?${qs}` : ''}`);
+}
+
+// SB-5 audit ring (B6 face): recent security/operational events (kind-tagged + unix-sec ts).
+export async function getAuditEvents(): Promise<AuditListResponse> {
+  return request('/audit');
 }
 
 export function connectEvents(): WebSocket {

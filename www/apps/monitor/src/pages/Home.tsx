@@ -5,6 +5,7 @@ import StreamTree, { type StreamSelection } from '../components/StreamTree';
 import { useStreams } from '../hooks/useStreams';
 import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
+import Timeline from '../components/Timeline';
 import './Home.css';
 
 // Playback cap (browser soft-decode guard): 16 = a 4x4 grid scale (B5 contract).
@@ -92,7 +93,7 @@ export default function Home() {
       <div className="mh-head">
         <h1>Monitor</h1>
         <p role="note">
-          Wall (cap {MAX_PLAYING}) — signed in as {username ?? 'unknown'}{role ? ` [${role}]` : ''}. {canMonitor ? '' : 'Wall access requires admin/dispatcher. '}Realtime timeline lands in ③c. Per-producer isolation within a multi-producer room needs registered-device stream labels; PSK host rooms are single-producer.
+          Wall (cap {MAX_PLAYING}) — signed in as {username ?? 'unknown'}{role ? ` [${role}]` : ''}. {canMonitor ? '' : 'Wall access requires admin/dispatcher. '}Realtime timeline below. Per-producer isolation within a multi-producer room needs registered-device stream labels; PSK host rooms are single-producer.
         </p>
       </div>
       <StreamTree
@@ -152,6 +153,7 @@ export default function Home() {
         onConfirm={() => { if (pendingPlay) addPlaying(pendingPlay.ids); setPendingPlay(null); }}
         onCancel={() => setPendingPlay(null)}
       />
+      <Timeline />
     </section>
   );
 }

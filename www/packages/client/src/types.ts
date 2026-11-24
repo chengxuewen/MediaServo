@@ -78,6 +78,13 @@ export interface SfuStreamStatRow {
 }
 export interface SfuStatsListResponse { streams: SfuStreamStatRow[]; }
 
+// SB-5 audit ring (B6 face): GET /api/admin/audit — kind-tagged events (snake_case)
+// + unix-second ts. Core-in-memory ring (cap 256, NOT persisted across restarts).
+// Wire mirror of server audit.rs AuditEvent (serde tag="kind"); per-variant fields
+// vary (peer_id/device_id/room_id/stream_id/actor/username/action/…), hence the index signature.
+export interface AuditEventEntry { kind: string; ts: number; [field: string]: unknown; }
+export interface AuditListResponse { events: AuditEventEntry[]; count: number; source: string; retention: string; }
+
 // H3: multi-vehicle status report (StatusReport wire mirror — E3).
 export interface TopicFlow { topic: string; fps: number; bps: number; last_ts_mono_ns: number; frames: number; stalled: boolean; }
 export interface StreamFlow { id: string; bytes_sent: number; frames_encoded: number; frame_width: number; frame_height: number; connected: boolean; }
