@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { VideoPlayer, Confirm } from '@mediaservo/react';
 import { getToken } from '@mediaservo/client';
 import StreamTree, { type StreamSelection } from '../components/StreamTree';
@@ -10,37 +10,52 @@ import './Home.css';
 
 // Playback cap (browser soft-decode guard): 16 = a 4x4 grid scale (B5 contract).
 const MAX_PLAYING = 16;
-// Column control: default 3, max 4, persisted with dirty-value defense.
-const PLAY_COLS_KEY = 'mediaservo_monitor_cols';
-const MAX_COLS = 4;
-const DEFAULT_COLS = 3;
-// B5 micro-decision: Play All above 8 streams asks for confirmation.
 const PLAY_ALL_CONFIRM = 8;
-// B2 fix: a playing producer that vanishes from /sfu/stats is reconciled out of
-// the wall after this grace (~3 poll cycles) so dead ids cannot fill cap16.
 const DROP_GRACE_MS = 6000;
-// B1: three-panel region collapse memory (left stream rail / right alerts / bottom feed).
 const REGION_KEY = 'mediaservo_monitor_regions';
+// B2 (R1): named-layout persistence uses a NEW key; migrate the legacy cols key.
+const LAYOUT_KEY = 'mediaservo_monitor_layout';
+const LEGACY_COLS_KEY = 'mediaservo_monitor_cols';
+// B2 min-tile width (prototype §2g): narrow screens horizontal-scroll, never shrink tiles to nothing.
+const MIN_TILE_PX = 230;
 
-function wsServerUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}`;
+interface Layout { id: string; name: string; cols: number; slots: number; areas?: string[]; }
+const sym = (id: string, n: number): Layout => { const c = Math.round(Math.sqrt(n)); return { id, name: id, cols: c, slots: n }; };
+// K4=A R6 精简集: symmetric 1/4/9/16 + asymmetric 1+3/1+5/1+7 (25/36/custom deferred D3).
+const LAYOUTS: Layout[] = [
+  sym('1', 1), sym('4', 4), sym('9', 9), sym('16', 16),
+  { id: '1+3', name: '1 + 3', cols: 3, slots: 4, areas: ['big big s1', 'big big s2', 'big big s3'] },
+  { id: '1+5', name: '1 + 5', cols: 4, slots: 6, areas: ['big big s1 s2', 'big big s3 s4', 'big big s5 .'] },
+  { id: '1+7', name: '1 + 7', cols: 4, slots: 8, areas: ['big big s1 s2', 'big big s3 s4', 'big big s5 s6', 'big big s7 .'] },
+];
+const autoTemplateId = (n: number) => (n <= 1 ? '1' : n <= 4 ? '4' : n <= 6 ? '1+5' : n <= 9 ? '9' : '16');
+const findLayout = (id: string) => LAYOUTS.find((l) => l.id === id) ?? LAYOUTS[1];
+function loadLayout(): string {
+  try {
+    const v = localStorage.getItem(LAYOUT_KEY);
+    if (v && (v === 'auto' || LAYOUTS.some((l) => l.id === v))) return v;
+    const c = Number(localStorage.getItem(LEGACY_COLS_KEY));
+    const map: Record<number, string> = { 1: '1', 2: '4', 3: '9', 4: '16' };
+    if (map[c]) { localStorage.setItem(LAYOUT_KEY, map[c]); return map[c]; }
+  } catch { /* silent degrade */ }
+  return 'auto';
 }
-
-function loadRegions(): { left: boolean; right: boolean; bottom: boolean } {
+function loadRegions() {
   try {
     const v = JSON.parse(localStorage.getItem(REGION_KEY) || '{}');
     return { left: v.left !== false, right: v.right !== false, bottom: v.bottom !== false };
   } catch { return { left: true, right: true, bottom: true }; }
 }
+function wsServerUrl(): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}`;
+}
 
 /**
- * Monitor realtime face — B1 three-panel progressive disclosure (monitor-prototype-parity).
- * Left stream rail (selected-stream list) | center canvas (wall, always visible) |
- * right alerts placeholder (B4 fills it). Bottom collapsible Event feed (audit ring).
- * Region collapse is remembered; narrow screens (<1200) stack the panels. healthChip
- * surfaces degraded streams; a LIVE clock marks the realtime face. Playback stays the
- * shared VideoPlayer tile; Recording/playback scrubber deferred (RECORDING_READY=false).
+ * Monitor realtime face — B1 three-panel + B2 named layouts (monitor-prototype-parity).
+ * Left stream rail | center canvas (wall) | right alerts placeholder (B4). Bottom Event feed.
+ * B2: R6 layout set (1/4/9/16 + 1+3/1+5/1+7) + Auto-by-count via a single dropdown,
+ * min-tile horizontal scroll, pager + carousel (default off), single-tile zoom (K5).
  */
 export default function Home() {
   const { username, role, canMonitor } = useAuth();
@@ -53,17 +68,17 @@ export default function Home() {
   const [modal, setModal] = useState<StreamSelection | null>(null);
   const [playHint, setPlayHint] = useState('');
   const [pendingPlay, setPendingPlay] = useState<{ room: string; ids: string[] } | null>(null);
-  const [cols, setCols] = useState<number>(() => {
-    let v: number;
-    try { v = Number(localStorage.getItem(PLAY_COLS_KEY)); } catch { v = NaN; }
-    return Number.isInteger(v) && v >= 1 && v <= MAX_COLS ? v : DEFAULT_COLS;
-  });
-  const applyCols = (n: number) => {
-    setCols(n);
-    try { localStorage.setItem(PLAY_COLS_KEY, String(n)); } catch { /* silent degrade */ }
+
+  // B2 layout / pagination / carousel / zoom.
+  const [layoutId, setLayoutId] = useState(loadLayout);
+  const [page, setPage] = useState(0);
+  const [carousel, setCarousel] = useState(false);
+  const [zoomedId, setZoomedId] = useState<string | null>(null);
+  const applyLayout = (id: string) => {
+    setLayoutId(id); setPage(0); setZoomedId(null);
+    try { localStorage.setItem(LAYOUT_KEY, id); } catch { /* silent degrade */ }
   };
 
-  // B1 region collapse (memory). Handles persist so a collapsed region can reopen.
   const [regions, setRegions] = useState(loadRegions);
   const toggleRegion = (k: 'left' | 'right' | 'bottom') => setRegions((prev) => {
     const next = { ...prev, [k]: !prev[k] };
@@ -71,13 +86,29 @@ export default function Home() {
     return next;
   });
 
-  // B1 LIVE clock (realtime face marker).
   const [clock, setClock] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(t); }, []);
 
   const byId = new Map(producers.map((p) => [p.id, p]));
-  // B1 healthChip: degraded = low transport score (stats only lists live producers).
   const degraded = producers.filter((p) => p.score < 8).length;
+
+  // B2 effective layout + pagination.
+  const layout = layoutId === 'auto' ? findLayout(autoTemplateId(playing.length)) : findLayout(layoutId);
+  const pages = Math.max(1, Math.ceil(playing.length / layout.slots));
+  const curPage = Math.min(page, pages - 1);
+  const visible = zoomedId ? [zoomedId] : playing.slice(curPage * layout.slots, curPage * layout.slots + layout.slots);
+  useEffect(() => {
+    if (!carousel || pages <= 1 || zoomedId) return;
+    const t = setInterval(() => setPage((p) => (p + 1) % pages), 5000);
+    return () => clearInterval(t);
+  }, [carousel, pages, zoomedId]);
+
+  const gridStyle: CSSProperties = zoomedId
+    ? { gridTemplateColumns: '1fr' }
+    : layout.areas
+      ? { gridTemplateColumns: `repeat(${layout.cols}, minmax(${MIN_TILE_PX}px, 1fr))`, gridTemplateAreas: layout.areas.map((r) => `"${r}"`).join(' ') }
+      : { gridTemplateColumns: `repeat(${layout.cols}, minmax(${MIN_TILE_PX}px, 1fr))` };
+  const cellStyle = (idx: number): CSSProperties => (layout.areas && !zoomedId ? { gridArea: idx === 0 ? 'big' : `s${idx}` } : {});
 
   // B2 fix: reconcile dead playing ids after a grace period.
   const missingSince = useRef<Map<string, number>>(new Map());
@@ -107,7 +138,6 @@ export default function Home() {
     for (const p of producers) if (p.room === room) { checked ? next.add(p.id) : next.delete(p.id); }
     return next;
   });
-
   const addPlaying = (ids: string[]) => {
     const fresh = ids.filter((id) => !playing.includes(id));
     const merged = [...playing, ...fresh].slice(0, MAX_PLAYING);
@@ -115,7 +145,6 @@ export default function Home() {
     setPlaying(merged);
     setPlayHint(dropped > 0 ? `Playback cap of ${MAX_PLAYING} reached; skipped ${dropped} (close tiles to play more)` : '');
   };
-
   const playRoom = (room: string) => {
     const roomProducers = producers.filter((p) => p.room === room);
     const roomSelected = roomProducers.some((p) => selected.has(p.id));
@@ -126,10 +155,10 @@ export default function Home() {
     if (ids.length > PLAY_ALL_CONFIRM) { setPendingPlay({ room, ids }); return; }
     addPlaying(ids);
   };
-
   const closeTile = (id: string) => {
     setPlaying((prev) => prev.filter((x) => x !== id));
     setModal((prev) => (prev?.producerId === id ? null : prev));
+    setZoomedId((prev) => (prev === id ? null : prev));
   };
 
   return (
@@ -171,39 +200,49 @@ export default function Home() {
         </aside>
 
         <div className="canvas">
+          <div className="wall-toolbar">
+                <label className="wt-label" htmlFor="layout-menu">Layout</label>
+                <select id="layout-menu" className="layout-menu" value={layoutId} onChange={(e) => applyLayout(e.target.value)}>
+                  <option value="auto">Auto · by count</option>
+                  {LAYOUTS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+                {zoomedId && <button className="wt-exit-zoom" onClick={() => setZoomedId(null)}>Exit zoom</button>}
+                {pages > 1 && !zoomedId && (
+                  <div className="wt-pager">
+                    <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={curPage === 0} aria-label="Previous page">‹</button>
+                    <span className="wt-page">{curPage + 1}/{pages}</span>
+                    <button onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={curPage >= pages - 1} aria-label="Next page">›</button>
+                    <button className={`wt-carousel${carousel ? ' active' : ''}`} aria-pressed={carousel} onClick={() => setCarousel((c) => !c)}>Carousel</button>
+                  </div>
+                )}
+            {playHint && <span className="wt-hint" role="status">{playHint}</span>}
+          </div>
           {playing.length > 0 ? (
-            <>
-              <div className="wall-toolbar">
-                <span className="wt-label">Columns</span>
-                {[1, 2, 3, 4].map((n) => (
-                  <button key={n} className={n === cols ? 'wt-btn active' : 'wt-btn'} aria-pressed={n === cols} onClick={() => applyCols(n)}>{n}</button>
-                ))}
-                {playHint && <span className="wt-hint" role="status">{playHint}</span>}
-              </div>
-              <div className="wall-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
-                {playing.map((id) => {
+            <div className="wall-grid" style={gridStyle}>
+                {visible.map((id, idx) => {
                   const p = byId.get(id);
                   if (!p) return (
-                    <div className="wall-offline" key={id}>
+                    <div className="wall-offline" key={id} style={cellStyle(idx)}>
                       <span className="wo-title">SIGNAL LOST</span>
                       <span className="wo-reason">Producer left — stream ended or device offline</span>
                       <button className="wo-close" onClick={() => closeTile(id)}>Close</button>
                     </div>
                   );
                   return (
-                    <VideoPlayer
-                      key={id}
-                      roomId={p.room}
-                      serverUrl={wsServerUrl()}
-                      token={getToken() ?? ''}
-                      variant="tile"
-                      onExpand={() => setModal({ room: p.room, producerId: p.id, kind: p.kind })}
-                      onClose={() => closeTile(id)}
-                    />
+                    <div className="wall-cell" key={id} style={cellStyle(idx)}>
+                      <VideoPlayer
+                        roomId={p.room}
+                        serverUrl={wsServerUrl()}
+                        token={getToken() ?? ''}
+                        variant="tile"
+                        onExpand={() => setModal({ room: p.room, producerId: p.id, kind: p.kind })}
+                        onClose={() => closeTile(id)}
+                      />
+                      {!zoomedId && <button className="wc-zoom" onClick={() => setZoomedId(id)} title="Zoom this stream" aria-label="Zoom this stream">⤢</button>}
+                    </div>
                   );
                 })}
-              </div>
-            </>
+            </div>
           ) : (
             <div className="canvas-empty">No streams on the wall yet. Pick streams in the left rail and Play All / Watch Selected.</div>
           )}
