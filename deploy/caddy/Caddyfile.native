@@ -42,6 +42,17 @@
 		file_server
 	}
 
+	# monitor 应用磁盘 SPA（admin-prototype-restyle P3④，D10=B）：同源 /monitor
+	# 伺服 ./web/monitor（JWT/登录态与 admin 天然共享）；姿态同 /voice。
+	@monitorroot path /monitor
+	redir @monitorroot "/monitor/?{query}" 308
+	handle_path /monitor/* {
+		root * ./web/monitor
+		try_files {path} /index.html
+		encode zstd gzip
+		file_server
+	}
+
 	# ③ 其余 → 静态 dist（vite hash 资源强缓存；入口 no-cache 防版本偏斜）
 	handle {
 		root * ./web

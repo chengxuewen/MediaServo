@@ -108,9 +108,18 @@ function(_mediaservo_app_web_legs)
         message(FATAL_ERROR
             "Error: no artifacts in ${_voice_dist} — pnpm build:voice not run or failed")
     endif()
+    # monitor app disk face (admin-prototype-restyle P3④, D10=B): staged at
+    # web/monitor — the caddy /monitor route serves it same-origin (shared JWT).
+    # Loud-missing parity with admin/voice, never silently hollow.
+    set(_monitor_dist "${MEDIASERVO_REPO_ROOT}/www/apps/monitor/dist")
+    if(NOT EXISTS "${_monitor_dist}/index.html")
+        message(FATAL_ERROR
+            "Error: no artifacts in ${_monitor_dist} — pnpm build:monitor not run or failed")
+    endif()
     install(CODE "execute_process(COMMAND \"\${CMAKE_COMMAND}\" -E rm -rf \"\${CMAKE_INSTALL_PREFIX}/web\")")
     install(DIRECTORY "${_dist}/" DESTINATION web USE_SOURCE_PERMISSIONS)
     install(DIRECTORY "${_voice_dist}/" DESTINATION web/voice USE_SOURCE_PERMISSIONS)
+    install(DIRECTORY "${_monitor_dist}/" DESTINATION web/monitor USE_SOURCE_PERMISSIONS)
 endfunction()
 
 # -- swap-install leg (build mode only): file(COPY) into a side dir (preserves

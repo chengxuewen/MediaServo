@@ -54,7 +54,7 @@ RUN cd /tmp/oxmgr && \
 # face does not invoke _ms_ensure_*_dist; MediaServoAppTree FATALs on a missing
 # dist). CI=true: pnpm refuses to write node_modules without a TTY otherwise.
 RUN cd www && CI=true pnpm install --frozen-lockfile && \
-    CI=true pnpm build:admin && CI=true pnpm build:voice
+    CI=true pnpm build:admin && CI=true pnpm build:voice && CI=true pnpm build:monitor
 
 # deploy server: fresh-goods cargo build (Release hard-coded per PLAN §2.4) +
 # cmake install rows + managed-binary init. The wrapcache mount feeds the

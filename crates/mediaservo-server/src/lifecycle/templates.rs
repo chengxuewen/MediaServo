@@ -200,6 +200,16 @@ __WEB_ADDR__ {
 		encode zstd gzip
 		file_server
 	}
+	# monitor app disk SPA (admin-prototype-restyle P3④, D10=B): same-origin
+	# /monitor serves the dist from <web root>/monitor (shared JWT/login state).
+	@monitorroot path /monitor
+	redir @monitorroot "/monitor/?{query}" 308
+	handle_path /monitor/* {
+		root * __WEB_ROOT__/monitor
+		try_files {path} /index.html
+		encode zstd gzip
+		file_server
+	}
 	handle {
 		root * __WEB_ROOT__
 		try_files {path} /index.html

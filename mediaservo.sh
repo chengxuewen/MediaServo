@@ -532,11 +532,26 @@ _ms_ensure_voice_dist() {
     echo "[build] pnpm build:voice  (cwd: $ROOT/www)"
     (cd "$ROOT/www" && pnpm build:voice) || exit $?
 }
+_ms_ensure_monitor_dist() {
+    # monitor app dist (admin-prototype-restyle P3④, D10=B): the deploy tree
+    # stages web/monitor and caddy /monitor serves it same-origin (shared JWT).
+    # Loud-missing parity with admin/voice (AppTree web-legs), never silently hollow.
+    local dist="$ROOT/www/apps/monitor/dist/index.html" src="$ROOT/www/apps/monitor/src"
+    if [ -f "$dist" ] && [ -d "$src" ] && [ -z "$(find "$src" -type f -newer "$dist" -print -quit 2>/dev/null)" ]; then
+        echo "monitor dist up to date (www/apps/monitor/dist — no src changes) — skipping frontend build, reusing existing dist"
+        return 0
+    fi
+    _ms_check pnpm "pnpm not installed — required for the frontend build (or run manually: cd www && pnpm build:monitor)"
+    echo "monitor dist stale/missing — building frontend (tsc -b && vite build)..."
+    echo "[build] pnpm build:monitor  (cwd: $ROOT/www)"
+    (cd "$ROOT/www" && pnpm build:monitor) || exit $?
+}
 _ms_build_web() {
     # frontend-only fast lane: vite invocation stays here (language-native builder,
     # F30); the placement rides the app-tree cmake face (staging=web).
     _ms_ensure_admin_dist
     _ms_ensure_voice_dist
+    _ms_ensure_monitor_dist
     _msvc_app_install server "" Debug "${MSRTC_OUT_ROOT:-$ROOT/out}/server" web
 }
 _ms_build_stage_weaknet() {
