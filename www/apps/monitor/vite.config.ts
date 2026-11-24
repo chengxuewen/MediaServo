@@ -14,8 +14,9 @@ const proxy = {
 export default defineConfig({
   // Relative base + HashRouter (main.tsx) → the dist loads under any root: the
   // caddy /monitor subpath (assets resolve at /monitor/assets; SPA deep links keep
-  // the path at /monitor/) AND desktop file:// (Tauri/Electron direct load, D10=B
-  // desktop reservation). Absolute base '/' would 404 assets under the subpath.
+  // the path at /monitor/) AND a desktop shell (Tauri/Electron) via custom protocol
+  // (D10=B desktop reservation; raw file:// won't boot ES modules — browser CORS).
+  // Absolute base '/' would 404 assets under the subpath.
   base: './',
   plugins: [react()],
   define: { __APP_TITLE__: JSON.stringify(APP_TITLE) },

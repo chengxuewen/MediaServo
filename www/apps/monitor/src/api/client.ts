@@ -21,8 +21,10 @@ async function request<T>(path: string, opts?: RequestInit): Promise<T> {
     const token = getToken();
     if (!token || isTokenExpired(token)) {
       clearToken();
-      const base = window.location.pathname.startsWith('/monitor') ? '/monitor' : '';
-      window.location.href = `${base}/login`;
+      // S5 fix: HashRouter (⑤) routes via the fragment, not a path navigation —
+      // works under caddy /monitor, dev, and desktop custom protocol without a
+      // full-reload hop that would lose wall state.
+      window.location.hash = '#/login';
     }
     throw new Error('Authentication required — please sign in');
   }

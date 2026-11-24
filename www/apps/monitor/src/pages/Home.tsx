@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { VideoPlayer, Confirm } from '@mediaservo/react';
 import { getToken } from '@mediaservo/client';
 import StreamTree, { type StreamSelection } from '../components/StreamTree';
@@ -16,6 +16,11 @@ const MAX_COLS = 4;
 const DEFAULT_COLS = 3;
 // B5 micro-decision: Play All above 8 streams asks for confirmation.
 const PLAY_ALL_CONFIRM = 8;
+// B2 fix: a playing producer that vanishes from /sfu/stats (device offline/restart,
+// uuid churn) is reconciled out of the wall after this grace (~3 poll cycles), so
+// dead ids cannot permanently occupy cap16 slots. Transient stats gaps < grace keep
+// the tile (shown as a closable offline placeholder meanwhile).
+const DROP_GRACE_MS = 6000;
 
 function wsServerUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -29,7 +34,7 @@ function wsServerUrl(): string {
  * device exposes one). A PSK host room is single-producer → consuming the room =
  * that one stream; per-producer isolation inside a multi-producer room needs
  * registered-device stream labels (cross-ref /rooms), a later refinement.
- * Realtime timeline lands in ③c. Recording stays deferred (RECORDING_READY, §8).
+ * Realtime timeline below. Recording stays deferred (RECORDING_READY, §8).
  */
 export default function Home() {
   const { username, role, canMonitor } = useAuth();
@@ -54,6 +59,25 @@ export default function Home() {
 
   const byId = new Map(producers.map((p) => [p.id, p]));
 
+  // B2 fix: reconcile dead playing ids (producer gone from /sfu/stats) after a grace
+  // period so a device offline/restart cannot permanently fill the cap with dead ids.
+  const missingSince = useRef<Map<string, number>>(new Map());
+  useEffect(() => {
+    const live = new Set(producers.map((p) => p.id));
+    const now = Date.now();
+    const missing = missingSince.current;
+    for (const id of [...missing.keys()]) if (live.has(id)) missing.delete(id);
+    for (const id of playing) if (!live.has(id) && !missing.has(id)) missing.set(id, now);
+    const dead = playing.filter((id) => {
+      const t = missing.get(id);
+      return t !== undefined && now - t >= DROP_GRACE_MS;
+    });
+    if (dead.length > 0) {
+      setPlaying((prev) => prev.filter((id) => !dead.includes(id)));
+      for (const id of dead) missing.delete(id);
+    }
+  }, [producers, playing]);
+
   const toggleSelect = (id: string) => setSelected((prev) => {
     const next = new Set(prev);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -75,7 +99,11 @@ export default function Home() {
 
   const playRoom = (room: string) => {
     const roomProducers = producers.filter((p) => p.room === room);
-    const ids = selected.size > 0
+    // B1 fix: per-room selection (matches the button's per-room anySelected label),
+    // not the global selected.size — selecting in room A must not turn room B's
+    // "Play All" into a silent no-op.
+    const roomSelected = roomProducers.some((p) => selected.has(p.id));
+    const ids = roomSelected
       ? roomProducers.filter((p) => selected.has(p.id)).map((p) => p.id)
       : roomProducers.map((p) => p.id);
     if (ids.length === 0) return;
@@ -118,7 +146,15 @@ export default function Home() {
           <div className="wall-grid" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
             {playing.map((id) => {
               const p = byId.get(id);
-              if (!p) return null;
+              // B2 fix: a vanished producer renders a closable offline placeholder
+              // (not a blank null) until the grace reconcile drops it — the cap slot
+              // stays recoverable without a page refresh.
+              if (!p) return (
+                <div className="wall-offline" key={id}>
+                  <span>Stream offline</span>
+                  <button className="wo-close" onClick={() => closeTile(id)}>Close</button>
+                </div>
+              );
               return (
                 <VideoPlayer
                   key={id}

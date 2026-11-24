@@ -8,9 +8,10 @@ import './App.css';
 
 // HashRouter (with vite base './') routes via the URL fragment, so the dist loads
 // under any root without a basename heuristic: caddy /monitor same-origin (D10=B)
-// AND desktop file:// (Tauri/Electron direct load, desktop reservation). Deep links
-// keep the path stable (/#/route) so relative assets always resolve — absolute
-// base '/' would 404 assets under the /monitor subpath.
+// AND a desktop shell (Tauri/Electron) via its custom protocol (desktop reservation).
+// Deep links keep the path stable (/#/route) so relative assets always resolve —
+// absolute base '/' would 404 assets under the /monitor subpath. Note: raw file://
+// won't boot ES modules (browser CORS); the desktop shell serves via custom protocol.
 
 // Branded title (injected at compile time via vite define — changing env at runtime
 // has no effect; needs pnpm build + server rebuild, C24).

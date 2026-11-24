@@ -39,6 +39,10 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // S1 fix: first-frame poll + 30s cap timeout tracked so unmount cleans them up
+  // (cap16 frequent tile open/close otherwise leaks timers up to 30s).
+  const firstFramePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const firstFrameCapRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [status, setStatus] = useState<ConnectionStatus>('connecting');
   const [metrics, setMetrics] = useState<StreamMetrics | null>(null);
   const [showStats, setShowStats] = useState(false);
@@ -95,15 +99,20 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           videoRef.current.onplaying = () => logT('video onplaying');
           // poll videoWidth to confirm the first frame actually rendered (timing kept inside the component — mount→first frame,
           // avoiding window.__playT0 cross-talk when multiple streams play, multi-stream P3)
-          const poll = setInterval(() => {
+          if (firstFramePollRef.current) clearInterval(firstFramePollRef.current);
+          if (firstFrameCapRef.current) clearTimeout(firstFrameCapRef.current);
+          firstFramePollRef.current = setInterval(() => {
             const v = videoRef.current;
             if (v && v.videoWidth > 0) {
               logT('first frame rendered, videoWidth=' + v.videoWidth + 'x' + v.videoHeight);
               console.log(`[mount→first frame] ${Math.round(performance.now() - t0)}ms`);
-              clearInterval(poll);
+              if (firstFramePollRef.current) clearInterval(firstFramePollRef.current);
+              if (firstFrameCapRef.current) clearTimeout(firstFrameCapRef.current);
             }
           }, 100);
-          setTimeout(() => clearInterval(poll), 30000); // 30s cap
+          firstFrameCapRef.current = setTimeout(() => {
+            if (firstFramePollRef.current) clearInterval(firstFramePollRef.current);
+          }, 30000); // 30s cap
         }
       },
       onStatus: (s) => { logT('status = ' + s); setStatus(s); },
@@ -119,6 +128,8 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
       client.close();
       clientRef.current = null;
       if (controlsTimerRef.current) clearTimeout(controlsTimerRef.current);
+      if (firstFramePollRef.current) clearInterval(firstFramePollRef.current);
+      if (firstFrameCapRef.current) clearTimeout(firstFrameCapRef.current);
     };
   }, [roomId, serverUrl, token, streamLabel]);
 

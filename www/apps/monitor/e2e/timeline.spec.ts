@@ -16,7 +16,8 @@ test.describe('Monitor timeline (S13, slice ③c)', () => {
 
     const token = await page.evaluate(() => localStorage.getItem('mediaservo_admin_token'));
     const headers = { Authorization: `Bearer ${token}` };
-    await page.request.post('/api/admin/managed-rooms', { headers, data: { id: roomId, kind: 'talk' } });
+    const created = await page.request.post('/api/admin/managed-rooms', { headers, data: { id: roomId, kind: 'talk' } });
+    expect(created.ok(), `room create failed: ${created.status()} ${await created.text()}`).toBeTruthy();
     try {
       await expect(newEntry.first()).toBeVisible({ timeout: 15000 });
     } finally {
