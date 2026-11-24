@@ -3,6 +3,7 @@ import { VideoPlayer, Confirm } from '@mediaservo/react';
 import { getToken } from '@mediaservo/client';
 import StreamTree, { type StreamSelection } from '../components/StreamTree';
 import Picker from '../components/Picker';
+import AlertPanel from '../components/AlertPanel';
 import { useStreams } from '../hooks/useStreams';
 import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
@@ -258,7 +259,7 @@ export default function Home() {
             <button className="region-collapse" onClick={() => toggleRegion('right')} aria-label={regions.right ? 'Hide right panel' : 'Show right panel'}>{regions.right ? '›' : '‹'}</button>
           </div>
           <div className="rail-body">
-            <div className="alerts-placeholder">Alert panel (filter / unread / click-to-wall) lands in B4. Degraded streams surface in the health chip above.</div>
+            <AlertPanel producers={producers} onPlayRoom={playRoom} />
           </div>
         </aside>
       </div>

@@ -1,0 +1,19 @@
+/* B4 right-rail alert panel — tokens only (PIT-258). */
+.alert-panel { display: flex; flex-direction: column; gap: var(--ms-space-2); }
+.ap-head { display: flex; align-items: center; gap: var(--ms-space-1); }
+.ap-unread { min-width: 20px; text-align: center; background: var(--ms-color-danger); color: var(--ms-color-text-inverse); border-radius: var(--ms-radius-full); font-size: var(--ms-font-size-xs); padding: 0 var(--ms-space-1); }
+.ap-markall, .ap-autowall { background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
+.ap-markall:hover, .ap-autowall:hover { background: var(--ms-color-surface-hover); }
+.ap-autowall.on { border-color: var(--ms-color-accent); color: var(--ms-color-text); background: var(--ms-color-primary-soft); }
+.ap-filter { display: flex; gap: var(--ms-space-1); }
+.ap-filter .chip { background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-full); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
+.ap-filter .chip.on { border-color: var(--ms-color-accent); background: var(--ms-color-accent); color: var(--ms-color-text-inverse); }
+.ap-list { display: flex; flex-direction: column; gap: var(--ms-space-1); max-height: 40vh; overflow: auto; }
+.ap-empty { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); padding: var(--ms-space-2); }
+.ap-row { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-sm); cursor: pointer; font-size: var(--ms-font-size-xs); }
+.ap-row:hover { background: var(--ms-color-surface-hover); }
+.ap-row.read { opacity: .55; }
+.ap-tag { font-weight: var(--ms-font-weight-medium); }
+.ap-tag.danger { color: var(--ms-color-danger); }
+.ap-tag.warn { color: var(--ms-color-warning); }
+.ap-room { color: var(--ms-color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

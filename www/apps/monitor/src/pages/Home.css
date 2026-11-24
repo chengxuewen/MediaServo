@@ -32,7 +32,6 @@
 /* Center canvas: wall always visible */
 .canvas { min-width: 0; display: flex; flex-direction: column; gap: var(--ms-space-2); }
 .canvas-empty { padding: var(--ms-space-6); text-align: center; color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-sm); border: 1px dashed var(--ms-color-border); border-radius: var(--ms-radius-md); }
-.alerts-placeholder { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); }
 
 /* Bottom collapsible Event feed */
 .bottom-zone { background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); overflow: hidden; }

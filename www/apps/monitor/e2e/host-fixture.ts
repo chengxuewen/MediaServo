@@ -1,5 +1,6 @@
 import { test as base, expect } from '@playwright/test';
 import { spawn, execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
 // S13雏形 host fixture (P3 slice ③a): ensure a live video producer for the wall test.
@@ -11,6 +12,16 @@ const HOST_BIN = path.join(ROOT, 'target', 'debug', 'host-legacy');
 const BASE = 'http://127.0.0.1:9800';
 
 async function adminToken(): Promise<string> {
+  // Reuse the globalSetup storageState token first: repeated fresh logins across
+  // host-fixture tests trip the server login rate-limit (HTTP 429). The storageState
+  // token is freshly minted by globalSetup and valid; fall back to login only if absent.
+  try {
+    const state = JSON.parse(readFileSync(path.join(process.cwd(), '.auth', 'admin.json'), 'utf8'));
+    for (const o of state.origins ?? []) {
+      const tok = (o.localStorage ?? []).find((x: { name: string; value: string }) => x.name === 'mediaservo_admin_token');
+      if (tok?.value) return tok.value;
+    }
+  } catch { /* no storageState yet — fall back to login */ }
   const res = await fetch(`${BASE}/api/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
