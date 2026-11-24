@@ -5,6 +5,7 @@ import StreamTree, { type StreamSelection } from '../components/StreamTree';
 import Picker from '../components/Picker';
 import AlertPanel from '../components/AlertPanel';
 import { useStreams } from '../hooks/useStreams';
+import { useAudit } from '../hooks/useAudit';
 import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
 import Timeline from '../components/Timeline';
@@ -62,13 +63,17 @@ function wsServerUrl(): string {
 export default function Home() {
   const { username, role, canMonitor } = useAuth();
   const { producers, loading, error, refetch } = useStreams();
-  const onWsEvent = useCallback(() => { refetch(); }, [refetch]);
+  // M6: single audit poll + single admin WS owned here; Timeline/AlertPanel are
+  // presentational (was 3 WS connections across components, now 1).
+  const audit = useAudit();
+  const onWsEvent = useCallback(() => { refetch(); audit.refetch(); }, [refetch, audit.refetch]);
   useAdminWS(onWsEvent);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [playing, setPlaying] = useState<string[]>([]);
   const [modal, setModal] = useState<StreamSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [statsVisible, setStatsVisible] = useState(true);
   const [playHint, setPlayHint] = useState('');
   const [pendingPlay, setPendingPlay] = useState<{ room: string; ids: string[] } | null>(null);
 
@@ -211,6 +216,7 @@ export default function Home() {
                   <option value="auto">Auto · by count</option>
                   {LAYOUTS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
                 </select>
+                <button className={`global-stats-toggle${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)}>Stats</button>
                 {zoomedId && <button className="wt-exit-zoom" onClick={() => setZoomedId(null)}>Exit zoom</button>}
                 {pages > 1 && !zoomedId && (
                   <div className="wt-pager">
@@ -223,7 +229,7 @@ export default function Home() {
             {playHint && <span className="wt-hint" role="status">{playHint}</span>}
           </div>
           {playing.length > 0 ? (
-            <div className="wall-grid" style={gridStyle}>
+            <div className={`wall-grid${statsVisible ? '' : ' stats-hidden'}`} style={gridStyle}>
                 {visible.map((id, idx) => {
                   const p = byId.get(id);
                   if (!p) return (
@@ -259,7 +265,7 @@ export default function Home() {
             <button className="region-collapse" onClick={() => toggleRegion('right')} aria-label={regions.right ? 'Hide right panel' : 'Show right panel'}>{regions.right ? '›' : '‹'}</button>
           </div>
           <div className="rail-body">
-            <AlertPanel producers={producers} onPlayRoom={playRoom} />
+            <AlertPanel events={audit.events} producers={producers} onPlayRoom={playRoom} />
           </div>
         </aside>
       </div>
@@ -270,7 +276,7 @@ export default function Home() {
           <button className="region-collapse" onClick={() => toggleRegion('bottom')} aria-label={regions.bottom ? 'Hide bottom panel' : 'Show bottom panel'}>{regions.bottom ? '⌄' : '⌃'}</button>
         </div>
         <div className="rail-body">
-          <Timeline />
+          <Timeline events={audit.events} loading={audit.loading} error={audit.error} refetch={audit.refetch} />
         </div>
       </div>
 

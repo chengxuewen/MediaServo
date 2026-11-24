@@ -1,7 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AuditEventEntry, SfuStreamStatRow } from '../api/client';
-import { useAudit } from '../hooks/useAudit';
-import { useAdminWS } from '../hooks/useAdminWS';
 import './AlertPanel.css';
 
 // B4 (F5): alert-worthy kinds per the adjudicated restyle:256 Alerts口径 (full names).
@@ -17,14 +15,11 @@ const key = (e: AuditEventEntry) => `${e.ts}-${e.kind}`;
  * toggle. Auto-wall plays a NEW danger alert's room; the cap16 skip + hint is handled
  * by the wall's addPlaying (O5). Data source mirrors Timeline (M6 single-WS merge in B6).
  */
-export default function AlertPanel({ producers, onPlayRoom }: {
+export default function AlertPanel({ events, producers, onPlayRoom }: {
+  events: AuditEventEntry[];
   producers: SfuStreamStatRow[];
   onPlayRoom: (room: string) => void;
 }) {
-  const { events, refetch } = useAudit();
-  const onWs = useCallback(() => { refetch(); }, [refetch]);
-  useAdminWS(onWs);
-
   const [filter, setFilter] = useState<'all' | 'danger' | 'warn'>('all');
   const [read, setRead] = useState<Set<string>>(new Set());
   const [autoWall, setAutoWall] = useState(false);

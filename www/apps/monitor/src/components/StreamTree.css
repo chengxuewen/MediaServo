@@ -20,6 +20,7 @@
 .st-kind { display: inline-flex; color: var(--ms-color-text-tertiary); }
 .st-stream-name { flex: 1; }
 .st-score { color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-xs); }
+.st-bitrate { color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-xs); font-variant-numeric: tabular-nums; }
 .st-preview { display: inline-flex; align-items: center; gap: var(--ms-space-1); background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
 .st-preview:hover { background: var(--ms-color-surface-hover); }
 .st-stale { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-2); background: var(--ms-color-warning-soft); border: 1px solid var(--ms-color-warning); border-radius: var(--ms-radius-sm); color: var(--ms-color-text); font-size: var(--ms-font-size-xs); }

@@ -1,8 +1,5 @@
-import { useCallback } from 'react';
 import { StatusGlyph, type GlyphTone } from '@mediaservo/react';
 import type { AuditEventEntry } from '../api/client';
-import { useAudit } from '../hooks/useAudit';
-import { useAdminWS } from '../hooks/useAdminWS';
 import './Timeline.css';
 
 function fmtTime(ts: number): string {
@@ -43,11 +40,9 @@ function tone(kind: string): GlyphTone {
  * 2s + refetched on admin WS events (/api/admin/events). Entries grow as audited
  * actions land. Honest boundary: core-in-memory ring cap 256, not persisted.
  */
-export default function Timeline() {
-  const { events, loading, error, refetch } = useAudit();
-  const onWs = useCallback(() => { refetch(); }, [refetch]);
-  useAdminWS(onWs);
-
+export default function Timeline({ events, loading, error, refetch }: {
+  events: AuditEventEntry[]; loading: boolean; error: string | null; refetch: () => void;
+}) {
   return (
     <section className="timeline" aria-label="Event feed (audit ring)">
       <h2 className="tl-title">Event feed <span className="tl-count">{events.length} events</span></h2>

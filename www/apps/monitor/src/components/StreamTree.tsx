@@ -6,6 +6,12 @@ import { ChevronRight, Video, Mic, Play, Maximize } from 'lucide-react';
 
 export interface StreamSelection { room: string; producerId: string; kind: string; }
 
+// M5 (O4): per-producer bitrate on the tree row, from the stats list (bits/s).
+function fmtBitrate(bps: number | null): string {
+  if (bps == null) return '—';
+  return bps >= 1_000_000 ? `${(bps / 1_000_000).toFixed(1)}M` : `${Math.round(bps / 1000)}K`;
+}
+
 /**
  * Device stream tree (P3 slice ③b, B5 corrected contract): live producers from
  * /sfu/stats grouped by device room, default-expanded (B5 board default).
@@ -86,6 +92,7 @@ export default function StreamTree({ producers, loading, error, selected, onTogg
                       <span className="st-stream-name">{p.kind} · {p.peer_id}</span>
                       <StatusGlyph tone={p.score >= 8 ? 'ok' : p.score >= 4 ? 'warn' : 'danger'} shape="dot" label={`score ${p.score}`} />
                       <span className="st-score">score {p.score}</span>
+                      <span className="st-bitrate">{fmtBitrate(p.available_incoming_bitrate)}</span>
                       <button className="st-preview" onClick={() => onPreview({ room: p.room, producerId: p.id, kind: p.kind })} title="Preview in a large window">
                         <Maximize size={12} /> Preview
                       </button>

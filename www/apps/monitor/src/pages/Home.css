@@ -55,6 +55,9 @@
 .wt-pager button:disabled { opacity: .4; cursor: default; }
 .wt-page { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; }
 .wt-carousel.active { border-color: var(--ms-color-accent); color: var(--ms-color-text); }
+.global-stats-toggle { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
+.global-stats-toggle.on { border-color: var(--ms-color-accent); color: var(--ms-color-text); }
+.wall-grid.stats-hidden .vp-mini-stats { display: none; }
 /* B2: grid columns set inline per layout; min-tile (230px) horizontal-scroll on narrow. */
 .wall-grid { display: grid; gap: var(--ms-space-2); overflow-x: auto; }
 .wall-cell { position: relative; min-width: 0; min-height: 0; }
