@@ -71,6 +71,6 @@ test.describe('Monitor wall regressions (B1/B2)', () => {
   test('layout key migration from legacy cols (R1)', async ({ page }) => {
     await page.addInitScript(() => { localStorage.setItem('mediaservo_monitor_cols', '3'); });
     await page.goto('/');
-    await expect(page.locator('.layout-menu')).toHaveValue('9', { timeout: 15000 });
+    await expect(page.locator('.layout-menu')).toContainText('9', { timeout: 15000 });
   });
 });

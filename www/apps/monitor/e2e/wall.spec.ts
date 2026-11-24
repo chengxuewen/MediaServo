@@ -79,12 +79,28 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
 
     const colCount = () => page.locator('.wall-grid').evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
-    await page.locator('.layout-menu').selectOption('1');
+    const pick = async (name: string) => { await page.locator('.layout-menu').click(); await page.getByRole('option', { name, exact: true }).click(); };
+    await pick('1');
     expect(await colCount()).toBe(1);
-    await page.locator('.layout-menu').selectOption('4');
+    await pick('4');
     expect(await colCount()).toBe(2);
-    await page.locator('.layout-menu').selectOption('9');
+    await pick('9');
     expect(await colCount()).toBe(3);
+  });
+
+  test('V2 layout gallery keyboard nav (arrows + Enter)', async ({ page, hostProducer }) => {
+    await page.goto('/');
+    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+    await page.locator('.st-play-all').first().click();
+    await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
+    await page.locator('.layout-menu').click();
+    await expect(page.locator('.layout-gallery')).toBeVisible();
+    // focus starts at current (auto); ArrowRight to '1', Enter selects
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.layout-gallery')).toHaveCount(0);
+    const cols = await page.locator('.wall-grid').evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+    expect(cols).toBe(1);
   });
 
   test('B2 single-tile zoom fills the wall; exit restores (K5)', async ({ page, hostProducer }) => {

@@ -9,6 +9,7 @@ import { useAudit } from '../hooks/useAudit';
 import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
 import Timeline from '../components/Timeline';
+import { PanelLeft, Bell, Rows3, RefreshCw } from 'lucide-react';
 import './Home.css';
 
 // Playback cap (browser soft-decode guard): 16 = a 4x4 grid scale (B5 contract).
@@ -54,6 +55,37 @@ function wsServerUrl(): string {
   return `${protocol}//${window.location.host}`;
 }
 
+// V2 (I2): Synology-style layout gallery combo with keyboard nav (arrows/Home/End/Enter/Esc).
+function LayoutGallery({ current, onSelect, onClose }: { current: string; onSelect: (id: string) => void; onClose: () => void }) {
+  const items = ['auto', ...LAYOUTS.map((l) => l.id)];
+  const [idx, setIdx] = useState(Math.max(0, items.indexOf(current)));
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { (ref.current?.querySelectorAll('button')[idx] as HTMLElement | undefined)?.focus(); }, [idx]);
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); setIdx((i) => Math.min(items.length - 1, i + 1)); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); setIdx((i) => Math.max(0, i - 1)); }
+    else if (e.key === 'Home') { e.preventDefault(); setIdx(0); }
+    else if (e.key === 'End') { e.preventDefault(); setIdx(items.length - 1); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(items[idx]); }
+    else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
+  };
+  return (
+    <div className="layout-gallery" role="listbox" aria-label="Layout gallery" ref={ref} onKeyDown={onKey}>
+      {items.map((id, i) => {
+        const l = id === 'auto' ? null : findLayout(id);
+        return (
+          <button key={id} role="option" aria-selected={id === current} className="lo-thumb" tabIndex={i === idx ? 0 : -1} onClick={() => onSelect(id)}>
+            <span className="lo-grid" style={{ gridTemplateColumns: `repeat(${l ? l.cols : 2}, 1fr)` }}>
+              {Array.from({ length: l ? l.slots : 4 }).map((_, c) => <span key={c} className={`lo-cell${l?.areas && c === 0 ? ' big' : ''}`} />)}
+            </span>
+            {l ? l.name : 'Auto'}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Monitor realtime face — B1 three-panel + B2 named layouts (monitor-prototype-parity).
  * Left stream rail | center canvas (wall) | right alerts placeholder (B4). Bottom Event feed.
@@ -74,6 +106,7 @@ export default function Home() {
   const [modal, setModal] = useState<StreamSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [statsVisible, setStatsVisible] = useState(true);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [playHint, setPlayHint] = useState('');
   const [pendingPlay, setPendingPlay] = useState<{ room: string; ids: string[] } | null>(null);
 
@@ -99,6 +132,10 @@ export default function Home() {
 
   const byId = new Map(producers.map((p) => [p.id, p]));
   const degraded = producers.filter((p) => p.score < 8).length;
+  // V2 (I6): unread-style alert badge count from the audit ring (alert-worthy kinds).
+  const ALERT_KINDS = ['device_offline', 'estop_audit', 'emergency_command', 'auth_failure', 'authorization_denied', 'stream_destroy', 'device_revoked'];
+  const alertCount = audit.events.filter((e) => ALERT_KINDS.includes(e.kind)).length;
+  const focusDegraded = () => { const d = producers.find((p) => p.score < 8); if (d) { if (!playing.includes(d.id)) addPlaying([d.id]); setZoomedId(d.id); } };
 
   // B2 effective layout + pagination.
   const layout = layoutId === 'auto' ? findLayout(autoTemplateId(playing.length)) : findLayout(layoutId);
@@ -177,14 +214,18 @@ export default function Home() {
     <section className="monitor-home">
       <div className="mh-bar">
         <h1>Monitor</h1>
-        <span className={`health-chip${degraded > 0 ? ' warn' : ''}`} role="status">
+        <button className={`health-chip${degraded > 0 ? ' warn' : ''}`} role="status" onClick={focusDegraded} title={degraded > 0 ? 'Focus first degraded stream' : 'All streams healthy'}>
           {degraded > 0 ? `${degraded} degraded` : 'Healthy'}
-        </span>
+        </button>
         <span className="live-clock"><span className="live-dot" aria-hidden="true" />LIVE {clock.toLocaleTimeString('en-GB', { hour12: false })}</span>
         <div className="region-toggles">
-          <button aria-pressed={regions.left} onClick={() => toggleRegion('left')}>Streams</button>
-          <button aria-pressed={regions.right} onClick={() => toggleRegion('right')}>Alerts</button>
-          <button aria-pressed={regions.bottom} onClick={() => toggleRegion('bottom')}>Events</button>
+          <button aria-pressed={regions.left} onClick={() => toggleRegion('left')} title="Toggle stream rail" aria-label="Toggle stream rail"><PanelLeft size={15} /></button>
+          <button aria-pressed={regions.right} onClick={() => toggleRegion('right')} title="Toggle alert panel" aria-label="Toggle alert panel">
+            <Bell size={15} />
+            {alertCount > 0 && <span className="al-badge" aria-label={`${alertCount} alerts`}>{alertCount}</span>}
+          </button>
+          <button aria-pressed={regions.bottom} onClick={() => toggleRegion('bottom')} title="Toggle event feed" aria-label="Toggle event feed"><Rows3 size={15} /></button>
+          <button aria-disabled="true" title="Drift sync display — multi-stream sync-seek deferred (RECORDING_READY=false)" aria-label="Sync (deferred)"><RefreshCw size={15} /></button>
         </div>
       </div>
       <p className="mh-note" role="note">
@@ -215,11 +256,12 @@ export default function Home() {
 
         <div className="canvas">
           <div className="wall-toolbar">
-                <label className="wt-label" htmlFor="layout-menu">Layout</label>
-                <select id="layout-menu" className="layout-menu" value={layoutId} onChange={(e) => applyLayout(e.target.value)}>
-                  <option value="auto">Auto · by count</option>
-                  {LAYOUTS.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
+                <div className="layout-combo">
+                  <button id="layout-menu" className="layout-menu" aria-haspopup="listbox" aria-expanded={galleryOpen} onClick={() => setGalleryOpen((o) => !o)}>
+                    Layout · {layoutId === 'auto' ? 'Auto' : findLayout(layoutId).name} ▾
+                  </button>
+                  {galleryOpen && <LayoutGallery current={layoutId} onSelect={(id) => { applyLayout(id); setGalleryOpen(false); }} onClose={() => setGalleryOpen(false)} />}
+                </div>
                 <button className={`global-stats-toggle${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)}>Stats</button>
                 {zoomedId && <button className="wt-exit-zoom" onClick={() => setZoomedId(null)}>Exit zoom</button>}
                 {pages > 1 && !zoomedId && (
