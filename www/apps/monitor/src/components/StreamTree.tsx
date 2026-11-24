@@ -2,22 +2,27 @@ import { useState } from 'react';
 import { StatusGlyph } from '@mediaservo/react';
 import type { SfuStreamStatRow } from '../api/client';
 import './StreamTree.css';
-import { ChevronRight, Video, Mic, Play } from 'lucide-react';
+import { ChevronRight, Video, Mic, Play, Maximize } from 'lucide-react';
 
 export interface StreamSelection { room: string; producerId: string; kind: string; }
 
 /**
- * Device stream tree (P3 slice ③a, B5 corrected contract): live producers from
- * /sfu/stats grouped by device room. Rooms default-expanded (B5 board default).
- * Select a stream → single-stream playback. Multi-stream wall (cap 16) + Play All
- * land in slice ③b; label-based single-stream isolation for registered devices too.
+ * Device stream tree (P3 slice ③b, B5 corrected contract): live producers from
+ * /sfu/stats grouped by device room, default-expanded (B5 board default).
+ * Multi-select checkboxes feed the wall (cap 16); per-room Play All / Watch
+ * Selected; per-stream Preview opens a large modal window. Addressing is device
+ * room (+ stream label when a registered device exposes one); a PSK host room is
+ * single-producer so consuming the room = that one stream.
  */
-export default function StreamTree({ producers, loading, error, selected, onSelect }: {
+export default function StreamTree({ producers, loading, error, selected, onToggleSelect, onToggleAll, onPlay, onPreview }: {
   producers: SfuStreamStatRow[];
   loading: boolean;
   error: string | null;
-  selected: StreamSelection | null;
-  onSelect: (sel: StreamSelection) => void;
+  selected: Set<string>;
+  onToggleSelect: (producerId: string) => void;
+  onToggleAll: (room: string, checked: boolean) => void;
+  onPlay: (room: string) => void;
+  onPreview: (sel: StreamSelection) => void;
 }) {
   // default-expanded: track collapsed rooms instead (empty = all open, B5 board default)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -46,30 +51,41 @@ export default function StreamTree({ producers, loading, error, selected, onSele
     <div className="stream-tree">
       {[...rooms.entries()].map(([room, list]) => {
         const open = !collapsed.has(room);
+        const allSelected = list.length > 0 && list.every((p) => selected.has(p.id));
+        const anySelected = list.some((p) => selected.has(p.id));
         return (
           <div className="st-group" key={room}>
-            <button className="st-device" onClick={() => toggle(room)} aria-expanded={open}>
-              <span className={`st-chevron${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
-              <span className="st-device-name">{room}</span>
-              <span className="st-count">{list.length} stream{list.length === 1 ? '' : 's'}</span>
-            </button>
+            <div className="st-device-row">
+              <button className="st-device" onClick={() => toggle(room)} aria-expanded={open}>
+                <span className={`st-chevron${open ? ' open' : ''}`}><ChevronRight size={12} /></span>
+                <span className="st-device-name">{room}</span>
+                <span className="st-count">{list.length} stream{list.length === 1 ? '' : 's'}</span>
+              </button>
+              <button className="st-play-all" onClick={() => onPlay(room)} title={anySelected ? 'Play the selected streams' : 'Play all streams of this device'}>
+                <Play size={12} /> {anySelected ? 'Watch Selected' : 'Play All'}
+              </button>
+              <label className="st-select-all">
+                <input type="checkbox" checked={allSelected} onChange={(e) => onToggleAll(room, e.target.checked)} title="Select all streams" />
+                <span>All</span>
+              </label>
+            </div>
             {open && (
               <div className="st-streams">
                 {list.map((p) => {
-                  const active = selected?.producerId === p.id;
+                  const isSel = selected.has(p.id);
                   return (
-                    <button
-                      key={p.id}
-                      className={`st-stream${active ? ' active' : ''}`}
-                      onClick={() => onSelect({ room: p.room, producerId: p.id, kind: p.kind })}
-                      title={`producer ${p.id}`}
-                    >
+                    <div key={p.id} className={`st-stream${isSel ? ' active' : ''}`}>
+                      <label className="st-check">
+                        <input type="checkbox" checked={isSel} onChange={() => onToggleSelect(p.id)} title="Select for the wall" />
+                      </label>
                       <span className="st-kind">{p.kind === 'audio' ? <Mic size={14} /> : <Video size={14} />}</span>
                       <span className="st-stream-name">{p.kind} · {p.peer_id}</span>
                       <StatusGlyph tone={p.score >= 8 ? 'ok' : p.score >= 4 ? 'warn' : 'danger'} shape="dot" label={`score ${p.score}`} />
                       <span className="st-score">score {p.score}</span>
-                      <span className="st-play"><Play size={12} /> Play</span>
-                    </button>
+                      <button className="st-preview" onClick={() => onPreview({ room: p.room, producerId: p.id, kind: p.kind })} title="Preview in a large window">
+                        <Maximize size={12} /> Preview
+                      </button>
+                    </div>
                   );
                 })}
               </div>

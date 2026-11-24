@@ -1,0 +1,12 @@
+/* P3 slice ③b monitor wall — tokens only (no raw values; PIT-258 guard). */
+.monitor-home { display: flex; flex-direction: column; gap: var(--ms-space-4); }
+.mh-head { display: flex; flex-direction: column; gap: var(--ms-space-1); }
+.mh-head h1 { font-size: var(--ms-font-size-md); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); }
+.mh-head p { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); margin: 0; }
+.wall-toolbar { display: flex; align-items: center; gap: var(--ms-space-2); font-size: var(--ms-font-size-sm); color: var(--ms-color-text-muted); }
+.wt-label { margin-right: var(--ms-space-1); }
+.wt-btn { width: 28px; height: 28px; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); font-size: var(--ms-font-size-sm); cursor: pointer; }
+.wt-btn:hover { background: var(--ms-color-bg); }
+.wt-btn.active { border-color: var(--ms-color-accent); background: var(--ms-color-accent); color: var(--ms-color-text-inverse); }
+.wt-hint { margin-left: auto; color: var(--ms-color-warning); font-size: var(--ms-font-size-xs); }
+.wall-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--ms-space-2); }
