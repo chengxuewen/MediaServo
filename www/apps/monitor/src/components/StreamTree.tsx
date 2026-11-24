@@ -14,7 +14,7 @@ export interface StreamSelection { room: string; producerId: string; kind: strin
  * room (+ stream label when a registered device exposes one); a PSK host room is
  * single-producer so consuming the room = that one stream.
  */
-export default function StreamTree({ producers, loading, error, selected, onToggleSelect, onToggleAll, onPlay, onPreview }: {
+export default function StreamTree({ producers, loading, error, selected, onToggleSelect, onToggleAll, onPlay, onPreview, onRetry }: {
   producers: SfuStreamStatRow[];
   loading: boolean;
   error: string | null;
@@ -23,12 +23,15 @@ export default function StreamTree({ producers, loading, error, selected, onTogg
   onToggleAll: (room: string, checked: boolean) => void;
   onPlay: (room: string) => void;
   onPreview: (sel: StreamSelection) => void;
+  onRetry: () => void;
 }) {
   // default-expanded: track collapsed rooms instead (empty = all open, B5 board default)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   if (loading) return <div className="st-state">Loading streams…</div>;
-  if (error) return <div className="st-state st-error">{error}</div>;
+  // M1: error with no data → error state + Retry; error with stale data → keep the
+  // tree and show a stale banner + Retry (do not discard the last known streams).
+  if (error && producers.length === 0) return <div className="st-state st-error">{error} <button className="st-retry" onClick={onRetry}>Retry</button></div>;
 
   const rooms = new Map<string, SfuStreamStatRow[]>();
   for (const p of producers) {
@@ -49,6 +52,7 @@ export default function StreamTree({ producers, loading, error, selected, onTogg
 
   return (
     <div className="stream-tree">
+      {error && <div className="st-stale" role="alert">Showing last known streams — refresh failed. <button className="st-retry" onClick={onRetry}>Retry</button></div>}
       {[...rooms.entries()].map(([room, list]) => {
         const open = !collapsed.has(room);
         const allSelected = list.length > 0 && list.every((p) => selected.has(p.id));

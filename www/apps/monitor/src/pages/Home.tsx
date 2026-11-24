@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { VideoPlayer, Confirm } from '@mediaservo/react';
 import { getToken } from '@mediaservo/client';
 import StreamTree, { type StreamSelection } from '../components/StreamTree';
+import Picker from '../components/Picker';
 import { useStreams } from '../hooks/useStreams';
 import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
@@ -66,6 +67,7 @@ export default function Home() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [playing, setPlaying] = useState<string[]>([]);
   const [modal, setModal] = useState<StreamSelection | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [playHint, setPlayHint] = useState('');
   const [pendingPlay, setPendingPlay] = useState<{ room: string; ids: string[] } | null>(null);
 
@@ -186,6 +188,7 @@ export default function Home() {
             <button className="region-collapse" onClick={() => toggleRegion('left')} aria-label={regions.left ? 'Hide left panel' : 'Show left panel'}>{regions.left ? '‹' : '›'}</button>
           </div>
           <div className="rail-body">
+            <button className="open-picker" onClick={() => setPickerOpen(true)}>＋ Select streams</button>
             <StreamTree
               producers={producers}
               loading={loading}
@@ -195,6 +198,7 @@ export default function Home() {
               onToggleAll={toggleAll}
               onPlay={playRoom}
               onPreview={setModal}
+              onRetry={refetch}
             />
           </div>
         </aside>
@@ -269,6 +273,9 @@ export default function Home() {
         </div>
       </div>
 
+      {pickerOpen && (
+        <Picker producers={producers} playing={playing} onClose={() => setPickerOpen(false)} onAdd={addPlaying} />
+      )}
       {modal && (
         <VideoPlayer
           key={`modal-${modal.producerId}`}

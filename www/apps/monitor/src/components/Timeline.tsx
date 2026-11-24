@@ -53,11 +53,13 @@ export default function Timeline() {
       <h2 className="tl-title">Event feed <span className="tl-count">{events.length} events</span></h2>
       {loading ? (
         <p className="tl-state">Loading events…</p>
-      ) : error ? (
-        <p className="tl-state tl-error">{error}</p>
+      ) : error && events.length === 0 ? (
+        <p className="tl-state tl-error">{error} <button className="tl-retry" onClick={refetch}>Retry</button></p>
       ) : events.length === 0 ? (
         <p className="tl-state">No events yet.</p>
       ) : (
+        <>
+        {error && <div className="tl-stale" role="alert">Showing last known events — refresh failed. <button className="tl-retry" onClick={refetch}>Retry</button></div>}
         <ol className="tl-list">
           {events.map((e, i) => (
             <li className="tl-entry" key={`${e.ts}-${e.kind}-${i}`}>
@@ -68,6 +70,7 @@ export default function Timeline() {
             </li>
           ))}
         </ol>
+        </>
       )}
     </section>
   );

@@ -1,0 +1,16 @@
+/* B3 add-stream shuttle picker — tokens only (PIT-258). */
+.picker-modal { width: min(48rem, 100%); }
+.picker-search { width: 100%; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text); border-radius: var(--ms-radius-sm); padding: var(--ms-space-2); font-size: var(--ms-font-size-sm); margin-bottom: var(--ms-space-2); }
+.picker-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ms-space-2); }
+.picker-avail, .picker-chosen { border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-sm); min-height: 200px; max-height: 320px; overflow: auto; padding: var(--ms-space-1); }
+.picker-avail:focus-visible { outline: var(--ms-focus-ring-width) solid var(--ms-focus-ring-color); outline-offset: 1px; }
+.picker-item { padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-sm); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); cursor: pointer; }
+.picker-item:hover { background: var(--ms-color-surface-hover); }
+.picker-item.focused { outline: 1px solid var(--ms-color-accent); }
+.picker-item.chosen { background: var(--ms-color-primary-soft); color: var(--ms-color-text); }
+.picker-empty { padding: var(--ms-space-2); font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); }
+.picker-chosen-head { font-size: var(--ms-font-size-xs); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text-tertiary); padding: var(--ms-space-1) var(--ms-space-2); }
+.picker-chosen-item { padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-sm); color: var(--ms-color-text); }
+.picker-cancel { background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-3); font-size: var(--ms-font-size-sm); cursor: pointer; }
+.picker-add { background: var(--ms-color-accent); border: 1px solid var(--ms-color-accent); color: var(--ms-color-text-inverse); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-3); font-size: var(--ms-font-size-sm); cursor: pointer; }
+.picker-add:disabled { opacity: .5; cursor: default; }

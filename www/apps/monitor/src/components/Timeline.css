@@ -9,3 +9,6 @@
 .tl-time { color: var(--ms-color-text-tertiary); font-variant-numeric: tabular-nums; flex: none; }
 .tl-kind { font-weight: var(--ms-font-weight-medium); color: var(--ms-color-text-secondary); flex: none; }
 .tl-summary { color: var(--ms-color-text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-stale { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-2); background: var(--ms-color-warning-soft); border: 1px solid var(--ms-color-warning); border-radius: var(--ms-radius-sm); color: var(--ms-color-text); font-size: var(--ms-font-size-xs); }
+.tl-retry { background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
+.tl-retry:hover { background: var(--ms-color-surface-hover); }
