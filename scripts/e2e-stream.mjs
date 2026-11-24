@@ -43,6 +43,12 @@ function cleanup() {
 }
 process.on('SIGINT', () => { cleanup(); process.exit(1); });
 process.on('SIGTERM', () => { cleanup(); process.exit(1); });
+// SIGHUP (terminal close) previously fell through to the default action = node dies
+// without cleanup, orphaning the self-started server (the 11-24 port-9800 residue incident).
+process.on('SIGHUP', () => { cleanup(); process.exit(1); });
+// exit hook covers process.exit paths / normal termination (cleanup is sync-only).
+// SIGKILL cannot be hooked -- msrtc-server start's pid-level residue takeover is the backstop.
+process.on('exit', cleanup);
 
 function fail(msg) {
   console.error(`S1-L1 RED: ${msg}`);
