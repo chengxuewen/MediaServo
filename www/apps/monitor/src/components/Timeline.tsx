@@ -38,7 +38,8 @@ function tone(kind: string): GlyphTone {
 }
 
 /**
- * Realtime event timeline (P3 slice ③c): the audit ring (/api/admin/audit) polled
+ * Event feed (P3 slice ③c; M8 renamed from "Realtime timeline" to avoid colliding
+ * with the prototype's playback scrubber): the audit ring (/api/admin/audit) polled
  * 2s + refetched on admin WS events (/api/admin/events). Entries grow as audited
  * actions land. Honest boundary: core-in-memory ring cap 256, not persisted.
  */
@@ -48,8 +49,8 @@ export default function Timeline() {
   useAdminWS(onWs);
 
   return (
-    <section className="timeline" aria-label="Realtime event timeline">
-      <h2 className="tl-title">Realtime timeline <span className="tl-count">{events.length} events</span></h2>
+    <section className="timeline" aria-label="Event feed (audit ring)">
+      <h2 className="tl-title">Event feed <span className="tl-count">{events.length} events</span></h2>
       {loading ? (
         <p className="tl-state">Loading events…</p>
       ) : error ? (
