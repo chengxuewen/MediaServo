@@ -53,4 +53,24 @@ test.describe('Monitor wall regressions (B1/B2)', () => {
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(0, { timeout: 15000 });
     await expect(page.locator('.wall-offline')).toHaveCount(0, { timeout: 15000 });
   });
+
+  test('cap16 + >8 confirm: Play All 17 streams caps at 16 with skipped hint (O1/O5)', async ({ page }) => {
+    const streams = Array.from({ length: 17 }, (_, i) => producer(`p${i}`, 'room-cap'));
+    await page.route('**/api/admin/sfu/stats', (route) => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({ streams }),
+    }));
+    await page.goto('/');
+    await expect(page.locator('.st-device-name', { hasText: 'room-cap' })).toBeVisible({ timeout: 15000 });
+    await page.locator('.st-group', { hasText: 'room-cap' }).locator('.st-play-all').click();
+    // 17 > 8 → Confirm dialog (B5 micro-decision); confirm caps at 16
+    await page.getByRole('button', { name: 'Play', exact: true }).click();
+    await expect(page.locator('.wall-grid .video-player')).toHaveCount(16, { timeout: 15000 });
+    await expect(page.locator('.wt-hint')).toContainText('skipped 1');
+  });
+
+  test('layout key migration from legacy cols (R1)', async ({ page }) => {
+    await page.addInitScript(() => { localStorage.setItem('mediaservo_monitor_cols', '3'); });
+    await page.goto('/');
+    await expect(page.locator('.layout-menu')).toHaveValue('9', { timeout: 15000 });
+  });
 });

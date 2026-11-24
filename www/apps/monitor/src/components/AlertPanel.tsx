@@ -6,7 +6,7 @@ import './AlertPanel.css';
 const DANGER = new Set(['device_offline', 'estop_audit', 'emergency_command']);
 const WARN = new Set(['auth_failure', 'authorization_denied', 'stream_destroy', 'device_revoked']);
 const ALERT_KINDS = new Set<string>([...DANGER, ...WARN]);
-const key = (e: AuditEventEntry) => `${e.ts}-${e.kind}`;
+const key = (e: AuditEventEntry) => `${e.ts}-${e.kind}-${e.room_id ?? e.device_id ?? e.username ?? ''}`;
 
 /**
  * Right-rail alert panel (B4, monitor-prototype-parity): the alert-worthy subset of
@@ -29,18 +29,23 @@ export default function AlertPanel({ events, producers, onPlayRoom }: {
   const unread = alerts.filter((e) => !read.has(key(e))).length;
   const filtered = alerts.filter((e) => (filter === 'all' ? true : filter === 'danger' ? DANGER.has(e.kind) : WARN.has(e.kind)));
 
-  // Auto-wall: track seen alerts always; play only NEW danger alerts while armed.
-  // addPlaying enforces cap16 (full → skip + hint, O5). producers dep keeps room lookup fresh.
+  // Auto-wall: play a NEW danger alert's room while armed. Mark seen only AFTER a
+  // play decision so a producer not yet loaded (audit 2s poll outruns stats 5s) is
+  // retried on the next producers update (B1 review fix: seen-before-check race).
+  // device_offline has no live stream to wall (its producer is gone) — honest skip;
+  // the alert stays visible in the panel. addPlaying enforces cap16 (full → skip, O5).
   useEffect(() => {
     for (const e of alerts) {
       const k = key(e);
-      if (!seenRef.current.has(k)) {
+      if (seenRef.current.has(k)) continue;
+      if (!autoWall) { seenRef.current.add(k); continue; }
+      const room = typeof e.room_id === 'string' ? e.room_id : null;
+      if (e.kind === 'device_offline') { seenRef.current.add(k); continue; }
+      if (room && producers.some((p) => p.room === room)) {
         seenRef.current.add(k);
-        if (autoWall && DANGER.has(e.kind) && typeof e.room_id === 'string'
-          && producers.some((p) => p.room === e.room_id)) {
-          onPlayRoom(e.room_id);
-        }
+        onPlayRoom(room);
       }
+      // else: playable danger, producer not loaded yet — leave unseen, retry next update
     }
   }, [alerts, autoWall, producers, onPlayRoom]);
 

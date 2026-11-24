@@ -24,8 +24,10 @@ function summary(e: AuditEventEntry): string {
 }
 
 // Alert-worthy kinds → danger; destructive/operational-warning → warn; healthy lifecycle → ok.
-const DANGER = new Set(['device_offline', 'estop_audit', 'emergency_command', 'auth_failure', 'authorization_denied', 'device_revoked']);
-const WARN = new Set(['stream_destroy', 'psk_rotated', 'account_deleted', 'evidence_withdraw', 'api_key_revoked']);
+// S4: align with the adjudicated restyle:256 Alerts口径 (same as AlertPanel) so the
+// Event feed and the alert panel agree on severity (auth_failure/etc are warn, not danger).
+const DANGER = new Set(['device_offline', 'estop_audit', 'emergency_command']);
+const WARN = new Set(['auth_failure', 'authorization_denied', 'stream_destroy', 'device_revoked', 'psk_rotated', 'account_deleted', 'evidence_withdraw', 'api_key_revoked']);
 const OK = new Set(['auth_success', 'device_online', 'stream_create', 'room_create', 'device_registered']);
 function tone(kind: string): GlyphTone {
   if (DANGER.has(kind)) return 'danger';

@@ -203,7 +203,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
       {isTile ? (
         <div className="video-player-overlay tile">{playerInner}</div>
       ) : (
-        <Modal open onClose={onClose} className="vp-modal-wide">{playerInner}</Modal>
+        <Modal open title={streamLabel ? `${roomId} · ${streamLabel}` : roomId} onClose={onClose} className="vp-modal-wide">{playerInner}</Modal>
       )}
       {showStats && metrics && createPortal(
         <div

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Modal } from '@mediaservo/react';
 import type { SfuStreamStatRow } from '../api/client';
 import './Picker.css';
@@ -30,11 +30,17 @@ export default function Picker({ producers, playing, onClose, onAdd }: {
     return next;
   });
 
+  const availRef = useRef<HTMLDivElement>(null);
+  // S7: roving tabindex must move real DOM focus so screen readers announce the item.
+  const moveFocus = (next: number) => {
+    setFocusIdx(next);
+    availRef.current?.querySelectorAll<HTMLElement>('[role="treeitem"]')[next]?.focus();
+  };
   const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); setFocusIdx((i) => Math.min(avail.length - 1, i + 1)); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setFocusIdx((i) => Math.max(0, i - 1)); }
-    else if (e.key === 'Home') { e.preventDefault(); setFocusIdx(0); }
-    else if (e.key === 'End') { e.preventDefault(); setFocusIdx(Math.max(0, avail.length - 1)); }
+    if (e.key === 'ArrowDown') { e.preventDefault(); moveFocus(Math.min(avail.length - 1, focusIdx + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); moveFocus(Math.max(0, focusIdx - 1)); }
+    else if (e.key === 'Home') { e.preventDefault(); moveFocus(0); }
+    else if (e.key === 'End') { e.preventDefault(); moveFocus(Math.max(0, avail.length - 1)); }
     else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (avail[focusIdx]) toggle(avail[focusIdx].id); }
   };
 
@@ -62,7 +68,7 @@ export default function Picker({ producers, playing, onClose, onAdd }: {
         aria-label="Search streams"
       />
       <div className="picker-cols">
-        <div className="picker-avail" role="tree" aria-label="Available streams" tabIndex={0} onKeyDown={onKey}>
+        <div ref={availRef} className="picker-avail" role="tree" aria-label="Available streams" aria-multiselectable="true" tabIndex={0} onKeyDown={onKey}>
           {avail.length === 0 && <div className="picker-empty">No available streams match.</div>}
           {avail.map((p, i) => (
             <div

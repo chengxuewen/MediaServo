@@ -49,4 +49,17 @@ test.describe('Monitor alert panel (B4)', () => {
     await page.locator('.ap-row').first().click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
   });
+
+  test('auto-wall plays a NEW danger alert room when armed (B1 behavior)', async ({ page, hostProducer }) => {
+    let auditEvents: Array<Record<string, unknown>> = [];
+    await page.route('**/api/admin/audit', (r) => r.fulfill({
+      json: { events: auditEvents, count: auditEvents.length, source: 'core', retention: 'memory' },
+    }));
+    await page.goto('/');
+    await expect(page.locator('.alert-panel')).toBeVisible({ timeout: 15000 });
+    // arm first (no alerts yet), then inject a NEW estop alert for the live host room
+    await page.locator('.ap-autowall').click();
+    auditEvents = [{ kind: 'estop_audit', ts: 1700000000, room_id: hostProducer.room }];
+    await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
+  });
 });

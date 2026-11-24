@@ -110,6 +110,9 @@ export default function Home() {
     const t = setInterval(() => setPage((p) => (p + 1) % pages), 5000);
     return () => clearInterval(t);
   }, [carousel, pages, zoomedId]);
+  // S1: clamp raw page when the page count shrinks (closing tiles / layout change)
+  // so Prev/Next stay responsive instead of walking a stale raw page down.
+  useEffect(() => { setPage((p) => Math.min(p, pages - 1)); }, [pages]);
 
   const gridStyle: CSSProperties = zoomedId
     ? { gridTemplateColumns: '1fr' }
@@ -132,6 +135,7 @@ export default function Home() {
     });
     if (dead.length > 0) {
       setPlaying((prev) => prev.filter((id) => !dead.includes(id)));
+      setZoomedId((prev) => (prev && dead.includes(prev) ? null : prev));
       for (const id of dead) missing.delete(id);
     }
   }, [producers, playing]);
@@ -184,7 +188,7 @@ export default function Home() {
         </div>
       </div>
       <p className="mh-note" role="note">
-        Signed in as {username ?? 'unknown'}{role ? ` [${role}]` : ''}. {canMonitor ? '' : 'Wall access requires admin/dispatcher. '}Cap {MAX_PLAYING}; PSK host rooms are single-producer. Alert panel lands in B4; playback scrubber/Recording deferred.
+        Signed in as {username ?? 'unknown'}{role ? ` [${role}]` : ''}. {canMonitor ? '' : 'Wall access requires admin/dispatcher. '}Cap {MAX_PLAYING}; PSK host rooms are single-producer. Alert panel at right; playback scrubber/Recording deferred.
       </p>
 
       <div className="monitor-three-panel">
