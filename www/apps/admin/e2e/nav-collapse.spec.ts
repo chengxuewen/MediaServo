@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { inkBox } from '../../../pixels/ink';
 
 // V21 (prototype nav): the sidebar collapses to a 58px icon rail via the header
 // button, persists the choice, and auto-rails at <=900px (prototype media rule).
@@ -62,26 +63,12 @@ test('header shows the current page name beside the brand', async ({ page }) => 
   expect(geo.ruleWidth).toBe('1px');
   expect(geo.align).toBe('center');
 
-  // V22h: PIXEL truth check — screenshot the header and compare the ink bottoms of the
-// brand vs the page label. Canvas font metrics mis-modelled the ascent (false 6px), so
-// we measure the rendered pixels: both text runs must sit on the same baseline (±1px).
-  const shot = await page.locator('.header').screenshot();
-  const { PNG } = await import('pngjs');
-  const png = PNG.sync.read(Buffer.from(shot));
-  const lum = (x: number, y: number) => {
-    const i = (y * png.width + x) * 4;
-    return 0.2126 * png.data[i] + 0.7152 * png.data[i + 1] + 0.0722 * png.data[i + 2];
-  };
-  const inkBottom = (x0: number, x1: number) => {
-    let bottom = -1;
-    for (let y = 0; y < png.height; y++) for (let x = x0; x < x1; x++) if (lum(x, y) > 150) { bottom = y; break; }
-    return bottom;
-  };
-  // brand word ≈ x 60..165, page label ≈ x 178..300 (css px; dpr-1 headless)
-  const brandBottom = inkBottom(60, 165);
-  const pageBottom = inkBottom(178, 300);
-  expect(brandBottom).toBeGreaterThan(0);
-  expect(Math.abs(brandBottom - pageBottom)).toBeLessThanOrEqual(1);
+  // V22h/V23: PIXEL truth check via the shared ink probe — the rendered ink bottoms of
+  // the brand and the page label must sit on the same baseline (±1px).
+  const header = page.locator('.header');
+  const brand = await inkBox(header, { xRange: [60, 165] });
+  const pageName = await inkBox(header, { xRange: [178, 300] });
+  expect(Math.abs(brand.bottom - pageName.bottom)).toBeLessThanOrEqual(1);
   // hierarchy: the page name must be visibly smaller than the brand
   const sizes = await page.evaluate(() => ({
     brand: parseFloat(getComputedStyle(document.querySelector('.header .logo')!).fontSize),
