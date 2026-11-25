@@ -42,4 +42,18 @@ test('header shows the current page name beside the brand', async ({ page }) => 
   await page.locator('nav a', { hasText: 'Monitor' }).click();
   await expect(page.locator('.header-page')).toHaveText('Monitor Center');
   await expect(page.locator('.sidebar')).toBeVisible();
+
+  // V22c: vertical rule spans the bar and the label is vertically centred with the brand.
+  const geo = await page.evaluate(() => {
+    const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
+    const logo = b('.header .logo'); const page2 = b('.header-page'); const head = b('.header');
+    return {
+      cyDelta: Math.abs((logo.top + logo.height / 2) - (page2.top + page2.height / 2)),
+      ruleSpans: Math.round(page2.height) >= Math.round(head.height) - 1,
+      border: getComputedStyle(document.querySelector('.header-page')!).borderLeftWidth,
+    };
+  });
+  expect(geo.cyDelta).toBeLessThanOrEqual(2);
+  expect(geo.ruleSpans).toBe(true);
+  expect(geo.border).toBe('1px');
 });
