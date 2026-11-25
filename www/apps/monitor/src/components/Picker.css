@@ -19,6 +19,7 @@
 .picker-dev.focused { outline: 1px solid var(--ms-color-accent); }
 .picker-dev.chosen { border-color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
 .picker-dev input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--ms-color-accent); }
+.picker-dev input[type="checkbox"]:indeterminate { accent-color: var(--ms-color-accent); }
 .st-device-name { flex: 1; min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .picker-dev-count { font-size: 11px; color: var(--ms-color-text-tertiary); font-variant-numeric: tabular-nums; }
 .st-play-all { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: 6px; padding: 0 8px; height: 22px; font-size: 11px; cursor: pointer; }

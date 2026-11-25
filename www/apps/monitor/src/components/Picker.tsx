@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal } from '@mediaservo/react';
 import type { SfuStreamStatRow } from '../api/client';
 import './Picker.css';
@@ -13,6 +13,13 @@ import './Picker.css';
  */
 type Status = 'online' | 'degraded' | 'offline';
 const statusOf = (score: number | null | undefined): Status => (score == null ? 'offline' : score >= 8 ? 'online' : score > 0 ? 'degraded' : 'offline');
+
+/** V14: tri-state parent checkbox — checked / indeterminate (some children) / unchecked. */
+function TriCheckbox({ checked, indeterminate }: { checked: boolean; indeterminate: boolean }) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+  return <input ref={ref} type="checkbox" checked={checked} readOnly tabIndex={-1} aria-hidden="true" />;
+}
 
 export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
   producers: SfuStreamStatRow[];
@@ -89,6 +96,9 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
             {rooms.length === 0 && <div className="picker-empty">No available streams match.</div>}
             {rooms.map((room) => {
               const list = roomStreams(room); const st = roomStatus(room); const open = expanded.has(room); const i = flat++;
+              const selCount = list.filter((p) => chosen.includes(p.id)).length;
+              const allSel = list.length > 0 && selCount === list.length;
+              const someSel = selCount > 0 && !allSel;
               return (
                 <div key={room} className="st-group">
                   <div role="treeitem" aria-selected={allChosen(room)} aria-expanded={open} tabIndex={i === focusIdx ? 0 : -1}
@@ -96,9 +106,9 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
                     onClick={() => toggleRoom(room)}>
                     <button className="pick-caret" aria-label={open ? 'Collapse' : 'Expand'} aria-expanded={open}
                       onClick={(e) => { e.stopPropagation(); toggleExpand(room); }}>{open ? '▾' : '▸'}</button>
-                    <input type="checkbox" readOnly checked={allChosen(room)} tabIndex={-1} aria-hidden="true" />
+                    <TriCheckbox checked={allSel} indeterminate={someSel} />
                     <span className="st-device-name">{room}</span>
-                    <span className="picker-dev-count">{list.filter((p) => chosen.includes(p.id)).length}/{list.length}</span>
+                    <span className="picker-dev-count">{selCount}/{list.length}</span>
                     <span className={`pick-status ${st}`}><span className="pick-dot" aria-hidden="true" />{st}</span>
                     <button className="st-play-all" title="Play all streams of this device" onClick={(e) => { e.stopPropagation(); onPlay(room); onClose(); }}>Play</button>
                   </div>
