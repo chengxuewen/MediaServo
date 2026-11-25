@@ -1,3 +1,6 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* V18: the monitor app is a full-screen console — never grow a document scrollbar; the
+   wall scales inside the viewport. */
+html, body, #root { height: 100%; overflow: hidden; }
 body { font-family: var(--ms-font-family); background: var(--ms-color-bg); color: var(--ms-color-text); min-height: 100vh; }
 #root { min-height: 100vh; }

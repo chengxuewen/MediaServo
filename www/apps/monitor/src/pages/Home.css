@@ -1,5 +1,8 @@
 /* B1 three-panel progressive disclosure (monitor-prototype-parity) — tokens only (PIT-258). */
-.monitor-home { display: flex; flex-direction: column; gap: var(--ms-space-3); min-height: 100%; }
+/* V18: page fills the viewport exactly (no document scrollbar); the wall grid scales
+   its rows to the remaining height instead of growing past the screen.
+   --monitor-chrome = app header + content padding, set per host app. */
+.monitor-home { display: flex; flex-direction: column; gap: var(--ms-space-3); height: calc(100vh - var(--monitor-chrome, 86px)); min-height: 0; overflow: hidden; }
 
 /* Top bar (V2 stage-bar): title + healthChip + LIVE clock + iconbtn region toggles */
 .mh-bar { display: flex; align-items: center; gap: var(--ms-space-3); flex-wrap: wrap; min-height: 52px; position: relative; z-index: 40; }
@@ -59,7 +62,7 @@
 .open-picker:hover { opacity: .9; }
 
 /* Center canvas: wall always visible (V2 padding 16) */
-.canvas { min-width: 0; display: flex; flex-direction: column; gap: var(--ms-space-2); padding: 16px; min-height: 0; }
+.canvas { min-width: 0; display: flex; flex-direction: column; gap: var(--ms-space-2); padding: 16px; min-height: 0; overflow: hidden; }
 .canvas-empty { padding: var(--ms-space-6); text-align: center; color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-sm); border: 1px dashed var(--ms-color-border); border-radius: var(--ms-radius-md); }
 
 /* Bottom collapsible Event feed */
@@ -129,7 +132,8 @@
 /* B2: grid columns set inline per layout; min-tile (230px) horizontal-scroll on narrow. V2 gap 12. */
 /* V16: uniform rows — live tiles used to be taller than empty slots (top bar + 16:9
    body vs pure 16:9), so rows misaligned. Rows now share 1fr and every cell fills. */
-.wall-grid { display: grid; gap: 12px; }
+/* V18: rows share the available height (grid fills its definite-height wrap). */
+.wall-grid { display: grid; gap: 12px; height: 100%; grid-auto-rows: minmax(0, 1fr); }
 /* V2 layout gallery combo (Synology-style thumbnails) */
 .layout-combo { position: relative; }
 .layout-gallery { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: var(--ms-space-2); display: grid; grid-template-columns: repeat(4, auto); gap: var(--ms-space-2); }
@@ -142,17 +146,17 @@
 .wall-wrap { position: relative; flex: 1; min-height: 0; }
 /* V6 (K10): empty-slot parity for 25/36/custom under cap16. */
 /* V8: empty slots are part of the dark video island (prototype look), honest placeholders. */
-.tile-empty { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/9; border: 1px solid var(--ms-color-border); background: var(--ms-palette-video-bg); border-radius: 0; color: rgba(255,255,255,.35); font-size: var(--ms-font-size-xs); font-family: var(--ms-font-family-mono); letter-spacing: 1px; }
+.tile-empty { display: flex; align-items: center; justify-content: center; height: 100%; border: 1px solid var(--ms-color-border); background: var(--ms-palette-video-bg); border-radius: 0; color: rgba(255,255,255,.35); font-size: var(--ms-font-size-xs); font-family: var(--ms-font-family-mono); letter-spacing: 1px; }
 /* V6 (I3): elastic column-weight drag handles. */
 .col-handle { position: absolute; top: 0; bottom: 0; width: 12px; margin-left: -6px; cursor: col-resize; z-index: 14; }
 .col-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: var(--ms-color-accent); opacity: 0; transition: opacity .12s; }
 .col-handle:hover::after, .col-handle:active::after { opacity: 1; }
-.wall-cell { position: relative; min-width: 0; min-height: 0; aspect-ratio: 16/9; }
+.wall-cell { position: relative; min-width: 0; min-height: 0; height: 100%; }
 .wall-cell .video-player-overlay.tile { width: 100%; height: 100%; }
 .wc-zoom { position: absolute; right: var(--ms-space-1); bottom: var(--ms-space-1); z-index: 15; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); width: 24px; height: 24px; cursor: pointer; font-size: var(--ms-font-size-sm); line-height: 1; }
 .wc-zoom:hover { background: var(--ms-color-surface-hover); }
 /* V9e: offline tile = dark video island (prototype), radius0 + SIGNAL LOST + slash. */
-.wall-offline { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--ms-space-2); aspect-ratio: 16/9; background: var(--ms-palette-video-bg); border: 1px solid var(--ms-color-border); border-radius: 0; color: rgba(255,255,255,.5); font-size: var(--ms-font-size-sm); overflow: hidden; }
+.wall-offline { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--ms-space-2); height: 100%; background: var(--ms-palette-video-bg); border: 1px solid var(--ms-color-border); border-radius: 0; color: rgba(255,255,255,.5); font-size: var(--ms-font-size-sm); overflow: hidden; }
 .wall-offline::before { content: '⊘'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 84px; color: rgba(255,255,255,.06); }
 .wo-title { position: relative; font-weight: 600; color: var(--ms-color-danger); letter-spacing: 2px; font-family: var(--ms-font-family-mono); }
 .wo-reason { position: relative; font-size: var(--ms-font-size-xs); color: rgba(255,255,255,.4); }

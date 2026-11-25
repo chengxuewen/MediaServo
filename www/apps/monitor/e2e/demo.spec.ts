@@ -56,3 +56,12 @@ test('1+5 featured layout geometry (big spans 2 cols, rows even)', async ({ page
   expect(geo.rowHSpread).toBeLessThanOrEqual(2);
   expect(geo.smallH).toBeGreaterThan(0);
 });
+
+// V18 guard: the monitor page must NOT scroll vertically — the wall scales to the
+// viewport (prototype behaviour) instead of growing a document scrollbar.
+test('monitor page has no vertical document scroll', async ({ page }) => {
+  await page.goto('/?demo=1');
+  await expect(page.locator('.wall-grid .video-player').first()).toBeVisible();
+  const s = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, ih: window.innerHeight }));
+  expect(s.sh).toBeLessThanOrEqual(s.ih + 1);
+});

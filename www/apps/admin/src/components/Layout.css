@@ -13,7 +13,7 @@
 .nav-item.dim { opacity: 0.5; }
 .nav-item.active { border-left-color: var(--ms-color-primary); color: var(--ms-color-primary); background: var(--ms-color-primary-soft); font-weight: 500; }
 
-.content { flex: 1; padding: 16px; overflow-y: auto; min-width: 0; }
+.content { flex: 1; padding: 16px; overflow-y: auto; min-width: 0; --monitor-chrome: 86px; /* 54 header + 2*16 padding (monitor page fills the rest) */ }
 
 /* P0 shell convergence: grouped navigation (tokens only) */
 .nav-group {
