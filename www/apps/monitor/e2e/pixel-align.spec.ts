@@ -29,6 +29,23 @@ test.describe('pixel alignment (rendered ink)', () => {
     expect(Math.abs(left.bottom - right.bottom)).toBeLessThanOrEqual(1);
   });
 
+  test('narrow viewport keeps the wall visible (rails become drawers)', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 860 }); // < 1024 -> drawer mode
+    await page.goto('/?demo=1');
+    const toolbar = page.locator('.wall-toolbar');
+    const grid = page.locator('.wall-grid');
+    await expect(toolbar).toBeVisible();
+    await expect(grid).toBeVisible();
+    const tb = (await toolbar.boundingBox())!;
+    const gb = (await grid.boundingBox())!;
+    expect(tb.width).toBeGreaterThan(300); // canvas not collapsed into a 0-width track
+    expect(gb.width).toBeGreaterThan(300);
+    expect(gb.height).toBeGreaterThan(200);
+    // drawers start closed on narrow (a stored desktop state must not cover the wall)
+    await expect(page.locator('.stream-rail')).toBeHidden();
+    await expect(page.locator('.mon-alerts')).toBeHidden();
+  });
+
   test('stage-bar never clips or wraps when the canvas is narrow', async ({ page }) => {
     await page.setViewportSize({ width: 1024, height: 800 }); // both rails open -> narrow canvas
     await page.goto('/?demo=1');

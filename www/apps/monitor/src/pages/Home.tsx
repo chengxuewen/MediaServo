@@ -55,6 +55,10 @@ function loadRegions() {
   // V3 (L5): narrow defaults to both drawers CLOSED (prototype), so they don't cover
   // the topbar; wide defaults open. Stored preference wins when present.
   const narrow = window.matchMedia('(max-width: 1023px)').matches;
+  // V27: on narrow screens a stored desktop state must NOT reopen both drawers at once
+  // (they float over the wall and hide it). Narrow always starts closed; the stage-bar
+  // toggles stay mutually exclusive.
+  if (narrow) return { left: false, right: false, bottom: false };
   try {
     const raw = localStorage.getItem(REGION_KEY);
     if (raw) { const v = JSON.parse(raw); return { left: v.left !== false, right: v.right !== false, bottom: v.bottom !== false }; }
