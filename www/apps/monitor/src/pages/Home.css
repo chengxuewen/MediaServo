@@ -1,5 +1,5 @@
 /* B1 three-panel progressive disclosure (monitor-prototype-parity) — tokens only (PIT-258). */
-.monitor-home { display: flex; flex-direction: column; gap: var(--ms-space-3); }
+.monitor-home { display: flex; flex-direction: column; gap: var(--ms-space-3); min-height: 100%; }
 
 /* Top bar (V2 stage-bar): title + healthChip + LIVE clock + iconbtn region toggles */
 .mh-bar { display: flex; align-items: center; gap: var(--ms-space-3); flex-wrap: wrap; min-height: 52px; position: relative; z-index: 40; }
@@ -33,7 +33,7 @@
 .mh-note { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); margin: 0; }
 
 /* Three-panel: left stream rail | center canvas (wall) | right alerts */
-.monitor-three-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0; align-items: stretch; }
+.monitor-three-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0; align-items: stretch; flex: 1; min-height: 0; }
 .stream-rail, .mon-alerts { background: var(--ms-color-surface); overflow: hidden; transition: width .18s; display: flex; flex-direction: column; }
 .stream-rail { border: 0; border-right: 1px solid var(--ms-color-border); border-radius: 0; }
 .mon-alerts { border: 0; border-left: 1px solid var(--ms-color-border); border-radius: 0; }
@@ -54,7 +54,7 @@
 .open-picker:hover { opacity: .9; }
 
 /* Center canvas: wall always visible (V2 padding 16) */
-.canvas { min-width: 0; display: flex; flex-direction: column; gap: var(--ms-space-2); padding: 16px; }
+.canvas { min-width: 0; display: flex; flex-direction: column; gap: var(--ms-space-2); padding: 16px; min-height: 0; }
 .canvas-empty { padding: var(--ms-space-6); text-align: center; color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-sm); border: 1px dashed var(--ms-color-border); border-radius: var(--ms-radius-md); }
 
 /* Bottom collapsible Event feed */
@@ -132,7 +132,7 @@
 .lo-grid { display: grid; gap: 2px; width: 48px; height: 32px; }
 .lo-cell { background: var(--ms-color-border-strong); border-radius: 1px; }
 .lo-thumb[aria-selected="true"] .lo-cell, .lo-cell.big { background: var(--ms-color-accent); }
-.wall-wrap { position: relative; }
+.wall-wrap { position: relative; flex: 1; min-height: 0; }
 /* V6 (K10): empty-slot parity for 25/36/custom under cap16. */
 /* V8: empty slots are part of the dark video island (prototype look), honest placeholders. */
 .tile-empty { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/9; border: 1px solid var(--ms-color-border); background: var(--ms-palette-video-bg); border-radius: 0; color: rgba(255,255,255,.35); font-size: var(--ms-font-size-xs); font-family: var(--ms-font-family-mono); letter-spacing: 1px; }

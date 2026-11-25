@@ -55,9 +55,20 @@ try {
   await pp.close();
 
   // Implementation. demo = labeled preview (like-for-like data); real = honest live state.
-  const ctx = await browser.newContext({ viewport: VP, storageState: path.join(SUB, 'www/apps/monitor/.auth/admin.json') });
+  // VISUAL_INSHELL=1 compares the REAL product (admin /monitor inside the shell) — same
+  // 230px nav context as the prototype — instead of the standalone app.
+  const INSHELL = !!process.env.VISUAL_INSHELL;
+  let token = '';
+  if (INSHELL) {
+    try {
+      const s = JSON.parse(fs.readFileSync(path.join(SUB, 'www/apps/monitor/.auth/admin.json'), 'utf8'));
+      for (const o of s.origins ?? []) for (const kv of o.localStorage ?? []) if (kv.name === 'mediaservo_admin_token') token = kv.value;
+    } catch { /* no token */ }
+  }
+  const ctx = await browser.newContext({ viewport: VP, storageState: INSHELL ? undefined : path.join(SUB, 'www/apps/monitor/.auth/admin.json') });
+  if (INSHELL) await ctx.addInitScript((t) => { try { localStorage.setItem('mediaservo_admin_token', t); } catch { /* silent */ } }, token);
   const ip = await ctx.newPage();
-  await ip.goto(APP + (mode === 'demo' ? '?demo=1' : ''));
+  await ip.goto(INSHELL ? `${APP}/monitor${mode === 'demo' ? '?demo=1' : ''}` : APP + (mode === 'demo' ? '?demo=1' : ''));
   await ip.waitForSelector('.monitor-home');
   await ip.waitForTimeout(400);
   const implBuf = await ip.screenshot();
@@ -83,10 +94,11 @@ try {
   const mismatch = pixelmatch(ca.data, cb.data, diff.data, w, h, { threshold: 0.1 });
   const pct = (100 * mismatch / (w * h)).toFixed(1);
 
+  const tag = INSHELL ? 'inshell' : mode;
   fs.writeFileSync(path.join(OUT, `proto-${page}.png`), protoBuf);
-  fs.writeFileSync(path.join(OUT, `impl-${page}-${mode}.png`), implBuf);
-  fs.writeFileSync(path.join(OUT, `diff-${page}-${mode}.png`), PNG.sync.write(diff));
-  const report = { page, mode, viewport: VP, mismatchPixels: mismatch, mismatchPct: Number(pct), layoutLedger: ledger, note: 'pixel % dominated by global shell + video content (data); use layoutLedger (region geometry, video-agnostic) for CRITICAL layout diffs per C3.' };
-  fs.writeFileSync(path.join(OUT, `report-${page}-${mode}.json`), JSON.stringify(report, null, 2));
+  fs.writeFileSync(path.join(OUT, `impl-${page}-${tag}.png`), implBuf);
+  fs.writeFileSync(path.join(OUT, `diff-${page}-${tag}.png`), PNG.sync.write(diff));
+  const report = { page, mode: tag, viewport: VP, mismatchPixels: mismatch, mismatchPct: Number(pct), layoutLedger: ledger, note: 'pixel % dominated by global shell + video content (data); use layoutLedger (region geometry, video-agnostic) for CRITICAL layout diffs per C3.' };
+  fs.writeFileSync(path.join(OUT, `report-${page}-${tag}.json`), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ ...report, layoutLedger: ledger.map((l) => `${l.region}:${l.critical ? 'CRIT' : l.shellOffset ? 'shell' : 'ok'}${l.heightDelta != null ? `(h${l.heightDelta}/w${l.widthDelta})` : ''}`) }));
 } finally { await browser.close(); }
