@@ -7,13 +7,14 @@ test.describe.serial('Monitor picker (B3)', () => {
     await page.goto('/');
     await openPicker(page);
     await expect(page.locator('[role="tree"]')).toBeVisible();
-    await expect(page.locator('.picker-search')).toBeVisible();
+    const search = page.getByLabel('Search streams');
+    await expect(search).toBeVisible();
     await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
 
     // search filters to zero, then back
-    await page.locator('.picker-search').fill('zzz-no-match');
+    await search.fill('zzz-no-match');
     await expect(page.locator('[role="treeitem"]')).toHaveCount(0);
-    await page.locator('.picker-search').fill('');
+    await search.fill('');
     await expect(page.locator('[role="treeitem"]').first()).toBeVisible();
 
     // keyboard: focus the tree, Enter toggles the focused item into chosen
