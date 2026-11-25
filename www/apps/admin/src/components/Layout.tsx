@@ -12,6 +12,17 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const notices = (location.state as { notice?: string } | null)?.notice;
+  // V21 (prototype nav): collapsible sidebar -> 58px icon rail; auto-rail at <=900px.
+  const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem('msrv_nav_collapsed') === '1'; } catch { return false; } });
+  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const on = () => setNarrow(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  const navMin = navCollapsed || narrow;
+  useEffect(() => { try { localStorage.setItem('msrv_nav_collapsed', navCollapsed ? '1' : '0'); } catch { /* silent */ } }, [navCollapsed]);
   // T8 weaknet panel entry card: probe once per mount (HEAD /weaknet/v1/capabilities), no polling.
   // Bucket table (design D4, revised in the 2026-09-11 de-noise pass): after the read-only capabilities exemption, 2xx+json = alive;
   // 2xx+html = SPA fallback false-positive (reverse-proxy block missing) / other 4xx (old serve 401/Host gate 403) = also alive / 5xx|reject = down.
@@ -49,15 +60,20 @@ export default function Layout() {
           )}
         </div>
       </header>
-      <div className="main">
+      <div className={`main${navMin ? ' nav-min' : ''}`}>
         <nav className="sidebar" aria-label="primary">
           <div className="nav-head">
             <span className="nav-title">Navigation</span>
+            <button className="nav-collapse" onClick={() => setNavCollapsed((c) => !c)}
+              title={navMin ? 'Expand navigation' : 'Collapse navigation'}
+              aria-label={navMin ? 'Expand navigation' : 'Collapse navigation'} aria-expanded={!navMin}>
+              {navMin ? '›' : '‹'}
+            </button>
           </div>
           <div className="nav-group">
             <span className="nav-group-label">Overview</span>
-            <NavLink to="/" end className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <LayoutDashboard size={15} /> Overview
+            <NavLink to="/" end title="Overview" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <LayoutDashboard size={15} /><span className="nav-label">Overview</span>
             </NavLink>
           </div>
           <div className="nav-group">
@@ -65,50 +81,50 @@ export default function Layout() {
             {/* D11=B: prototype shape kept; unavailable domains are disabled WITH a reason */}
             {canMonitor ? (
               <NavLink to="/monitor" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'} title="Monitor: realtime surveillance wall (in-shell)">
-                <MonitorCog size={15} /> Monitor
+                <MonitorCog size={15} /><span className="nav-label">Monitor</span>
               </NavLink>
             ) : (
               <span className="nav-item disabled" title="Monitor: requires admin/dispatcher" aria-disabled="true">
-                <MonitorCog size={15} /> Monitor
+                <MonitorCog size={15} /><span className="nav-label">Monitor</span>
               </span>
             )}
             <span className="nav-item disabled" title="Recording: deferred until recording-recon unlocks RECORDING_READY" aria-disabled="true">
-              <FileAudio size={15} /> Recording
+              <FileAudio size={15} /><span className="nav-label">Recording</span>
             </span>
           </div>
           <div className="nav-group">
             <span className="nav-group-label">Communication</span>
             {canMonitor && (
-              <NavLink to="/intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-                <Radio size={15} /> Intercom
+              <NavLink to="/intercom" title="Intercom" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+                <Radio size={15} /><span className="nav-label">Intercom</span>
                 {heldCount > 0 && <span className="nav-badge">{heldCount}</span>}
               </NavLink>
             )}
             <span className="nav-item disabled" title="Meeting: deferred (board B-M1 pending)" aria-disabled="true">
-              <Users size={15} /> Meeting
+              <Users size={15} /><span className="nav-label">Meeting</span>
             </span>
           </div>
           <div className="nav-group">
             <span className="nav-group-label">Control</span>
             <span className="nav-item disabled" title="Remote: deferred (board B-R1 + B-lease server batch)" aria-disabled="true">
-              <Sliders size={15} /> Remote
+              <Sliders size={15} /><span className="nav-label">Remote</span>
             </span>
           </div>
           <div className="nav-group">
             <span className="nav-group-label">Administration</span>
             {/* D12=A: one Admin entry; spokes live inside the hub */}
-            <NavLink to="/admin" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
-              <SettingsIcon size={15} /> Admin
+            <NavLink to="/admin" title="Admin" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'}>
+              <SettingsIcon size={15} /><span className="nav-label">Admin</span>
             </NavLink>
             {showWnet && (
               <a href="/weaknet/" target="_blank" rel="noopener noreferrer"
                  className={wnet ? 'nav-item dim' : 'nav-item'}
-                 title={wnet === 'no-proxy' ? 'Reverse-proxy block missing (check Caddy)' : wnet === 'down' ? 'weaknet serve not running' : undefined}>
-                <Sliders size={15} /> Weaknet Panel
+                 title={wnet === 'no-proxy' ? 'Reverse-proxy block missing (check Caddy)' : wnet === 'down' ? 'weaknet serve not running' : 'Weaknet Panel'}>
+                <Sliders size={15} /><span className="nav-label">Weaknet Panel</span>
               </a>
             )}
           </div>
-          <div className="nav-foot">v0.1.0 · admin</div>
+          <div className="nav-foot"><span>v0.1.0 · admin</span></div>
         </nav>
         <main className="content">
           <Outlet />

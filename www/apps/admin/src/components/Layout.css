@@ -102,3 +102,22 @@
   border-bottom-color: var(--ms-color-accent);
   font-weight: var(--ms-font-weight-semibold);
 }
+
+/* V21 (prototype nav): collapsible sidebar -> 58px icon rail (--nav-w-min), and an
+   automatic rail at <=900px (prototype media rule). Labels/badges/groups hide,
+   items centre; every item keeps a title tooltip. */
+.sidebar { transition: width .18s ease; }
+.nav-collapse { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; line-height: 1; font-size: 14px; }
+.nav-collapse:hover { border-color: var(--ms-color-accent); color: var(--ms-color-accent); }
+.nav-badge { margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--ms-color-danger); color: var(--ms-color-text-inverse); font-size: 10px; display: inline-flex; align-items: center; justify-content: center; }
+.main.nav-min .sidebar { width: 58px; }
+.main.nav-min .nav-title, .main.nav-min .nav-label, .main.nav-min .nav-badge, .main.nav-min .nav-group-label, .main.nav-min .nav-foot span { display: none; }
+.main.nav-min .nav-head { justify-content: center; padding-inline: 0; }
+.main.nav-min .nav-item { justify-content: center; padding-inline: 0; }
+@media (max-width: 900px) {
+  .sidebar { width: 58px; }
+  .nav-title, .nav-label, .nav-badge, .nav-group-label, .nav-foot span { display: none; }
+  .nav-head, .nav-item { justify-content: center; }
+  .nav-head { padding-inline: 0; }
+  .nav-item { padding-inline: 0; }
+}
