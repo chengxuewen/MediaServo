@@ -8,7 +8,7 @@
 // a parent workspace can point it at the workspace root instead of this repo.
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -115,8 +115,42 @@ if (spec.kind === 'pixi') {
     if (res.status !== 0) process.exit(res.status ?? 1)
   }
 
-  spawnAndExit(binPath, spec.args || [], { stdio: 'inherit', cwd: PROJECT })
+  spawnAndExit(binPath, resolveBrowsers(spec), { stdio: 'inherit', cwd: PROJECT })
 } else {
   console.error(`[mcp-serve] unsupported kind "${spec.kind}" for ${name}`)
   process.exit(2)
+}
+
+// --- pinned-browser resolution -------------------------------------------
+// For npm specs declaring `browsers` (e.g. local-playwright), resolve the
+// bundled chromium executable dynamically from the playwright cache instead
+// of a hardcoded --executable-path (which broke on cache clears and new
+// machines). `playwright install` may refuse unsupported hosts (ubuntu20.04);
+// any cached chromium-* build works via --executable-path, and an explicit
+// path already in args (or PLAYWRIGHT_CHROMIUM_EXECUTABLE) always wins.
+function resolveBrowsers(spec) {
+  const args = [...(spec.args || [])]
+  if (!spec.browsers || !spec.browsers.includes('chromium')) return args
+  if (args.includes('--executable-path')) return args
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE) {
+    return [...args, '--executable-path', process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE]
+  }
+  const base = process.env.PLAYWRIGHT_BROWSERS_PATH
+    || join(process.env.HOME || '', '.cache', 'ms-playwright')
+  let found = null
+  try {
+    const entries = readdirSync(base)
+      .filter((d) => /^chromium-\d+$/.test(d))
+      .sort((a, b) => parseInt(b.slice(9), 10) - parseInt(a.slice(9), 10))
+    for (const dir of entries) {
+      for (const sub of ['chrome-linux64', 'chrome-linux']) {
+        const exe = join(base, dir, sub, 'chrome')
+        if (existsSync(exe)) { found = exe; break }
+      }
+      if (found) break
+    }
+  } catch { /* cache absent */ }
+  if (found) return [...args, '--executable-path', found]
+  console.error(`[mcp-serve] no bundled chromium in ${base}; run: ./msrtc.sh mcp setup`)
+  return args
 }

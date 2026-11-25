@@ -36,6 +36,13 @@ def npm_bin():
     return shutil.which("npm") or "npm"
 
 
+def node_bin():
+    candidate = os.path.join(ROOT, ".pixi", "envs", "default", "bin", "node")
+    if os.path.isfile(candidate):
+        return candidate
+    return shutil.which("node") or "node"
+
+
 def node_env():
     # npm and the installed npm bins (codegraph, playwright-mcp) use
     # `#!/usr/bin/env node` shebangs: resolving the npm path alone is not
@@ -126,14 +133,48 @@ def install_npm(name, spec) -> int:
     current = npm_version(name, spec)
     if current == spec["version"]:
         print(f"{PREFIX} {name:16s} npm {spec['version']} already installed")
+        rc = 0
+    else:
+        print(f"{PREFIX} {name:16s} installing {spec['pkg']}@{spec['version']} ...")
+        proc = subprocess.run(
+            [npm_bin(), "install", "--no-save", "--no-package-lock",
+             "--prefix", prefix, f"{spec['pkg']}@{spec['version']}"],
+            cwd=HERE, env={**node_env(), "npm_config_cache": NPM_CACHE},
+            stdin=subprocess.DEVNULL, check=False)
+        rc = proc.returncode
+    if rc:
+        return rc
+    # Pinned browsers (registry `browsers` list, e.g. playwright's chromium):
+    # `playwright install` is idempotent and fetches the build matching the
+    # pinned package -- replacing the old hardcoded --executable-path, which
+    # broke on cache clears and new machines. No --with-deps: OS-level apt
+    # deps are outside the gate (ubuntu20.04 is unsupported; this box already
+    # has a system chromium's shared libs the bundled one can run against).
+    if spec.get("browsers"):
+        bin_dir = os.path.join(prefix, "node_modules", ".bin")
+        rc2 = 0
+        for tool in ("playwright", "playwright-core"):
+            pw = os.path.join(bin_dir, tool)
+            if os.path.isfile(pw):
+                print(f"{PREFIX} {name:16s} installing browsers: {', '.join(spec['browsers'])} ...")
+                proc = subprocess.run(
+                    [node_bin(), pw, "install", *spec["browsers"]],
+                    cwd=HERE, env=node_env(),
+                    stdin=subprocess.DEVNULL, check=False)
+                rc2 = proc.returncode
+                break
+        if rc2:
+            # Refusals here are host-support refusals (e.g. playwright refusing
+            # ubuntu20.04), not pin failures. The serve side resolves any
+            # cached chromium-* build via --executable-path, so setup stays
+            # green and the runtime fallback chain (cache -> env -> error
+            # hint) does the real work.
+            print(f"{PREFIX} {name:16s} browser install refused/failed (rc={rc2}); "
+                  f"serve-side cache resolution will pick up any cached chromium")
+        else:
+            print(f"{PREFIX} {name:16s} browsers ready ({', '.join(spec['browsers'])})")
         return 0
-    print(f"{PREFIX} {name:16s} installing {spec['pkg']}@{spec['version']} ...")
-    proc = subprocess.run(
-        [npm_bin(), "install", "--no-save", "--no-package-lock",
-         "--prefix", prefix, f"{spec['pkg']}@{spec['version']}"],
-        cwd=HERE, env={**node_env(), "npm_config_cache": NPM_CACHE},
-        stdin=subprocess.DEVNULL, check=False)
-    return proc.returncode
+    return 0
 
 
 def install_pixi(spec) -> int:
