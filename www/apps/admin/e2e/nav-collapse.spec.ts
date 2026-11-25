@@ -46,16 +46,26 @@ test('header shows the current page name beside the brand', async ({ page }) => 
   // V22c: vertical rule spans the bar and the label is vertically centred with the brand.
   const geo = await page.evaluate(() => {
     const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
-    const logo = b('.header .logo'); const page2 = b('.header-page'); const head = b('.header');
+    const rule = b('.header-rule'); const head = b('.header');
+    // baseline of the brand text vs the page label (Range rect bottoms differ by ascent;
+    // comparing baseline via same line box is the practical check)
+    const baseline = (sel: string) => {
+      const el = document.querySelector(sel)!;
+      const r = document.createRange(); r.selectNodeContents(el);
+      const rect = r.getBoundingClientRect();
+      const lh = parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize);
+      return rect.bottom - Math.max(0, lh - parseFloat(getComputedStyle(el).fontSize)) / 2;
+    };
     return {
-      cyDelta: Math.abs((logo.top + logo.height / 2) - (page2.top + page2.height / 2)),
-      ruleSpans: Math.round(page2.height) >= Math.round(head.height) - 1,
-      border: getComputedStyle(document.querySelector('.header-page')!).borderLeftWidth,
+      ruleSpans: Math.abs(Math.round(rule.height) - Math.round(head.height)) <= 1,
+      ruleWidth: getComputedStyle(document.querySelector('.header-rule')!).width,
+      align: getComputedStyle(document.querySelector('.header-left')!).alignItems,
+      baselineDelta: Math.abs(baseline('.logo-text') - baseline('.header-page')),
     };
   });
-  expect(geo.cyDelta).toBeLessThanOrEqual(2);
   expect(geo.ruleSpans).toBe(true);
-  expect(geo.border).toBe('1px');
+  expect(geo.ruleWidth).toBe('1px');
+  expect(geo.align).toBe('baseline');
   // hierarchy: the page name must be visibly smaller than the brand
   const sizes = await page.evaluate(() => ({
     brand: parseFloat(getComputedStyle(document.querySelector('.header .logo')!).fontSize),

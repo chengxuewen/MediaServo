@@ -62,7 +62,8 @@ export default function Layout() {
       {notices && <div className="notice-banner">ℹ️ {notices}</div>}
       <header className="header">
         <div className="header-left">
-          <span className="logo"><span className="logo-mark" aria-hidden="true"><Radio size={16} /></span> MediaServo</span>
+          <span className="logo"><span className="logo-mark" aria-hidden="true"><Radio size={16} /></span><span className="logo-text">MediaServo</span></span>
+          <span className="header-rule" aria-hidden="true" />
           <span className="header-page" aria-current="page">{pageLabel}</span>
         </div>
         <div className="header-right">
