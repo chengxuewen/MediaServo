@@ -158,6 +158,7 @@ clang-tools = "23.*"
 [feature.serena.tasks]
 mcp-serena = "bash scripts/agents/serena-launch.sh"
 mcp-probe = "python3 scripts/agents/mcp_probe.py"  # end-to-end: real browser_navigate snapshot
+mcp-selftest = "python3 scripts/agents/mcp_selftest.py"  # full acceptance incl. negative proofs
 
 [environments]
 runtime = { features = ["media"] }
