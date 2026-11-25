@@ -8,7 +8,6 @@ import { useStreams } from '../hooks/useStreams';
 import { useAudit } from '../hooks/useAudit';
 import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
-import Timeline from '../components/Timeline';
 import PlaybackBar from '../components/PlaybackBar';
 import { isDemo, DEMO_PRODUCERS, DEMO_PLAYING, DEMO_EVENTS } from '../demo';
 import { PanelLeft, Bell, Rows3 } from 'lucide-react';
@@ -61,8 +60,8 @@ function loadRegions() {
     const raw = localStorage.getItem(REGION_KEY);
     if (raw) { const v = JSON.parse(raw); return { left: v.left !== false, right: v.right !== false, bottom: v.bottom !== false }; }
   } catch { /* fall through */ }
-  // V4 (I7): prototype desktop defaults left-open / right-CLOSED / bottom-open.
-  return { left: !narrow, right: false, bottom: true };
+  // Prototype desktop: left-open, RIGHT ALERTS OPEN, bottom playback open. Narrow: closed.
+  return { left: !narrow, right: !narrow, bottom: true };
 }
 function wsServerUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -296,14 +295,6 @@ export default function Home() {
         <span className="live-clock"><span className="live-dot" aria-hidden="true" />LIVE {clock.toLocaleTimeString('en-GB', { hour12: false })}</span>
         <button className={`demo-toggle${demo ? ' on' : ''}`} aria-pressed={demo} onClick={() => { try { localStorage.setItem('ms_demo', demo ? '0' : '1'); } catch { /* silent */ } window.location.reload(); }} title="Toggle labeled simulated preview">Demo</button>
         <button className="theme-toggle" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Toggle light/dark theme" title="Toggle theme">{theme === 'dark' ? '☀' : '◐'}</button>
-        <div className="region-toggles">
-          <button aria-pressed={regions.left} onClick={() => toggleRegion('left')} title="Toggle stream rail" aria-label="Toggle stream rail"><PanelLeft size={15} /></button>
-          <button aria-pressed={regions.right} onClick={() => toggleRegion('right')} title="Toggle alert panel" aria-label="Toggle alert panel">
-            <Bell size={15} />
-            {alertCount > 0 && <span className="al-badge" aria-label={`${alertCount} alerts`}>{alertCount}</span>}
-          </button>
-          <button aria-pressed={regions.bottom} onClick={() => toggleRegion('bottom')} title="Toggle event feed" aria-label="Toggle event feed"><Rows3 size={15} /></button>
-        </div>
       </div>
       <p className="mh-note" role="note">
         Signed in as {username ?? 'unknown'}{role ? ` [${role}]` : ''}. {canMonitor ? '' : 'Wall access requires admin/dispatcher. '}Cap {MAX_PLAYING}; PSK host rooms are single-producer. Alert panel at right; playback scrubber/Recording deferred.
@@ -352,6 +343,14 @@ export default function Home() {
 
         <div className="canvas">
           <div className="wall-toolbar">
+                <div className="region-toggles">
+                  <button aria-pressed={regions.left} onClick={() => toggleRegion('left')} title="Toggle stream rail" aria-label="Toggle stream rail"><PanelLeft size={15} /></button>
+                  <button aria-pressed={regions.right} onClick={() => toggleRegion('right')} title="Toggle alert panel" aria-label="Toggle alert panel">
+                    <Bell size={15} />
+                    {alertCount > 0 && <span className="al-badge" aria-label={`${alertCount} alerts`}>{alertCount}</span>}
+                  </button>
+                  <button aria-pressed={regions.bottom} onClick={() => toggleRegion('bottom')} title="Toggle playback bar" aria-label="Toggle playback bar"><Rows3 size={15} /></button>
+                </div>
                 <div className="layout-combo">
                   <button id="layout-menu" className="layout-menu" aria-haspopup="listbox" aria-expanded={galleryOpen} onClick={() => setGalleryOpen((o) => !o)}>
                     Layout · {layoutId === 'auto' ? 'Auto' : findLayout(layoutId).name} ▾
@@ -437,12 +436,11 @@ export default function Home() {
 
       <div className={`bottom-zone${regions.bottom ? '' : ' collapsed'}`}>
         <div className="rail-head">
-          <span className="rail-title">Event feed</span>
+          <span className="rail-title">Playback</span>
           <button className="region-collapse" onClick={() => toggleRegion('bottom')} aria-label={regions.bottom ? 'Hide bottom panel' : 'Show bottom panel'}>{regions.bottom ? '⌄' : '⌃'}</button>
         </div>
         <div className="rail-body">
           <PlaybackBar events={events} demo={demo} />
-          <Timeline events={events} loading={audit.loading} error={audit.error} refetch={audit.refetch} />
         </div>
       </div>
 

@@ -34,7 +34,7 @@
 
 /* Three-panel: left stream rail | center canvas (wall) | right alerts */
 .monitor-three-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0; align-items: stretch; }
-.stream-rail, .mon-alerts { background: var(--ms-color-surface); overflow: hidden; transition: width .18s; }
+.stream-rail, .mon-alerts { background: var(--ms-color-surface); overflow: hidden; transition: width .18s; display: flex; flex-direction: column; }
 .stream-rail { border: 0; border-right: 1px solid var(--ms-color-border); border-radius: 0; }
 .mon-alerts { border: 0; border-left: 1px solid var(--ms-color-border); border-radius: 0; }
 .stream-rail { width: 248px; }
@@ -48,7 +48,8 @@
 .region-collapse { background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); width: 24px; height: 24px; cursor: pointer; font-size: var(--ms-font-size-sm); line-height: 1; }
 .region-collapse:hover { background: var(--ms-color-surface-hover); }
 .rail-body { padding: var(--ms-space-2); }
-.stream-rail .rail-body { max-height: 70vh; overflow: auto; }
+/* V9f (1): the selected-stream list fills to the bottom and scrolls (foot pinned). */
+.stream-rail .rail-body { flex: 1; min-height: 0; overflow-y: auto; }
 .open-picker { display: block; width: 100%; background: var(--ms-color-accent); color: var(--ms-color-text-inverse); border: 0; border-radius: var(--ms-radius-sm); padding: var(--ms-space-2); font-size: var(--ms-font-size-sm); cursor: pointer; margin-bottom: var(--ms-space-2); }
 .open-picker:hover { opacity: .9; }
 
@@ -97,7 +98,8 @@
 /* V3 (L5): narrow = overlay drawers + pin; mutual exclusion handled in toggleRegion. */
 @media (max-width: 1199px) {
   .monitor-three-panel { grid-template-columns: 1fr; }
-  .stream-rail, .mon-alerts { position: fixed; top: 0; bottom: 0; z-index: 30; width: min(248px, 82vw); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
+  /* V9f (2): drawers start BELOW the stage-bar so the top-left region toggles stay visible. */
+  .stream-rail, .mon-alerts { position: fixed; top: 128px; bottom: 0; z-index: 30; width: min(248px, 82vw); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
   .stream-rail { left: 0; }
   .mon-alerts { right: 0; width: min(300px, 86vw); }
   .stream-rail.collapsed, .mon-alerts.collapsed { display: none; }
