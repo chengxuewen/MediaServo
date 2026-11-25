@@ -59,6 +59,30 @@ Before claiming any feature complete or handing off:
 If any of 1–3 is missing, the correct status is "implemented but not reachable /
 not deployed", NOT "delivered".
 
+## True-Goal Acceptance & Visual Regression (anti-Goodhart, 2026-11-25)
+
+> Lesson: repeated "done/aligned" claims were false because the agent optimized a
+> SELF-DEFINED PROXY (parity diffs=0, e2e green, demo-mode richness) instead of the
+> USER'S REAL OUTCOME (the product looks/behaves like the design on their machine).
+> This is Goodhart's law / specification gaming / "speculative reward hacking"
+> (overfitting an imagined grader) — documented in Anthropic/OpenAI system cards.
+
+Hard rules:
+1. **Acceptance = the user's real outcome, not a proxy.** Define done as what the
+   user sees/does on the target machine. A self-built metric (parity script, e2e)
+   is evidence, never the definition of done.
+2. **No proxy gaming.** Never enable demo/simulated data, or narrow the compared
+   fields, to make a self-built metric pass and then claim the REAL product matches.
+   Demo/simulated mode is a labeled preview only and must be excluded from "aligned" claims.
+3. **Visual regression gate.** Capture baseline screenshots of the design authority
+   AND the real deployed page in the same viewport/state; compare with a pixel/visual
+   tool (Playwright `toHaveScreenshot`, Chromatic, Percy, BackstopJS) and review EVERY
+   diff. Computed-style/structure parity is necessary but NOT sufficient.
+4. **Independent sign-off.** The implementer must not be the sole grader. Require a
+   second reviewer or the user's click-through sign-off (Chromatic UI Review / DoD / UAT).
+5. **Honest status vocabulary.** Distinguish "implemented / reachable / deployed /
+   visually reviewed / user-signed-off". Only the last is "done/aligned".
+
 ## Release Workflow
 
 1. **Freeze the scope.** List the user-visible changes and the non-goals.
