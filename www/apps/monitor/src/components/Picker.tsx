@@ -24,6 +24,7 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
   const [query, setQuery] = useState('');
   const [selQuery, setSelQuery] = useState('');
   const [chosen, setChosen] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [focusIdx, setFocusIdx] = useState(0);
 
   const q = query.trim().toLowerCase();
@@ -44,6 +45,8 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
     const ids = roomStreams(room).map((p) => p.id);
     setChosen((prev) => (ids.every((i) => prev.includes(i)) ? prev.filter((i) => !ids.includes(i)) : [...prev, ...ids.filter((i) => !prev.includes(i))]));
   };
+  const toggleExpand = (room: string) => setExpanded((prev) => { const n = new Set(prev); n.has(room) ? n.delete(room) : n.add(room); return n; });
+  const toggleStream = (id: string) => setChosen((prev) => (prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]));
   const move = (idx: number, dir: -1 | 1) => setChosen((prev) => { const n = [...prev]; const t = idx + dir; if (t < 0 || t >= n.length) return prev; [n[idx], n[t]] = [n[t], n[idx]]; return n; });
   const remove = (id: string) => setChosen((prev) => prev.filter((i) => i !== id));
 
@@ -83,19 +86,34 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
           <div ref={availRef} className="picker-avail" role="tree" aria-label="Available streams" aria-multiselectable="true" tabIndex={0} onKeyDown={onKey}>
             {rooms.length === 0 && <div className="picker-empty">No available streams match.</div>}
             {rooms.map((room) => {
-              const list = roomStreams(room); const st = roomStatus(room); const i = flat++;
+              const list = roomStreams(room); const st = roomStatus(room); const open = expanded.has(room); const i = flat++;
               return (
                 <div key={room} className="st-group">
-                  <div role="treeitem" aria-selected={allChosen(room)} tabIndex={i === focusIdx ? 0 : -1}
+                  <div role="treeitem" aria-selected={allChosen(room)} aria-expanded={open} tabIndex={i === focusIdx ? 0 : -1}
                     className={`picker-dev${allChosen(room) ? ' chosen' : ''}${i === focusIdx ? ' focused' : ''}`}
                     onClick={() => toggleRoom(room)}>
+                    <button className="pick-caret" aria-label={open ? 'Collapse' : 'Expand'} aria-expanded={open}
+                      onClick={(e) => { e.stopPropagation(); toggleExpand(room); }}>{open ? '▾' : '▸'}</button>
                     <input type="checkbox" readOnly checked={allChosen(room)} tabIndex={-1} aria-hidden="true" />
                     <span className="st-device-name">{room}</span>
                     <span className="picker-dev-count">{list.length}/{list.length}</span>
                     <span className={`pick-status ${st}`}><span className="pick-dot" aria-hidden="true" />{st}</span>
                     <button className="st-play-all" title="Play all streams of this device" onClick={(e) => { e.stopPropagation(); onPlay(room); onClose(); }}>Play</button>
                   </div>
-                  <div className="picker-dev-streams">{list.map((p) => <span key={p.id} className="picker-dev-stream">{p.kind} · {p.peer_id}</span>)}</div>
+                  {open && (
+                    <div className="picker-dev-streams">
+                      {list.map((p) => {
+                        const on = chosen.includes(p.id); const s = statusOf(p.score);
+                        return (
+                          <div key={p.id} className={`picker-child${on ? ' chosen' : ''}`} onClick={() => toggleStream(p.id)}>
+                            <input type="checkbox" readOnly checked={on} tabIndex={-1} aria-hidden="true" />
+                            <span className="picker-child-name">{p.kind} · {p.peer_id}</span>
+                            <span className={`pick-status ${s}`}><span className="pick-dot" aria-hidden="true" />{s}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}

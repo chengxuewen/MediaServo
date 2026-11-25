@@ -23,7 +23,15 @@
 .picker-dev-count { font-size: 11px; color: var(--ms-color-text-tertiary); font-variant-numeric: tabular-nums; }
 .st-play-all { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: 6px; padding: 0 8px; height: 22px; font-size: 11px; cursor: pointer; }
 .st-play-all:hover { border-color: var(--ms-color-accent); color: var(--ms-color-accent); }
-.picker-dev-streams { display: none; }
+.pick-caret { width: 18px; height: 18px; border: 0; background: none; color: var(--ms-color-text-tertiary); cursor: pointer; font-size: 11px; line-height: 1; padding: 0; }
+.pick-caret:hover { color: var(--ms-color-text); }
+/* expanded child streams (prototype: indented rows with checkbox + name + status dot) */
+.picker-dev-streams { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 0 22px; }
+.picker-child { display: flex; align-items: center; gap: var(--ms-space-2); padding: 5px var(--ms-space-2); border: 1px solid var(--ms-color-border); border-radius: 6px; background: var(--ms-color-surface); cursor: pointer; font-size: var(--ms-font-size-sm); }
+.picker-child:hover { background: var(--ms-color-surface-hover); }
+.picker-child.chosen { border-color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
+.picker-child input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--ms-color-accent); }
+.picker-child-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* status word + dot (shape+color, prototype) */
 .pick-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--ms-color-text-secondary); min-width: 74px; justify-content: flex-end; }
