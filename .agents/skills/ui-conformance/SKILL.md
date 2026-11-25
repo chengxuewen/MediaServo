@@ -1,3 +1,8 @@
+---
+name: ui-conformance
+description: Fourth layer of the UI workflow -- pixel-diff the implemented surface against the prototype (screenshot evidence, C1/C2/C3 checks) before handoff. Use after implementing a UI change that has a prototype or design reference.
+---
+
 # ui-conformance — design-conformance visual closed loop (the 4th verification layer)
 
 > Structure/computed-style parity and e2e-green are layers 1–3. They do NOT prove the

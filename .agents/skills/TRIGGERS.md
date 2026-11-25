@@ -21,6 +21,7 @@
 | Verify a browser-facing feature | `browser-testing` | Network-impairment angle -> `weaknet-testing`; UI code changes -> `incremental-implementation` |
 | Review interface quality / a11y / three states | `ui-ux-review` | Functional verification -> `browser-testing`; token mechanics -> `design-system` |
 | Consume/extend design tokens, style a component | `design-system` | Visual-quality verdict -> `ui-ux-review`; implementation -> `web-frontend` role |
+| Visual conformance to a prototype (pixel diff, layering) | `ui-conformance` | Acceptance method -> `ui-ux-review`; prototype home -> `www/prototype` |
 | Design exploration / style selection / palette candidates / industry anti-patterns | `design-library` | Token/theme landing -> `design-system`; acceptance -> `ui-ux-review`; quality floor -> design-quality.md |
 | Pick the right context for a polyglot task | `context-engineering` | Which layer/files -> `repo-triage`; symbol impact -> `lsp-code-analysis` |
 | Audit .agents/ or scan the community for adoptables | `repo-audit` | Internal doc consistency -> `doc-audit`; whether to adopt -> `think-before-act` |
