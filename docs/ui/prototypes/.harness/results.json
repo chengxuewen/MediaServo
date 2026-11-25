@@ -1,11 +1,11 @@
 {
-  "when": "2026-11-25T02:44:35.026Z",
+  "when": "2026-11-25T10:33:07.476Z",
   "mode": "positive",
   "fail": 0,
   "results": {
     "floor": {
       "pass": true,
-      "size": 175658,
+      "size": 171214,
       "assertions": {
         "idleGrant": true,
         "noJump": true
@@ -14,7 +14,7 @@
     },
     "queue": {
       "pass": true,
-      "size": 167218,
+      "size": 162386,
       "assertions": {
         "cap": true,
         "rew": true
@@ -23,7 +23,7 @@
     },
     "replay": {
       "pass": true,
-      "size": 248247,
+      "size": 231108,
       "assertions": {
         "scanKeeps": true,
         "manualClears": true,
@@ -33,7 +33,7 @@
     },
     "emergency": {
       "pass": true,
-      "size": 180763,
+      "size": 176422,
       "assertions": {
         "armPersist": true,
         "emergNoPress": true
@@ -42,7 +42,7 @@
     },
     "tabs-size": {
       "pass": true,
-      "size": 161192,
+      "size": 157423,
       "assertions": {
         "diag": true,
         "tabSwitch": true
@@ -51,7 +51,7 @@
     },
     "nav": {
       "pass": true,
-      "size": 154088,
+      "size": 131051,
       "assertions": {
         "navSvg": true,
         "unique": true,
@@ -61,7 +61,7 @@
     },
     "notif": {
       "pass": true,
-      "size": 179526,
+      "size": 175225,
       "assertions": {
         "xpage": true,
         "clickLand": true,
@@ -71,7 +71,7 @@
     },
     "groups": {
       "pass": true,
-      "size": 166416,
+      "size": 163030,
       "assertions": {
         "created": true,
         "cascade": true,
@@ -83,7 +83,7 @@
     },
     "evidence": {
       "pass": true,
-      "size": 154208,
+      "size": 149833,
       "assertions": {
         "purge": true,
         "revoke": true
@@ -92,7 +92,7 @@
     },
     "admin-hub": {
       "pass": true,
-      "size": 171829,
+      "size": 166837,
       "assertions": {
         "domains": true,
         "spoke": true,
@@ -103,7 +103,7 @@
     },
     "device-drawer": {
       "pass": true,
-      "size": 172032,
+      "size": 167015,
       "assertions": {
         "open": true,
         "hiddenClosed": true,
@@ -122,7 +122,7 @@
     },
     "device-drawer-narrow": {
       "pass": true,
-      "size": 93750,
+      "size": 90137,
       "assertions": {
         "fullWidth": true
       },
@@ -130,7 +130,7 @@
     },
     "device-config": {
       "pass": true,
-      "size": 184253,
+      "size": 179317,
       "assertions": {
         "diff": true,
         "applied": true,
@@ -144,7 +144,7 @@
     },
     "device-role": {
       "pass": true,
-      "size": 176046,
+      "size": 171101,
       "assertions": {
         "viewerOk": true,
         "fieldOk": true,
@@ -156,7 +156,7 @@
     },
     "accounts": {
       "pass": true,
-      "size": 126034,
+      "size": 120964,
       "assertions": {
         "matrixRows9": true,
         "statesDerive": true,
@@ -188,7 +188,7 @@
     },
     "psk": {
       "pass": true,
-      "size": 178478,
+      "size": 176675,
       "assertions": {
         "viewAudited": true,
         "rotateFocus": true,
@@ -218,7 +218,7 @@
     },
     "creds": {
       "pass": true,
-      "size": 203954,
+      "size": 198491,
       "assertions": {
         "visionGated": true,
         "emptyState": true,
@@ -242,7 +242,7 @@
     },
     "fleet": {
       "pass": true,
-      "size": 137602,
+      "size": 133836,
       "assertions": {
         "lensFilter": true,
         "lensAria": true,
@@ -262,7 +262,7 @@
     },
     "monitor-link": {
       "pass": true,
-      "size": 280613,
+      "size": 261142,
       "assertions": {
         "treeRole": true,
         "twistyFocusable": true,
@@ -282,7 +282,7 @@
     },
     "audit-ring": {
       "pass": true,
-      "size": 166479,
+      "size": 163283,
       "assertions": {
         "ringRows": true,
         "retentionLabel": true,
@@ -300,7 +300,7 @@
     },
     "nav-collapse": {
       "pass": true,
-      "size": 154088,
+      "size": 131051,
       "assertions": {
         "initSvg": true,
         "collapsedIcon": true,
@@ -314,7 +314,7 @@
     },
     "meet-lobby": {
       "pass": true,
-      "size": 115841,
+      "size": 114455,
       "assertions": {
         "cards": true,
         "typeOk": true,
@@ -333,7 +333,7 @@
     },
     "meet-prejoin": {
       "pass": true,
-      "size": 118342,
+      "size": 116565,
       "assertions": {
         "nameFocus": true,
         "voiceCamGuard": true,
@@ -351,7 +351,7 @@
     },
     "meet-live": {
       "pass": true,
-      "size": 114796,
+      "size": 113900,
       "assertions": {
         "shellHidden": true,
         "tilesAdaptive": true,
@@ -373,7 +373,7 @@
     },
     "meet-host": {
       "pass": true,
-      "size": 114814,
+      "size": 113902,
       "assertions": {
         "panelOpen": true,
         "hostBadge": true,
@@ -399,7 +399,7 @@
     },
     "meet-state": {
       "pass": true,
-      "size": 114814,
+      "size": 113902,
       "assertions": {
         "errState": true,
         "shellRestored": true,
@@ -413,7 +413,7 @@
     },
     "meet-exit": {
       "pass": true,
-      "size": 114814,
+      "size": 113902,
       "assertions": {
         "joined": true,
         "live": true,
@@ -435,7 +435,7 @@
     },
     "meet-polish": {
       "pass": true,
-      "size": 107154,
+      "size": 106418,
       "assertions": {
         "speakerRender": true,
         "offPageIndicator": true,
@@ -459,7 +459,7 @@
     },
     "meet-polish-narrow": {
       "pass": true,
-      "size": 73784,
+      "size": 74278,
       "assertions": {
         "leaveReachable": true,
         "pipHidden": true,
@@ -469,7 +469,7 @@
     },
     "remote-lobby": {
       "pass": true,
-      "size": 133757,
+      "size": 131121,
       "assertions": {
         "cards": true,
         "simTag": true,
@@ -491,7 +491,7 @@
     },
     "remote-lease": {
       "pass": true,
-      "size": 157488,
+      "size": 167644,
       "assertions": {
         "chipView": true,
         "chipCaptured": true,
@@ -512,7 +512,7 @@
     },
     "remote-lease-narrow": {
       "pass": true,
-      "size": 109850,
+      "size": 112710,
       "assertions": {
         "wrap": true,
         "noOv": true
@@ -521,7 +521,7 @@
     },
     "remote-timing": {
       "pass": true,
-      "size": 115819,
+      "size": 115788,
       "assertions": {
         "held": true,
         "renew300": true,
@@ -538,7 +538,7 @@
     },
     "remote-estop": {
       "pass": true,
-      "size": 158328,
+      "size": 168362,
       "assertions": {
         "estopVisible": true,
         "coarse44": true,
@@ -565,7 +565,7 @@
     },
     "remote-handover": {
       "pass": true,
-      "size": 153665,
+      "size": 164196,
       "assertions": {
         "holderBadge": true,
         "holderBadgeCtl": true,
@@ -586,7 +586,7 @@
     },
     "remote-input": {
       "pass": true,
-      "size": 153062,
+      "size": 162816,
       "assertions": {
         "kbdCount": true,
         "mouseCount": true,
@@ -608,7 +608,7 @@
     },
     "remote-fixes": {
       "pass": true,
-      "size": 150061,
+      "size": 160311,
       "assertions": {
         "gamepadGraceHeld": true,
         "connLostCaptureBlocked": true,
@@ -642,7 +642,7 @@
     },
     "remote-layout": {
       "pass": true,
-      "size": 157206,
+      "size": 165901,
       "assertions": {
         "shellHidden": true,
         "tileFillViewport": true,
@@ -667,7 +667,7 @@
     },
     "remote-layout-narrow": {
       "pass": true,
-      "size": 109850,
+      "size": 112710,
       "assertions": {
         "wideHidden": true,
         "moreWorks": true,
@@ -678,7 +678,7 @@
     },
     "settings-login": {
       "pass": true,
-      "size": 118280,
+      "size": 115978,
       "assertions": {
         "formFocus": true,
         "mask": true,
@@ -695,7 +695,7 @@
     },
     "settings-index": {
       "pass": true,
-      "size": 164838,
+      "size": 162041,
       "assertions": {
         "sixRows": true,
         "valuesSim": true,
@@ -708,7 +708,7 @@
     },
     "remote-safetyfix": {
       "pass": true,
-      "size": 98138,
+      "size": 99715,
       "assertions": {
         "spaceOnChromeNotForwarded": true,
         "spaceOnTileForwarded": true,
@@ -720,7 +720,7 @@
     },
     "remote-window": {
       "pass": true,
-      "size": 146230,
+      "size": 156550,
       "assertions": {
         "safetyBarNeverHide": true,
         "topHiddenDefault": true,
@@ -744,7 +744,7 @@
     },
     "remote-launcher": {
       "pass": true,
-      "size": 188712,
+      "size": 190705,
       "assertions": {
         "launcherEmpty": true,
         "launcherSelect": true,
@@ -766,7 +766,7 @@
     },
     "remote-launcher-narrow": {
       "pass": true,
-      "size": 98390,
+      "size": 107862,
       "assertions": {
         "narrowFold": true,
         "noOv": true
@@ -775,7 +775,7 @@
     },
     "remote-devlist": {
       "pass": true,
-      "size": 160109,
+      "size": 151608,
       "assertions": {
         "treeCounts": true,
         "treeNoDeadControl": true,
@@ -803,7 +803,7 @@
     },
     "remote-devlist-narrow": {
       "pass": true,
-      "size": 98138,
+      "size": 99715,
       "assertions": {
         "tier3TwoLine": true,
         "treeChips": true,
@@ -813,7 +813,7 @@
     },
     "remote-devlist-1600": {
       "pass": true,
-      "size": 156496,
+      "size": 167034,
       "assertions": {
         "tier1RightMeta": true,
         "colWide": true
@@ -822,7 +822,7 @@
     },
     "tower": {
       "pass": true,
-      "size": 190609,
+      "size": 194988,
       "assertions": {
         "collapseFreesSpace": true,
         "tabOrder": true,
@@ -845,7 +845,7 @@
     },
     "tower-narrow": {
       "pass": true,
-      "size": 81932,
+      "size": 84771,
       "assertions": {
         "narrowStack": true,
         "ackReachable": true,
@@ -855,7 +855,7 @@
     },
     "intercom-space": {
       "pass": true,
-      "size": 152605,
+      "size": 148180,
       "assertions": {
         "bodySpaceNoPtt": true,
         "focusSpacePtt": true,
@@ -865,7 +865,7 @@
     },
     "remote-unify": {
       "pass": true,
-      "size": 182105,
+      "size": 184182,
       "assertions": {
         "metaThreeRows": true,
         "tileLabelNowrap": true,
@@ -877,7 +877,7 @@
     },
     "remote-visual": {
       "pass": true,
-      "size": 184443,
+      "size": 186474,
       "assertions": {
         "rowBorderless": true,
         "rowHoverTint": true,
@@ -902,7 +902,7 @@
     },
     "remote-visual-tree": {
       "pass": true,
-      "size": 124609,
+      "size": 124082,
       "assertions": {
         "treeGroupIndent": true,
         "treeCountPill": true,
@@ -914,7 +914,7 @@
     },
     "remote-visual-narrow": {
       "pass": true,
-      "size": 98390,
+      "size": 107862,
       "assertions": {
         "toolbarSingleRow": true,
         "tier3TwoLine": true,
@@ -926,7 +926,7 @@
     },
     "remote-left": {
       "pass": true,
-      "size": 182142,
+      "size": 183906,
       "assertions": {
         "headerFixedSlot": true,
         "footerFixedSlot": true,
@@ -952,7 +952,7 @@
     },
     "remote-left-scroll": {
       "pass": true,
-      "size": 146230,
+      "size": 156550,
       "assertions": {
         "headerFixedSlot": true,
         "listIndependentScroll": true,
@@ -962,7 +962,7 @@
     },
     "remote-tools": {
       "pass": true,
-      "size": 136211,
+      "size": 136599,
       "assertions": {
         "filterPopAnchored": true,
         "filterBadgeCount": true,
@@ -976,7 +976,7 @@
     },
     "remote-row": {
       "pass": true,
-      "size": 182105,
+      "size": 184182,
       "assertions": {
         "sublineAlign": true,
         "sublineOrder": true,
@@ -988,7 +988,7 @@
     },
     "remote-launcher-visual": {
       "pass": true,
-      "size": 184443,
+      "size": 186474,
       "assertions": {
         "containerTwoCol": true,
         "midBandPower3": true,
@@ -1003,13 +1003,17 @@
         "loadingSkeleton": true,
         "emptyTopAligned": true,
         "focusOrder": true,
-        "iconAriaLabels": true
+        "iconAriaLabels": true,
+        "prevEmpty": true,
+        "prevLive": true,
+        "prevNonInteractive": true,
+        "emptyCard": true
       },
       "error": null
     },
     "remote-chrome": {
       "pass": true,
-      "size": 115697,
+      "size": 115659,
       "assertions": {
         "safeBarScrim": true,
         "safeBarScrimDark": true,
@@ -1039,7 +1043,7 @@
     },
     "remote-menu": {
       "pass": true,
-      "size": 179377,
+      "size": 182543,
       "assertions": {
         "stripGated": true,
         "tilesGated": true,
@@ -1073,7 +1077,7 @@
     },
     "remote-bar-stable": {
       "pass": true,
-      "size": 128313,
+      "size": 128337,
       "assertions": {
         "barStable": true,
         "slotsInsideBar": true,
@@ -1085,7 +1089,7 @@
     },
     "accounts-narrow": {
       "pass": true,
-      "size": 74238,
+      "size": 76600,
       "assertions": {
         "noOv": true,
         "card": true,
@@ -1095,7 +1099,7 @@
     },
     "admin-controls": {
       "pass": true,
-      "size": 103647,
+      "size": 99550,
       "assertions": {
         "h30": true,
         "stateStable": true,
@@ -1105,7 +1109,7 @@
     },
     "admin-spoke": {
       "pass": true,
-      "size": 77968,
+      "size": 79620,
       "assertions": {
         "back": true,
         "noHScroll": true,
@@ -1117,7 +1121,7 @@
     },
     "board-1100": {
       "pass": true,
-      "size": 154387,
+      "size": 148821,
       "assertions": {
         "uniformH": true,
         "singleLine": true,
@@ -1130,7 +1134,7 @@
     },
     "board-1000": {
       "pass": true,
-      "size": 137873,
+      "size": 137321,
       "assertions": {
         "uniformH": true,
         "singleLine": true,
@@ -1143,7 +1147,7 @@
     },
     "board-1200": {
       "pass": true,
-      "size": 157285,
+      "size": 152087,
       "assertions": {
         "uniformH": true,
         "singleLine": true,

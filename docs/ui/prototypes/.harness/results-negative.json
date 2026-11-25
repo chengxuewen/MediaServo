@@ -1,5 +1,5 @@
 {
-  "when": "2026-11-25T02:54:00.714Z",
+  "when": "2026-11-25T10:42:33.639Z",
   "mode": "negative",
   "fail": 0,
   "results": {
@@ -44,9 +44,9 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "t0 is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:6:68\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:21:112\n@http://127.0.0.1:8201/portal-unified.html:2:2226\n@http://"
+        "__err": "t0 is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:6:68\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:21:112\n@http://127.0.0.1:8219/portal-unified.html:2:2226\n@http://"
       },
-      "error": "t0 is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:6:68\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:21:112\n@http://127.0.0.1:8201/portal-unified.html:2:2226\n@http://"
+      "error": "t0 is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:6:68\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:21:112\n@http://127.0.0.1:8219/portal-unified.html:2:2226\n@http://"
     },
     "device-config": {
       "negative": true,
@@ -78,9 +78,9 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:14:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:43:296\n@http://127.0.0.1:8201/portal-unified.html:2:4482\n@http:/"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:14:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:43:296\n@http://127.0.0.1:8219/portal-unified.html:2:4482\n@http:/"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:14:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:43:296\n@http://127.0.0.1:8201/portal-unified.html:2:4482\n@http:/"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:14:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:43:296\n@http://127.0.0.1:8219/portal-unified.html:2:4482\n@http:/"
     },
     "psk": {
       "negative": true,
@@ -140,25 +140,25 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:26:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:32:178\n@http://127.0.0.1:8201/portal-unified.html:2:2853\n@http:/"
+        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:26:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:32:178\n@http://127.0.0.1:8219/portal-unified.html:2:2853\n@http:/"
       },
-      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:26:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:32:178\n@http://127.0.0.1:8201/portal-unified.html:2:2853\n@http:/"
+      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:26:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:32:178\n@http://127.0.0.1:8219/portal-unified.html:2:2853\n@http:/"
     },
     "monitor-link": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "tw is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:59\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:28:177\n@http://127.0.0.1:8201/portal-unified.html:2:2516\n@http://"
+        "__err": "tw is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:59\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:28:177\n@http://127.0.0.1:8219/portal-unified.html:2:2516\n@http://"
       },
-      "error": "tw is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:59\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:28:177\n@http://127.0.0.1:8201/portal-unified.html:2:2516\n@http://"
+      "error": "tw is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:59\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:28:177\n@http://127.0.0.1:8219/portal-unified.html:2:2516\n@http://"
     },
     "audit-ring": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:22:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:24:154\n@http://127.0.0.1:8201/portal-unified.html:2:2455\n@http:/"
+        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:22:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:24:154\n@http://127.0.0.1:8219/portal-unified.html:2:2455\n@http:/"
       },
-      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:22:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:24:154\n@http://127.0.0.1:8201/portal-unified.html:2:2455\n@http:/"
+      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:22:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:24:154\n@http://127.0.0.1:8219/portal-unified.html:2:2455\n@http:/"
     },
     "nav-collapse": {
       "negative": true,
@@ -178,9 +178,9 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:17:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:26:132\n@http://127.0.0.1:8201/portal-unified.html:2:2427\n@http:/"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:17:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:26:132\n@http://127.0.0.1:8219/portal-unified.html:2:2427\n@http:/"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:17:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:26:132\n@http://127.0.0.1:8201/portal-unified.html:2:2427\n@http:/"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:17:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:26:132\n@http://127.0.0.1:8219/portal-unified.html:2:2427\n@http:/"
     },
     "meet-prejoin": {
       "negative": true,
@@ -226,21 +226,21 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:41:256\n@http://127.0.0.1:8201/portal-unified.html:2:3348\n@http://"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:8:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:41:256\n@http://127.0.0.1:8219/portal-unified.html:2:3348\n@http://"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:41:256\n@http://127.0.0.1:8201/portal-unified.html:2:3348\n@http://"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:8:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:41:256\n@http://127.0.0.1:8219/portal-unified.html:2:3348\n@http://"
     },
     "meet-state": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:15\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:56\n@http://127.0.0.1:8201/portal-unified.html:2:954\n@http://12",
+        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:5:15\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:10:56\n@http://127.0.0.1:8219/portal-unified.html:2:954\n@http://12",
         "retryLive": false,
         "transcript": true,
         "readOnly": true,
         "hostSimLabel": true
       },
-      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:15\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:56\n@http://127.0.0.1:8201/portal-unified.html:2:954\n@http://12"
+      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:5:15\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:10:56\n@http://127.0.0.1:8219/portal-unified.html:2:954\n@http://12"
     },
     "meet-exit": {
       "negative": true,
@@ -302,7 +302,7 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "ob is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:4:65\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:9:59\n@http://127.0.0.1:8201/portal-unified.html:2:925\n@http://127",
+        "__err": "ob is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:4:65\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:9:59\n@http://127.0.0.1:8219/portal-unified.html:2:925\n@http://127",
         "sessOpen": false,
         "viewOnly": true,
         "leaseState": false,
@@ -314,7 +314,7 @@
         "retryWorks": false,
         "noObject": true
       },
-      "error": "ob is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:4:65\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:9:59\n@http://127.0.0.1:8201/portal-unified.html:2:925\n@http://127"
+      "error": "ob is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:4:65\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:9:59\n@http://127.0.0.1:8219/portal-unified.html:2:925\n@http://127"
     },
     "remote-lease": {
       "negative": true,
@@ -515,9 +515,9 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:4:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8201/portal-unified.html:2:1078\n@http://1"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:4:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8219/portal-unified.html:2:1078\n@http://1"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:4:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8201/portal-unified.html:2:1078\n@http://1"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:4:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8219/portal-unified.html:2:1078\n@http://1"
     },
     "remote-safetyfix": {
       "negative": true,
@@ -559,9 +559,9 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:42:278\n@http://127.0.0.1:8201/portal-unified.html:2:3827\n@http://"
+        "__err": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:5:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:42:278\n@http://127.0.0.1:8219/portal-unified.html:2:3827\n@http://"
       },
-      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:42:278\n@http://127.0.0.1:8201/portal-unified.html:2:3827\n@http://"
+      "error": "document.getElementById(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:5:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:42:278\n@http://127.0.0.1:8219/portal-unified.html:2:3827\n@http://"
     },
     "remote-launcher-narrow": {
       "negative": true,
@@ -576,41 +576,41 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:25\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:48:261\n@http://127.0.0.1:8201/portal-unified.html:2:5000\n@http://"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:8:25\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:48:261\n@http://127.0.0.1:8219/portal-unified.html:2:5000\n@http://"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:8:25\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:48:261\n@http://127.0.0.1:8201/portal-unified.html:2:5000\n@http://"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:8:25\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:48:261\n@http://127.0.0.1:8219/portal-unified.html:2:5000\n@http://"
     },
     "remote-devlist-narrow": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "row is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:39\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:6:44\n@http://127.0.0.1:8201/portal-unified.html:2:635\n@http://127"
+        "__err": "row is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:39\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:6:44\n@http://127.0.0.1:8219/portal-unified.html:2:635\n@http://127"
       },
-      "error": "row is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:39\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:6:44\n@http://127.0.0.1:8201/portal-unified.html:2:635\n@http://127"
+      "error": "row is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:39\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:6:44\n@http://127.0.0.1:8219/portal-unified.html:2:635\n@http://127"
     },
     "remote-devlist-1600": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:40\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:39\n@http://127.0.0.1:8201/portal-unified.html:2:580\n@http://127"
+        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:40\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:5:39\n@http://127.0.0.1:8219/portal-unified.html:2:580\n@http://127"
       },
-      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:40\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:39\n@http://127.0.0.1:8201/portal-unified.html:2:580\n@http://127"
+      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:40\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:5:39\n@http://127.0.0.1:8219/portal-unified.html:2:580\n@http://127"
     },
     "tower": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "alertsPanel is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:12\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:41:234\n@http://127.0.0.1:8201/portal-unified.html:2:3480\n@http://"
+        "__err": "alertsPanel is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:12\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:41:234\n@http://127.0.0.1:8219/portal-unified.html:2:3480\n@http://"
       },
-      "error": "alertsPanel is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:12\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:41:234\n@http://127.0.0.1:8201/portal-unified.html:2:3480\n@http://"
+      "error": "alertsPanel is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:12\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:41:234\n@http://127.0.0.1:8219/portal-unified.html:2:3480\n@http://"
     },
     "tower-narrow": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "secs[0] is undefined @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:21\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:46\n@http://127.0.0.1:8201/portal-unified.html:2:874\n@http://12"
+        "__err": "secs[0] is undefined @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:21\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:10:46\n@http://127.0.0.1:8219/portal-unified.html:2:874\n@http://12"
       },
-      "error": "secs[0] is undefined @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:21\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:46\n@http://127.0.0.1:8201/portal-unified.html:2:874\n@http://12"
+      "error": "secs[0] is undefined @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:21\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:10:46\n@http://127.0.0.1:8219/portal-unified.html:2:874\n@http://12"
     },
     "intercom-space": {
       "negative": true,
@@ -626,25 +626,25 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:80\n@http://127.0.0.1:8201/portal-unified.html:2:1222\n@http://1"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:10:80\n@http://127.0.0.1:8219/portal-unified.html:2:1222\n@http://1"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:80\n@http://127.0.0.1:8201/portal-unified.html:2:1222\n@http://1"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:10:80\n@http://127.0.0.1:8219/portal-unified.html:2:1222\n@http://1"
     },
     "remote-visual": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:7:39\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:45:288\n@http://127.0.0.1:8201/portal-unified.html:2:5281\n@http://"
+        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:7:39\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:45:288\n@http://127.0.0.1:8219/portal-unified.html:2:5281\n@http://"
       },
-      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:7:39\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:45:288\n@http://127.0.0.1:8201/portal-unified.html:2:5281\n@http://"
+      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:7:39\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:45:288\n@http://127.0.0.1:8219/portal-unified.html:2:5281\n@http://"
     },
     "remote-visual-tree": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:36\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8201/portal-unified.html:2:1531\n@http://1"
+        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:36\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8219/portal-unified.html:2:1695\n@http://1"
       },
-      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:36\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8201/portal-unified.html:2:1531\n@http://1"
+      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:36\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:12:90\n@http://127.0.0.1:8219/portal-unified.html:2:1695\n@http://1"
     },
     "remote-visual-narrow": {
       "negative": true,
@@ -662,9 +662,9 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:52:309\n@http://127.0.0.1:8201/portal-unified.html:2:5294\n@http://"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:52:309\n@http://127.0.0.1:8219/portal-unified.html:2:5294\n@http://"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:52:309\n@http://127.0.0.1:8201/portal-unified.html:2:5294\n@http://"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:52:309\n@http://127.0.0.1:8219/portal-unified.html:2:5294\n@http://"
     },
     "remote-left-scroll": {
       "negative": true,
@@ -680,25 +680,25 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:6:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:15:124\n@http://127.0.0.1:8201/portal-unified.html:2:1745\n@http://"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:6:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:15:124\n@http://127.0.0.1:8219/portal-unified.html:2:1745\n@http://"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:6:14\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:15:124\n@http://127.0.0.1:8201/portal-unified.html:2:1745\n@http://"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:6:14\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:15:124\n@http://127.0.0.1:8219/portal-unified.html:2:1745\n@http://"
     },
     "remote-row": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:18:85\n@http://127.0.0.1:8201/portal-unified.html:2:1676\n@http://1"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:18:85\n@http://127.0.0.1:8219/portal-unified.html:2:1676\n@http://1"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:18:85\n@http://127.0.0.1:8201/portal-unified.html:2:1676\n@http://1"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:18:85\n@http://127.0.0.1:8219/portal-unified.html:2:1676\n@http://1"
     },
     "remote-launcher-visual": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:4:41\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:37:218\n@http://127.0.0.1:8201/portal-unified.html:2:3757\n@http://"
+        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:4:41\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:42:266\n@http://127.0.0.1:8219/portal-unified.html:2:4358\n@http://"
       },
-      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:4:41\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:37:218\n@http://127.0.0.1:8201/portal-unified.html:2:3757\n@http://"
+      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:4:41\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:42:266\n@http://127.0.0.1:8219/portal-unified.html:2:4358\n@http://"
     },
     "remote-chrome": {
       "negative": true,
@@ -780,9 +780,9 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:30\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:37\n@http://127.0.0.1:8201/portal-unified.html:2:570\n@http://127"
+        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:30\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:5:37\n@http://127.0.0.1:8219/portal-unified.html:2:570\n@http://127"
       },
-      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:3:30\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:5:37\n@http://127.0.0.1:8201/portal-unified.html:2:570\n@http://127"
+      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:3:30\n@http://127.0.0.1:8219/portal-unified.html line 2 > injectedScript:5:37\n@http://127.0.0.1:8219/portal-unified.html:2:570\n@http://127"
     },
     "board-1100": {
       "negative": true,

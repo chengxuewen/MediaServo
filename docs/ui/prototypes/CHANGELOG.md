@@ -1,5 +1,174 @@
 # Prototypes CHANGELOG
 
+## v1.129 — 2026-11-25 (portal-unified) — N-37 overview Quick check card removed (pending review)
+User: the Overview "Quick check (≤4 tiles)" card is not needed.
+- Card markup removed (title + #ovQuick mini-wall + "Multi-tile wall monitoring lives in…" note/link).
+- renderOverview write guarded: `const _ovq=$('#ovQuick'); if(_ovq) _ovq.innerHTML=…` so a future re-add
+  or a stale build cannot throw on null.
+- Alerts card gains the existing `alerts-panel` class (grid-column 1/-1) so the column does not end
+  with a half-width gap after the removal.
+- Verified: single case nav green, full 70 cases ALL GREEN + NEG all red; DOM check: #ovQuick absent,
+  "Quick check" text absent, overview cards = [Fleet, Alerts · last 24 h]; screenshots
+  n37-overview / n37-overview2 (stat row reflows 6-up, Alerts full width); lint clean; stamps x8.
+- .mini-wall/.mini-tile CSS kept (still used by Tower wall).
+
+## v1.128 — 2026-11-25 (portal-unified) — N-36 page-head titles retired globally (pending review)
+User: every page should drop the detail-page title/subtitle like Monitor, since the top-bar crumb
+already names the page; page function is carried by the global top bar text.
+- `.page-head>div:not(.toolbar):not(.spacer)` becomes sr-only (clip 1x1) globally: title block hidden
+  visually, h1/subtitle stay in the a11y tree. First selector attempt used `div:first-child`, but
+  hub pages (Rooms/Sessions/Streams subset) inject a Back button as first child, so the title block
+  survived on Rooms (caught by screenshot + computed check) -> switched to the :not() form.
+- `.page-head.head-bare` (no toolbar children) collapses entirely (sr-only); `_compactHeads()` marks
+  every head after build: bare = Monitor/Remote/Admin/Sessions/Config/Settings/Signaling; compact =
+  Overview(Refresh)/Recordings/Intercom/Meeting/Tower/Rooms(search)/Streams(search)/Audit(segmented)
+  which keep only their functional control row (padding 8/20/0, no bottom border, transparent bg).
+- Measured after: bare heads 1px (monitor 16px legacy but absolute = no layout), compact 31-76px rows
+  of controls only; Rooms head 38px (back + search). Wall/content gains the former 72-100px title band.
+- Verified: single case rooms green (title hidden, head 38), full 70 cases ALL GREEN + NEG all red;
+  screenshots n36-rooms / n36-rooms2 (before/after selector fix); lint clean; stamps x8.
+
+## v1.127 — 2026-11-25 (portal-unified) — N-35 top-left brand|crumb treatment (pending review)
+User reference: brand bold, thin vertical divider, page name smaller/lighter, vertically centered.
+- .brand: font-weight 600->700, font-size 14->15px (literal; --fs15 does not exist in :root — first
+  attempt silently fell back to 14 and was caught by computed-style check).
+- .brand::after: 1px x 16px divider, var(--bd), margin 0 2px 0 6px (flex item, no markup change).
+- .crumb: margin-left 8px; stays 12px var(--tx3); measured vertical centers brand 27 == crumb 27
+  (aligned), divider 1x16 confirmed.
+- Verified: harness single case nav green, then full 70 cases ALL GREEN + NEG all red; MCP computed
+  check brandFs 15 / fw 700 / sep 1x16 / aligned true; screenshot n35-brand; lint clean; stamps x8.
+
+## v1.126 — 2026-11-25 (portal-unified) — N-34 monitor bar: sim chip visually removed (user request, honesty note) (pending review)
+User asked to remove the right-hand "simulated†" chip from the monitor control bar.
+- .stage-bar .sim-chip is now sr-only (clip-rect, 1x1) instead of a pill; the 104px right padding
+  reserve is gone, so the bar returns to a plain 44px single row (measured wall top stays 98).
+- **Honesty trade-off recorded**: the visible simulated marker is intentionally removed per user
+  instruction; the full sentence ("Simulated video — prototype feeds… real-backend contract…")
+  remains in the a11y tree inside #monSimNote, so the honestBanner regression gate still reads it.
+  Visible-marker absence on Monitor is filed as an open honesty item (options: tile watermark,
+  breadcrumb suffix, or restore chip) pending a later decision.
+- Verified: single-case monitor-link green (honestBanner true), then full 70 cases ALL GREEN + NEG
+  all red; MCP: chip rect 1x1 clipped, bar 44, wall 98; screenshot n34-bar; lint clean; stamps x8.
+
+## v1.125 — 2026-11-25 (portal-unified) — N-33 monitor page-head retired (crumb carries name) (pending review)
+User: the app top bar already shows "Monitor Center" as breadcrumb, so the page-level head (title +
+"Surveillance wall + timeline review") is redundant; keep only the icon-controls row.
+- #page-monitor .page-head visually hidden via sr-only clip (h1 "Monitor Center" + subtitle stay in the
+  a11y tree); no layout cost (measured height 1px).
+- simulated† honesty chip moved from the head into the stage-bar: mounted by _mountSimChip() after
+  buildPages (single node, sr-only full contract text preserved so honestBanner assertion keeps
+  reading 'Simulated video'); absolutely positioned right 16px with 104px padding reserve so the bar
+  stays 44px single-row instead of wrapping to 69px (first attempt measured 69 -> fixed).
+- stage-bar already compacted in N-32 (min-height 44); wall top now 98px vs 173px pre-N-32 (75px
+  reclaimed for the grid; 2 grid rows + timeline fully visible at 1086x800).
+- Verified: harness 70 cases ALL GREEN + NEG all red; single-case monitor-link (honestBanner) green
+  before full sweep; MCP: head 1px absolute / stage-bar 44 / chip in bar / wall 98; screenshot
+  n33-monitor; node --check + lint clean; stamps x8.
+- Robustness: chip is created by JS (not static markup) so a re-render can never duplicate the id;
+  _mountSimChip is idempotent (early-returns when #monSimNote exists).
+
+## v1.124 — 2026-11-25 (portal-unified) — N-32 monitor header height reclaimed (pending review)
+User: monitor top chrome consumed too much height and squeezed the multi-grid wall.
+Measured before: page-head 72px (title 20px + subtitle on second line) + full-width simulated notice
+strip 18px+6 margin + stage-bar 52px = ~148px before the wall.
+- **Header single line**: #page-monitor .page-head padding 16->8, inner container flex baseline
+  gap 8, title 20->16, subtitle inline nowrap ellipsis -> head 72->45px.
+- **Honesty notice became an inline chip in the header row** ("simulated†", pill 22px, mono 11px,
+  title=full contract sentence, sr-only full text inside the same #monSimNote node so the
+  honestBanner assertion keeps reading 'Simulated video'); full-width strip retired from the canvas
+  flow (-24px). Chip injected by the head() factory for Monitor Center only (single source, no
+  duplicated id).
+- **Stage bar** min-height 52->44, padding 8->4 vertical (-8px).
+- Net: wall top 173->143 at equal content, wall height +~50px visible rows.
+- Verified: harness 70 cases ALL GREEN + NEG all red (honestBanner still reads the full text via
+  sr-only); MCP post-measure head 45/canvas top 99/stage 44/wall 143; screenshot n32-monitor
+  (3 grid rows + timeline visible at 800h); node --check + lint clean; stamps x8.
+- Fixes en route: page head markup is generated by head() factory (TITLES table), so the chip had to
+  be injected there instead of editing static HTML; first static insertion duplicated the node and
+  was removed.
+
+## v1.123 — 2026-11-25 (portal-unified) — N-31 design-language consistency sweep (D57=A; pending review)
+Whole-prototype audit (MCP 18-page computed clustering + 3-seat panel) produced 18 real inconsistencies;
+two seats also refuted four scanner claims (recorded in PLAN 3ab): --bd-strong page-card usage did not
+exist (that value is --bdc input border, 4 uses), chip variants are >=9 not 5, empty states are 7 not 2,
+"monitor buttons height 0" was a display:none measurement artifact, and 13px is not data-pages-only.
+- **Radius**: all 10px -> var(--r8) (4 rules); all bare 8px -> var(--r8) (7 rules); bare 6px in remote
+  rules -> var(--r6); count/new badges misusing 8px -> var(--rpill) (tree .cnt, .bm-badge, #remBallBadge,
+  .fbadge 7px -> pill); r10 retired as a tier (containers now 8, matching D54/D55 Recording-language
+  baseline).
+- **Section heads**: .dd-sec unified to 14px/500 sentence-case tx2 (remote-local 14/500 kept same);
+  global uppercase retirement (15 rules text-transform:none) and all letter-spacing values -> normal
+  (design-quality forbids uppercase+letterspacing labels).
+- **Chip/pill floors**: .dev-badges .chip 9->11px; narrow safe-bar chip 10->11px; .al-badge/.fbadge
+  9->10px (count badge) / .bm-badge 10px; .al-chip (clickable filter) moved from pill to control
+  geometry (30h r6 pad 12, border --bd); #remSafeBar narrow .btn 32px -> var(--ctl-h).
+- **Controls**: .btn and .chip-btn borders --bd2 -> --bd (hover/overlay remains --bd2); .msg-in border
+  --bd -> --bdc (input visibility tier); .dt-seg button 26h/bd2 -> var(--ctl-h)/--bd/r4; .pick-col
+  search 32 -> var(--ctl-h); .bm-ic 36x32 -> var(--ctl-h) square; dead .combo-trigger height removed;
+  .rec-search 34 -> var(--ctl-h).
+- **Focus**: all outline --accent -> --focus; .dev-row/.rem-tile gain focus-visible background; phantom
+  #remTop rules deleted (4 rules + focus list + <=760px hide + keydown guard reference), broken
+  1151-line corrupted selector and duplicated ancestor selector removed (this also repairs the
+  inverted #remWake display rule that the corruption had created).
+- **Dark-token honesty**: .rec-pname #E7ECF5 -> var(--video-scrim-ink); .rec-pnone hardcoded
+  rgba(7,11,20,.55) -> var(--video-scrim); #remOsd chip rgba(0,0,0,.85) -> var(--video-scrim);
+  .tile-name #E7ECF5 -> var(--video-scrim-ink).
+- **Empty/error states**: .empty / .rec-pnone unified to the centered icon-capable idiom (12px, tx3,
+  padded); .pb-empty 12px; new .replay-empty.state-error + #remResumeErr danger-ink rule so error text
+  no longer wears empty-state clothing.
+- Verified: harness 70 cases ALL GREEN + NEG all red; treeCountPill leg re-specified to pill-radius
+  acceptance; MCP post-check: launcher r8 / .dd-sec transform none + 14px / row chip 11px; screenshots
+  n31-remote / n31-rec; node --check + lint clean; stamps x8.
+- **Staged remainder (honest, not silently dropped)**: icon-size ladder (11 distinct values -> 12/14/16/
+  20/28) only partially applied (bm-ic 15->14; the rest documented); .kbd role not created; page-card
+  vs sub-card border layering deferred (assertions sepContrast/panelCard depend); 10px retained only
+  for media overlay/count roles by design; prototype still outside check-tokens gate (directory +
+  --ms-* namespace blind) — wiring the gate is a toolchain task; dark-theme full audit of remaining
+  hardcoded rgba (#remOsd popover backgrounds etc) open.
+
+## v1.122 — 2026-11-25 (portal-unified) — N-30 default empty state card (pending review)
+User: entering Remote with nothing selected left the right column blank/hidden; Recording shows an
+empty detail card with a hint. #remLauncherEmpty was a bare text node (.replay-empty flex:none).
+- Empty state now = Recording-idiom card: surface + 1px bd + r8 + flex:1 full column with centered
+  .rec-pempty (grid icon + "Select a device" + "Choose a device from the list to see its connection
+  options."); plain-text div retired.
+- Verified: harness 70 cases ALL GREEN + NEG all red; new emptyCard leg (surface bg + 1px border +
+  title text + icon present) alongside existing launcherEmpty/emptyTopAligned; MCP first-entry
+  measure: sel=null, card 550x706 white r8 with hint; screenshot n30-empty; lint clean; stamps x8.
+
+## v1.121 — 2026-11-25 (portal-unified) — N-29 preview block removed (D56=A; pending review)
+User: right-column device detail should not carry a screen preview — mainstream remote-desktop
+launchers have none. Evidence: ToDesk launcher (todesk-12) meta+tiles+power only; RustDesk address
+book, TeamViewer device list, Parsec list = no thumbnails; thumbnails live in RMM tooling
+("last screenshot", on-demand) and in-session diagnostics, not launcher slots. Honesty angle: before
+connect there is no frame source, so a launcher preview can only be a mock implying live state.
+- **Removed**: lm-prev block from normal and error branches + its CSS (lm-prev / lm-prev-empty).
+- **Kept**: Recording-idiom detail card (surface + 1px bd + r8 + pad14) — region separation intact.
+- Legs re-specified: prevEmpty/prevLive -> preview ABSENT in both normal and offline branches;
+  prevNonInteractive retired as constant-true placeholder removed from return.
+- Verified: harness 70 cases ALL GREEN + NEG all red; MCP launcher bg white/1px/r8/prev=false;
+  screenshot n29-card; node --check + lint clean; stamps x8.
+- D55 partial supersession note (preview block retired; card retained) recorded in PLAN 3aa.
+
+## v1.120 — 2026-11-25 (portal-unified) — N-28 detail panel card + preview block delivered (D55=A; pending review)
+User: remote list optimized but no region separation and right detail lacks Recording's panel
+("color block") idiom. MCP: launcher transparent + left divider + r0 (D39) vs Recording full-column
+surface card with embedded dark preview block.
+- **Detail panel = Recording card**: surface + 1px bd + r8 + padding 14, full column height, content
+  top-aligned; borderless + left divider retired (D39 forward-supersession note); region separation
+  now = card boundary + 12px gap (left stays card-rows on page bg, Recording parity).
+- **Preview color block**: 16:9 dark block at card top = static simulated feed mini-mock (reuses
+  .sim-desktop windows/taskbar, pointer-events:none) + corner simulated chip (D43 honesty);
+  offline/pending/revoked/lost = empty text block inside same geometry (Recording "No recorded
+  preview yet" parity), placed in the error branch too (early-return path previously skipped it).
+- Verified: harness 70 cases ALL GREEN + NEG all red; borderlessDivider re-specified to panelCard
+  read (1px + surface + r8); sepContrast/sepContrastDark re-specified to surface-vs-body difference
+  (card border uses --bd like Recording, >=3:1 divider requirement retired with divider); new legs
+  prevEmpty (offline injection) / prevLive / prevNonInteractive; MCP screenshots n28-light/dark;
+  node --check + lint clean; stamps x8.
+- Fixes en route: taskbar class is sd-task not sd-bar; revoked/offline renderLauncher early-returns
+  with lm-error so preview empty block had to be added inside that branch.
+
 ## v1.119 — 2026-11-25 (portal-unified) — N-27 component-language unification delivered (D54=A; pending review)
 User dual screenshots: Remote page inharmonious vs Recording/Intercom siblings. MCP forensics:
 remote rows borderless/transparent vs Recording card rows; launcher codeline top 184 overlapped sub

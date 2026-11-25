@@ -1,6 +1,6 @@
 # Unified baseline — MediaServo Portal (single page)
 
-> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.119 见 sidecar)**
+> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.129 见 sidecar)**
 > Carrier: `../prototypes/portal-unified.html` · Supersedes the fragmented boards for iteration.
 
 ## Why this exists (user directive 11-13)
@@ -16,10 +16,10 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.119
+version: v1.129
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
 e2e_hooks: [".nav-item", ".active", ".page", ".active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg", "#meetGrid", "#meetScrim", "#prejoinScrim", "#meetCanvas", "#meetTiles", "#meetRail", "#meetPip", "#muteChip", "#meetBar", "#mkLeave", "#holdRing", "#holdBar", "#meetExitHint", "#meetPanel", "#mpBody", "#mpTabs", "#mpBadge", "#mpChatBadge", "#meetInfo", "#meetTransScrim", "#remGrid", "#remSession", "#remTile", "#remBar", "#remTake", "#remRelease", "#remCtlState", "#remLive", "#remHealth", "#remEstop", "#remEstopRing", "#remReqChip", "#remHolderChip", "#remForce", "#remResumeScrim", "#remResumeName", "#remStopped", "#remPerimeter", "#remMapPanel", "#remTouch", "#remHud", "#remStateChip", "#remEscHint", "#remOsd", "#remStage", "#cfgIndex", "#ktVal", "#ktSave", "#ktClear", "#liUser", "#liPass", "#liRole", "#liBtn", "#liOut", "#liErr", "#aboutVer", "#sigResult", "#remLauncher", "#remLauncherEmpty", "#remLauncherTitle", "#lmCode", "#lmCopy", "#lmInfo", "#remDevPop", "#remTiles", ".rem-tile", ".rem-card", "#remViewHint", "#remViewBack", "#remSafeBar", "#remBall", "#remBallPop", "#remSessPop", "#remDetailsPop", "#remConnecting", "#remPanHint", "#remDisplayPop", "#remInputPop", "#remSecPop", "#remTree", "#remSearch", "#remHitCount", "#remSortBtn", "#remSortPop", "#remFilterBtn", "#remFilters", "#remActiveRows", "#remActiveCount", "#remRecentRows", "#remRecentToggle", "#remDevEmpty", "#remClearFilters", "#remRenameScrim", "#rnAlias", "#rnNote", "#rnTagIn", "#rnTags", "#rnSave", "#remGroupScrim", "#rgName", "#lmRename", ".dev-row", ".dev-meta", ".dev-badges", "#towerGrid", "#towerWall", "#towerTalk", "#towerAlerts", "#towerHeld", "#twWallCount", "#twAlertCount", "#twAckFilter", "#twPtt", "#twCountdown", "#twMore", "#twOpenChan", "#backTower", ".tw-collapse", ".tw-ack", "[data-col]", "[data-chan]", "[data-ack]", ".rem-hitwrap", "#remSortWord", ".dev-row.hover", ".rem-tile.hover", "#remTree .tname", "#remTree .cnt", ".rem-searchrow", "#remListScroll", "#remLeftFoot", ".dot-on", ".dot-off", ".dot-deg", ".dev-line1", ".metatxt", "#remFilterPop", "#remFilterCount", "#remTreeNav", ".nav-glabel", ".fbadge", ".rowgo", ".dev-badges .self", ".lm-meta", ".lm-name", ".lm-sub", ".lm-codeline", ".btn-icon", ".lockcorner", ".lm-skel", ".lm-error", "#lmBackList", "#pwForm", "#remSimCorner", ".sim-desktop", "#remEstopHoldTxt", ".hudpair", "#remSafeBar .inner", "#bmCast", "#bmVol", "#bmMin", "#bmMute", "#bmPrivacy", "#bmMode", "#bmFile", "#bmPeriph", "#bmInteract", "#bmMulti", "#bmTrue", "#bmExtreme", "#bmSafeBadge", "#remFitRow", "#remFitPop", "#remQualityPop", "#remAdvRow", "#remAdvPop", "#remSessRow2", "#remKeysRow2", ".bm-row", ".bm-tile", ".bm-open", "[data-menu]", "#bmForce", "#bmHolder", "#ballHint", "#ballDot", "#remZoomFit", "#remZoomOrig", "#remOsdBtn3", "remLeaveSession", ".hudgroup", ".opswap", "#remLatchedNote", "#hudPair", ".dev-ic", ".dev-go", ".dev-body", ".lm-copyrow", ".rem-sechead"]
-regions: [remote-lobby-cards, ball-only-session-chrome, safety-holder-force, session-full-bleed, safebar-deframed, state-badge-single-frame, safebar-fixed-slots, banners-out-of-flow, banner-stack-no-overlap, estop-contextual-unified, recording-card-language, launcher-meta-three-rows], semantic-line, gamepad-map-row, feed-tile-letterbox, osd-overlay, bottom-bar-state-grace-take-release, estop-never-hide, health-banner, stopped-banner-resume, req-chip, perimeter-latched, info-popover, settings-login-card, settings-config-index, keys-admin-token, remote-launcher-panel, capability-tiles-bare, power-row-pills, pure-view-safebar-variant, device-group-tree, device-row-tiers, rename-modal, search-sort-filter, recent-section, in-session-section, tower-shell-grid, tower-wall-panel, tower-intercom-panel, tower-alerts-panel, back-to-tower-chip, device-row-visual-language, device-tree-visual, launcher-tile-bare-weights, list-toolbar-single-row, left-column-three-section, group-nav-block, device-row-two-line, status-dot-shapes, left-footer-summary, filters-popover, merged-toolbar-row, flat-group-nav, row-rail-aligned, row-hover-chevron]
+regions: [remote-lobby-cards, ball-only-session-chrome, safety-holder-force, session-full-bleed, safebar-deframed, state-badge-single-frame, safebar-fixed-slots, banners-out-of-flow, banner-stack-no-overlap, estop-contextual-unified, recording-card-language, launcher-meta-three-rows, detail-panel-card, default-empty-card, radius-tiers, sec-head-sentence, control-border-roles, monitor-compact-header, sim-notice-chip, monitor-head-retired, monitor-sim-marker-open, topbar-brand-divider, page-head-titles-retired, overview-no-quickcheck], semantic-line, gamepad-map-row, feed-tile-letterbox, osd-overlay, bottom-bar-state-grace-take-release, estop-never-hide, health-banner, stopped-banner-resume, req-chip, perimeter-latched, info-popover, settings-login-card, settings-config-index, keys-admin-token, remote-launcher-panel, capability-tiles-bare, power-row-pills, pure-view-safebar-variant, device-group-tree, device-row-tiers, rename-modal, search-sort-filter, recent-section, in-session-section, tower-shell-grid, tower-wall-panel, tower-intercom-panel, tower-alerts-panel, back-to-tower-chip, device-row-visual-language, device-tree-visual, launcher-tile-bare-weights, list-toolbar-single-row, left-column-three-section, group-nav-block, device-row-two-line, status-dot-shapes, left-footer-summary, filters-popover, merged-toolbar-row, flat-group-nav, row-rail-aligned, row-hover-chevron]
 open_questions: [quality-codec-fps-adjust-backend, B-lease-server-batch, real-pointer-lock-fullscreen-UA-Esc-device, real-gamepad-device, special-keys-real-channel, R6-five-backendization, view-wall-fullscreen-cross-plan, PROGRAM-memorys-parallel-owned, devtools-hidden-in-session, launcher-code-copy-format, launcher-info-fields, launcher-container-queries, sep-panel-token]
 ```
 
@@ -421,6 +421,31 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   for right-edge collapse); now region-collapse + i-chevron (right), aria-label/title synced in
   renderDrawer. Precedent: region-collapse chevrons point toward collapse edge; modal dismiss = X.
   harness device-drawer += ddIcon assertion; 27 cases + NEG green.
+- v1.129 (N-37 overview quick-check removed, PENDING REVIEW): card + guarded writer removed,
+  Alerts full width. 70 cases + NEG green.
+- v1.128 (N-36 page-head titles retired globally, PENDING REVIEW): title blocks sr-only on all pages
+  (crumb carries name), bare heads collapse, toolbar-only rows kept. 70 cases + NEG green.
+- v1.127 (N-35 brand|crumb divider, PENDING REVIEW): brand 15/700, 1x16 px divider, crumb 12 tx3
+  vertically centered. 70 cases + NEG green.
+- v1.126 (N-34 monitor sim chip visually removed, PENDING REVIEW): chip sr-only, bar 44;
+  visible-marker absence filed as open honesty item. 70 cases + NEG green.
+- v1.125 (N-33 monitor page-head retired, PENDING REVIEW): head sr-only (crumb carries name),
+  sim chip absolute in 44px stage-bar; wall top 98px. 70 cases + NEG green.
+- v1.124 (N-32 monitor header compact, PENDING REVIEW): head 72->45 single line (title 16 + inline
+  sub), sim notice -> header chip with sr-only full text, stage-bar 52->44; wall +~50px. 70 cases +
+  NEG green.
+- v1.123 (N-31 consistency sweep, D57=A, PENDING REVIEW): radius 4/6/8/pill tiers (10 retired);
+  section heads 14/500 sentence; uppercase+letterspacing retired; chip floors 11; control borders
+  bd/bd2/bdc roles; heights -> --ctl-h; focus ring -> --focus + row/tile coverage; dark hardcodes ->
+  video tokens; empty/error states unified; dead #remTop/wake CSS removed. 70 cases + NEG green.
+  Staged: icon ladder, .kbd, page-card layering, token gate, dark audit.
+- v1.122 (N-30 default empty state card, PENDING REVIEW): right column shows Recording-idiom empty
+  card (icon + Select a device + hint) when nothing selected. 70 cases + NEG green.
+- v1.121 (N-29 preview block removed, D56=A, PENDING REVIEW): launcher has no screen preview
+  (mainstream parity + honesty); detail card retained. 70 cases + NEG green.
+- v1.120 (N-28 detail panel card + preview, D55=A, PENDING REVIEW): surface card r8 pad14 full column;
+  16:9 simulated preview block + sim corner; offline/revoked empty block in error branch; region
+  separation via card boundary. 70 cases + NEG green.
 - v1.119 (N-27 component-language unification, D54=A, PENDING REVIEW): card rows + icon tile +
   square go button; meta strict 3 rows + copy in code row; tint icon-box tiles + nowrap labels;
   plain recent head; toolbar sim small. 70 cases + NEG green.
