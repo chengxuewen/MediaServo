@@ -6,7 +6,15 @@
 .mh-bar h1 { font-size: var(--ms-font-size-md); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); margin: 0; }
 .health-chip { font-size: var(--ms-font-size-xs); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-full); border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); background: var(--ms-color-surface); cursor: pointer; }
 .health-chip.warn { border-color: var(--ms-color-warning); color: var(--ms-color-text); background: var(--ms-color-warning-soft); }
-.live-clock { display: inline-flex; align-items: center; gap: var(--ms-space-1); font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; }
+.live-clock { display: inline-flex; align-items: center; gap: var(--ms-space-1); font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; font-family: var(--ms-font-family-mono); }
+.theme-toggle { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
+/* V5 (S8): faint ambient radials (prototype), tokens-only. */
+.monitor-home::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0; background: radial-gradient(900px 500px at 85% -10%, var(--ms-color-primary-soft), transparent), radial-gradient(700px 400px at -10% 110%, color-mix(in srgb, var(--ms-palette-cyan) 6%, transparent), transparent); }
+.monitor-home > * { position: relative; z-index: 1; }
+/* V5 (F2): coarse pointers get 44px touch targets. */
+@media (pointer: coarse) {
+  .region-toggles button, .theme-toggle, .pb-ctl, .pb-live, .region-collapse, .pin-btn { min-width: 44px; min-height: 44px; }
+}
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ms-color-success); }
 .region-toggles { margin-left: auto; display: flex; gap: var(--ms-space-1); }
 .region-toggles button { position: relative; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
@@ -24,7 +32,8 @@
 .stream-rail.collapsed, .mon-alerts.collapsed { display: none; }
 .collapsed .rail-body { display: none; }
 .rail-head { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-2); border-bottom: 1px solid var(--ms-color-border-subtle); }
-.rail-title { flex: 1; font-size: var(--ms-font-size-sm); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); white-space: nowrap; }
+/* V5 (S5): uppercase micro-labels, 11px, 1px tracking (prototype). */
+.rail-title { flex: 1; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; color: var(--ms-color-text-tertiary); white-space: nowrap; }
 .region-collapse { background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); width: 24px; height: 24px; cursor: pointer; font-size: var(--ms-font-size-sm); line-height: 1; }
 .region-collapse:hover { background: var(--ms-color-surface-hover); }
 .rail-body { padding: var(--ms-space-2); }

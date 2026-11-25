@@ -37,4 +37,26 @@ test.describe('Monitor finishing (B6)', () => {
     await page.waitForTimeout(2500); // let StrictMode remount + handshake settle
     expect(active).toBe(1);
   });
+
+  test('V5 theme toggle switches to dark (K8)', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.monitor-home')).toBeVisible();
+    const bgLight = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    await page.locator('.theme-toggle').click();
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    const bgDark = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+    expect(bgDark).not.toBe(bgLight);
+  });
+
+  test('V5 Esc exits single-tile zoom (I8)', async ({ page, hostProducer }) => {
+    await page.goto('/');
+    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+    await page.locator('.st-play-all').first().click();
+    await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
+    await page.locator('.wall-grid .video-player').first().hover();
+    await page.locator('.tile-actions [aria-label="Zoom this stream"]').click();
+    await expect(page.locator('.wt-exit-zoom')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.wt-exit-zoom')).toHaveCount(0);
+  });
 });

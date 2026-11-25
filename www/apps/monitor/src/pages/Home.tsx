@@ -147,6 +147,21 @@ export default function Home() {
   const [clock, setClock] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(t); }, []);
 
+  // V5 (F3/K8): light+dark theme toggle (tokens dark preset), persisted per origin.
+  const [theme, setTheme] = useState(() => { try { return localStorage.getItem('msrv_theme') || 'light'; } catch { return 'light'; } });
+  useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('msrv_theme', theme); } catch { /* silent */ } }, [theme]);
+
+  // V5 (I8): Esc hierarchical close — gallery -> zoom (modal/picker ride kit Modal LIFO).
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || modal || pickerOpen) return;
+      if (galleryOpen) setGalleryOpen(false);
+      else if (zoomedId) setZoomedId(null);
+    };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [galleryOpen, zoomedId, modal, pickerOpen]);
+
   const byId = new Map(producers.map((p) => [p.id, p]));
   const degraded = producers.filter((p) => p.score < 8).length;
   // V2 (I6): unread-style alert badge count from the audit ring (alert-worthy kinds).
@@ -235,6 +250,7 @@ export default function Home() {
           {degraded > 0 ? `${degraded} degraded` : 'Healthy'}
         </button>
         <span className="live-clock"><span className="live-dot" aria-hidden="true" />LIVE {clock.toLocaleTimeString('en-GB', { hour12: false })}</span>
+        <button className="theme-toggle" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Toggle light/dark theme" title="Toggle theme">{theme === 'dark' ? '☀' : '◐'}</button>
         <div className="region-toggles">
           <button aria-pressed={regions.left} onClick={() => toggleRegion('left')} title="Toggle stream rail" aria-label="Toggle stream rail"><PanelLeft size={15} /></button>
           <button aria-pressed={regions.right} onClick={() => toggleRegion('right')} title="Toggle alert panel" aria-label="Toggle alert panel">
