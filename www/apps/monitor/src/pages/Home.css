@@ -13,7 +13,7 @@
 .iconbtn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
 .iconbtn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 .iconbtn.on { border-color: var(--ms-color-accent); color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
-.health-chip { font-size: var(--ms-font-size-xs); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-full); border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); background: var(--ms-color-surface); cursor: pointer; }
+.health-chip { font-size: var(--ms-font-size-xs); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-full); border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); background: var(--ms-color-surface); cursor: pointer; white-space: nowrap; }
 .health-chip.warn { border-color: var(--ms-color-danger); color: var(--ms-color-danger); background: var(--ms-color-danger-soft); font-weight: 600; }
 .live-clock { display: inline-flex; align-items: center; gap: var(--ms-space-1); font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; font-family: var(--ms-font-family-mono); }
 .theme-toggle { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
@@ -108,7 +108,7 @@
 }
 
 /* Wall toolbar / grid / offline tile (unchanged mechanics) */
-.wall-toolbar { display: flex; align-items: center; gap: var(--ms-space-2); font-size: var(--ms-font-size-sm); color: var(--ms-color-text-muted); min-height: 52px; padding: 8px 16px; }
+.wall-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ms-space-2); font-size: var(--ms-font-size-sm); color: var(--ms-color-text-muted); min-height: 52px; padding: 8px 16px; }
 .wt-label { margin-right: var(--ms-space-1); }
 .wt-hint { margin-left: auto; color: var(--ms-color-text-secondary); font-size: var(--ms-font-size-xs); }
 .layout-menu { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-sm); cursor: pointer; }
