@@ -1,11 +1,12 @@
 import { test, expect } from './host-fixture';
+import { readyProducers } from './flow';
 
-// B6 (monitor-prototype-parity) finishing: global stats toggle, per-stream tree
-// metrics (M5/O4), and the single admin WS consolidation (M6 — was 3 connections).
+// B6 finishing: global stats toggle + single admin WS (M6). V9b (K12=A): the per-stream
+// tree row (M5 bitrate) was retired with the rail device tree — not in the prototype.
 test.describe('Monitor finishing (B6)', () => {
   test('global stats toggle hides/shows tile stats', async ({ page, hostProducer }) => {
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+    await readyProducers(page, hostProducer.room);
     await page.locator('.st-play-all').first().click();
     await expect(page.locator('.wall-grid .vp-mini-stats')).toHaveCount(1, { timeout: 15000 });
 
@@ -16,16 +17,9 @@ test.describe('Monitor finishing (B6)', () => {
     await expect(page.locator('.wall-grid .vp-mini-stats')).toBeVisible();
   });
 
-  test('per-stream bitrate renders on the tree row (M5)', async ({ page, hostProducer }) => {
-    await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
-    await expect(page.locator('.st-bitrate').first()).toBeVisible();
-  });
-
   test('single admin events WS connection (M6)', async ({ page }) => {
     // Count ACTIVE connections (open minus close): StrictMode dev double-mounts the
     // single Home useAdminWS hook (2 handshakes, first closed) — active must be 1.
-    // Before M6 this was 3 hooks (Home/Timeline/AlertPanel) → 3 active.
     let active = 0;
     page.on('websocket', (ws) => {
       if (!ws.url().includes('/api/admin/events')) return;
@@ -34,7 +28,7 @@ test.describe('Monitor finishing (B6)', () => {
     });
     await page.goto('/');
     await expect(page.locator('.monitor-home')).toBeVisible();
-    await page.waitForTimeout(2500); // let StrictMode remount + handshake settle
+    await page.waitForTimeout(2500);
     expect(active).toBe(1);
   });
 
@@ -50,7 +44,7 @@ test.describe('Monitor finishing (B6)', () => {
 
   test('V5 Esc exits single-tile zoom (I8)', async ({ page, hostProducer }) => {
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+    await readyProducers(page, hostProducer.room);
     await page.locator('.st-play-all').first().click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
     await page.locator('.wall-grid .video-player').first().hover();

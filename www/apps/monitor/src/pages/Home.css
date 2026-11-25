@@ -62,6 +62,22 @@
 
 /* V3 (L3/I1): on-wall stream cards — whole-row drag to reorder, × / drop-zone to remove. */
 .rail-cards { display: flex; flex-direction: column; gap: var(--ms-space-1); margin-bottom: var(--ms-space-2); }
+.rail-empty { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); padding: var(--ms-space-2); }
+.rail-card.active { border-color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
+.rc-glyph { width: 12px; height: 12px; flex: 0 0 auto; }
+.rc-glyph.live { background: var(--ms-color-success); border-radius: 50%; }
+.rc-glyph.degraded { background: repeating-linear-gradient(90deg, var(--ms-color-warning) 0 2px, transparent 2px 4px); }
+.rc-glyph.offline { border: 2px solid var(--ms-color-text-muted); border-radius: 50%; position: relative; }
+.rc-glyph.offline::after { content: ''; position: absolute; left: -2px; top: 4px; width: 12px; height: 2px; background: var(--ms-color-text-muted); transform: rotate(-45deg); }
+.rc-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.rc-sub { font-size: 11px; color: var(--ms-color-text-tertiary); font-family: var(--ms-font-family-mono); }
+.stream-rail .rail-body { display: flex; flex-direction: column; }
+.rail-foot { margin-top: auto; font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); padding-top: var(--ms-space-1); }
+.st-stale { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-2); background: var(--ms-color-warning-soft); border: 1px solid var(--ms-color-warning); border-radius: var(--ms-radius-sm); color: var(--ms-color-text); font-size: var(--ms-font-size-xs); }
+.st-state { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); padding: var(--ms-space-2); }
+.st-error { color: var(--ms-color-danger); }
+.st-retry { background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
+.st-retry:hover { background: var(--ms-color-surface-hover); }
 .rail-card { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-2); border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); border-radius: 6px; cursor: grab; }
 .rail-card:active { cursor: grabbing; opacity: .6; }
 .rc-name { flex: 1; font-size: var(--ms-font-size-xs); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

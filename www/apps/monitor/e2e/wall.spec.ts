@@ -1,16 +1,13 @@
 import { test, expect } from './host-fixture';
+import { readyProducers, playAllFirst } from './flow';
 
-// S13 (P3 slice ③b): multi-stream wall mechanics. The host fixture ensures a
-// producing device room (PSK host = single producer); the tree reads producers
-// from /sfu/stats (B5). Play All / Watch Selected feed a tile grid (shared
-// VideoPlayer tile variant); Preview opens a modal window. cap16 hint + Play All
-// >8 confirm need >16 / >8 producers (not exercised by the single-host fixture).
-// Serial: the host fixture spawns/reuses one host at a time (no concurrent spawn).
+// S13 (P3 slice ③b): multi-stream wall mechanics. V9b (K12=A): the device tree lives in
+// the Picker; the rail shows selected cards. Non-prototype extras (per-stream Preview /
+// Watch Selected) were retired — the prototype has neither. Serial: one host at a time.
 test.describe.serial('Monitor wall (S13, slice ③b)', () => {
   test('Play All → wall tile readyState≥2 + first frame + layout control', async ({ page, hostProducer }) => {
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
-
+    await readyProducers(page, hostProducer.room);
     await page.locator('.st-play-all').first().click();
 
     const video = page.locator('.wall-grid .video-player video').first();
@@ -23,40 +20,9 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
     await expect(page.locator('.layout-menu')).toBeVisible();
   });
 
-  test('Preview opens a modal video reaching readyState≥2', async ({ page, hostProducer }) => {
-    await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
-
-    await page.locator('.st-preview').first().click();
-
-    const video = page.locator('.vp-modal-wide video');
-    await expect(video).toBeVisible({ timeout: 15000 });
-    // H3: the expand window is now a real dialog (kit Modal — role/Esc/trap).
-    await expect(page.locator('.vp-modal-wide[role="dialog"]')).toBeVisible();
-    await expect
-      .poll(async () => video.evaluate((v) => (v as HTMLVideoElement).readyState), { timeout: 30000, intervals: [500] })
-      .toBeGreaterThanOrEqual(2);
-  });
-
-  test('select stream → Watch Selected plays the tile', async ({ page, hostProducer }) => {
-    await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
-
-    await page.locator('.st-check input').first().check();
-    await expect(page.locator('.st-play-all').first()).toContainText('Watch Selected');
-    await page.locator('.st-play-all').first().click();
-
-    const video = page.locator('.wall-grid .video-player video').first();
-    await expect(video).toBeVisible({ timeout: 15000 });
-    await expect
-      .poll(async () => video.evaluate((v) => (v as HTMLVideoElement).readyState), { timeout: 30000, intervals: [500] })
-      .toBeGreaterThanOrEqual(2);
-  });
-
   test('close a tile removes it; Play All restores (wall lifecycle)', async ({ page, hostProducer }) => {
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
-
+    await readyProducers(page, hostProducer.room);
     await page.locator('.st-play-all').first().click();
     const tile = page.locator('.wall-grid .video-player');
     await expect(tile).toHaveCount(1, { timeout: 15000 });
@@ -64,7 +30,7 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
     await page.locator('.wall-grid .vp-close').first().click();
     await expect(tile).toHaveCount(0);
 
-    await page.locator('.st-play-all').first().click();
+    await playAllFirst(page);
     await expect(tile).toHaveCount(1, { timeout: 15000 });
     const video = page.locator('.wall-grid .video-player video').first();
     await expect
@@ -74,7 +40,7 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
 
   test('B2 named-layout switch changes the wall grid columns', async ({ page, hostProducer }) => {
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+    await readyProducers(page, hostProducer.room);
     await page.locator('.st-play-all').first().click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
 
@@ -90,12 +56,11 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
 
   test('V2 layout gallery keyboard nav (arrows + Enter)', async ({ page, hostProducer }) => {
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+    await readyProducers(page, hostProducer.room);
     await page.locator('.st-play-all').first().click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
     await page.locator('.layout-menu').click();
     await expect(page.locator('.layout-gallery')).toBeVisible();
-    // focus starts at current (auto); ArrowRight to '1', Enter selects
     await page.keyboard.press('ArrowRight');
     await page.keyboard.press('Enter');
     await expect(page.locator('.layout-gallery')).toHaveCount(0);
@@ -105,7 +70,7 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
 
   test('B2 single-tile zoom fills the wall; exit restores (K5)', async ({ page, hostProducer }) => {
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+    await readyProducers(page, hostProducer.room);
     await page.locator('.st-play-all').first().click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
 

@@ -1,16 +1,14 @@
 import { test, expect } from './host-fixture';
+import { openPicker } from './flow';
 
-// B3 (monitor-prototype-parity): add-stream shuttle picker (search + role=tree +
-// arrow/Enter keyboard, B5 contract) and M1 stale-data + Retry. Serial: one host
-// fixture at a time. The ARIA tree lives in the kit Modal portal (asserted globally).
+// B3 picker (V9b K12=A: device list now lives in the Picker) + M1 stale/Retry in the rail.
 test.describe.serial('Monitor picker (B3)', () => {
   test('picker opens with search + ARIA tree + keyboard; add to wall', async ({ page, hostProducer }) => {
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
-
-    await page.locator('.open-picker').click();
+    await openPicker(page);
     await expect(page.locator('[role="tree"]')).toBeVisible();
     await expect(page.locator('.picker-search')).toBeVisible();
+    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
 
     // search filters to zero, then back
     await page.locator('.picker-search').fill('zzz-no-match');
@@ -29,13 +27,14 @@ test.describe.serial('Monitor picker (B3)', () => {
 
   test('M1 stale banner + Retry keeps last known streams on fetch error', async ({ page, hostProducer }) => {
     await page.goto('/');
+    await openPicker(page);
     await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room, { timeout: 15000 });
+    await page.keyboard.press('Escape'); // back to the rail
 
-    // fail subsequent fetches; the poll surfaces a stale banner but keeps the tree
+    // fail subsequent fetches; the poll surfaces a stale banner but keeps the last data
     await page.route('**/api/admin/sfu/stats', (route) => route.abort());
     await expect(page.locator('.st-stale')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('.st-retry').first()).toBeVisible();
-    await expect(page.locator('.st-device-name').first()).toContainText(hostProducer.room);
 
     // Retry after the route heals restores live data (stale banner clears)
     await page.unroute('**/api/admin/sfu/stats');

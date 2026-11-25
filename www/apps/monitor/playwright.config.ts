@@ -7,6 +7,10 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   timeout: 30000,
+  // The host-fixture spawns one PSK host per test; the dev SFU is single-producer per
+  // room, so parallel workers contend for ICE. Serialize + one retry for transient ICE.
+  workers: 1,
+  retries: 1,
   globalSetup: './e2e/global-setup.ts',
   projects: [
     // anonymous: login page + route guards + token self-heal (no storageState)

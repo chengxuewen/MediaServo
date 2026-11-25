@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openPicker } from './flow';
 
 // V3 (monitor-nvr-visual-parity): left-rail on-wall cards + drag reorder / drag-to-remove
 // + narrow overlay-drawer mutual exclusion + pin. Mock /sfu/stats (2 producers) so two
@@ -14,8 +15,9 @@ test.describe('V3 rail cards + drag + drawer', () => {
   test('drag reorders on-wall cards', async ({ page }) => {
     await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams: [prod('a', 'room-a'), prod('b', 'room-b')] } }));
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toBeVisible({ timeout: 15000 });
+    await openPicker(page);
     await page.locator('.st-group', { hasText: 'room-a' }).locator('.st-play-all').click();
+    await openPicker(page);
     await page.locator('.st-group', { hasText: 'room-b' }).locator('.st-play-all').click();
     await expect(page.locator('.rail-card')).toHaveCount(2);
     const before = await page.locator('.rc-name').allTextContents();
@@ -27,8 +29,9 @@ test.describe('V3 rail cards + drag + drawer', () => {
   test('drag onto remove zone closes the tile', async ({ page }) => {
     await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams: [prod('a', 'room-a'), prod('b', 'room-b')] } }));
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toBeVisible({ timeout: 15000 });
+    await openPicker(page);
     await page.locator('.st-group', { hasText: 'room-a' }).locator('.st-play-all').click();
+    await openPicker(page);
     await page.locator('.st-group', { hasText: 'room-b' }).locator('.st-play-all').click();
     await expect(page.locator('.rail-card')).toHaveCount(2);
     await page.locator('.rail-card').first().dragTo(page.locator('.rail-drop-remove'));

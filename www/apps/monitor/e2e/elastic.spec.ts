@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openPicker } from './flow';
 
 // V6 (monitor-nvr-visual-parity): elastic/custom layouts — 25/36 empty-slot parity
 // (cap16), 2x2 span, column-weight drag, region drag-box zoom + double-click reset.
@@ -14,8 +15,9 @@ test.describe('V6 elastic/custom + region zoom', () => {
   test('25-layout fills empty slots under cap16 (K10)', async ({ page }) => {
     await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams: [prod('a', 'room-a'), prod('b', 'room-b')] } }));
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toBeVisible({ timeout: 15000 });
+    await openPicker(page);
     await page.locator('.st-group', { hasText: 'room-a' }).locator('.st-play-all').click();
+    await openPicker(page);
     await page.locator('.st-group', { hasText: 'room-b' }).locator('.st-play-all').click();
     await pick(page, '25');
     await expect(page.locator('.tile-empty')).toHaveCount(23);
@@ -24,7 +26,7 @@ test.describe('V6 elastic/custom + region zoom', () => {
   test('custom 2x2 span toggle persists', async ({ page }) => {
     await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams: [prod('a', 'room-a')] } }));
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toBeVisible({ timeout: 15000 });
+    await openPicker(page);
     await page.locator('.st-play-all').first().click();
     await pick(page, 'Custom');
     await page.locator('.wall-grid .video-player').first().hover();
@@ -35,7 +37,7 @@ test.describe('V6 elastic/custom + region zoom', () => {
   test('column-weight drag changes fr weights', async ({ page }) => {
     await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams: [prod('a', 'room-a')] } }));
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toBeVisible({ timeout: 15000 });
+    await openPicker(page);
     await page.locator('.st-play-all').first().click();
     await pick(page, 'Custom');
     const before = await page.locator('.wall-grid').evaluate((el) => getComputedStyle(el).gridTemplateColumns);
@@ -49,7 +51,7 @@ test.describe('V6 elastic/custom + region zoom', () => {
   test('region drag-box zooms; double-click resets', async ({ page }) => {
     await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams: [prod('a', 'room-a')] } }));
     await page.goto('/');
-    await expect(page.locator('.st-device-name').first()).toBeVisible({ timeout: 15000 });
+    await openPicker(page);
     await page.locator('.st-play-all').first().click();
     const body = page.locator('.wall-grid .vp-body').first();
     await expect(body).toBeVisible();

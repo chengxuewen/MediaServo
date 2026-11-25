@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { VideoPlayer, Confirm } from '@mediaservo/react';
 import { getToken } from '@mediaservo/client';
-import StreamTree, { type StreamSelection } from '../components/StreamTree';
+import type { StreamSelection } from '../components/StreamTree';
 import Picker from '../components/Picker';
 import AlertPanel from '../components/AlertPanel';
 import { useStreams } from '../hooks/useStreams';
@@ -112,7 +112,6 @@ export default function Home() {
   const demo = isDemo();
   const real = useStreams();
   const producers = demo ? DEMO_PRODUCERS : real.producers;
-  const loading = demo ? false : real.loading;
   const error = demo ? null : real.error;
   const refetch = real.refetch;
   // M6: single audit poll + single admin WS owned here; Timeline/AlertPanel are
@@ -122,7 +121,6 @@ export default function Home() {
   const onWsEvent = useCallback(() => { refetch(); audit.refetch(); }, [refetch, audit.refetch]);
   useAdminWS(onWsEvent);
 
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [playing, setPlaying] = useState<string[]>(demo ? DEMO_PLAYING : []);
   const [modal, setModal] = useState<StreamSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -157,6 +155,11 @@ export default function Home() {
   const reorderPlaying = (from: string, to: string) => {
     if (!from || from === to) return;
     setPlaying((prev) => { const a = [...prev]; const fi = a.indexOf(from); const ti = a.indexOf(to); if (fi < 0 || ti < 0) return prev; a.splice(fi, 1); a.splice(ti, 0, from); return a; });
+  };
+  // V9b: rail card -> wall slot reorder (drop onto a wall cell / empty slot).
+  const dropToWall = (fromId: string, toIdx: number) => {
+    if (!fromId) return;
+    setPlaying((prev) => { if (!prev.includes(fromId)) return prev; const a = prev.filter((x) => x !== fromId); a.splice(Math.min(toIdx, a.length), 0, fromId); return a; });
   };
 
   const [clock, setClock] = useState(() => new Date());
@@ -258,16 +261,6 @@ export default function Home() {
     }
   }, [producers, playing]);
 
-  const toggleSelect = (id: string) => setSelected((prev) => {
-    const next = new Set(prev);
-    next.has(id) ? next.delete(id) : next.add(id);
-    return next;
-  });
-  const toggleAll = (room: string, checked: boolean) => setSelected((prev) => {
-    const next = new Set(prev);
-    for (const p of producers) if (p.room === room) { checked ? next.add(p.id) : next.delete(p.id); }
-    return next;
-  });
   const addPlaying = (ids: string[]) => {
     const fresh = ids.filter((id) => !playing.includes(id));
     const merged = [...playing, ...fresh].slice(0, MAX_PLAYING);
@@ -276,11 +269,7 @@ export default function Home() {
     setPlayHint(dropped > 0 ? `Playback cap of ${MAX_PLAYING} reached; skipped ${dropped} (close tiles to play more)` : '');
   };
   const playRoom = (room: string) => {
-    const roomProducers = producers.filter((p) => p.room === room);
-    const roomSelected = roomProducers.some((p) => selected.has(p.id));
-    const ids = roomSelected
-      ? roomProducers.filter((p) => selected.has(p.id)).map((p) => p.id)
-      : roomProducers.map((p) => p.id);
+    const ids = producers.filter((p) => p.room === room).map((p) => p.id);
     if (ids.length === 0) return;
     if (ids.length > PLAY_ALL_CONFIRM) { setPendingPlay({ room, ids }); return; }
     addPlaying(ids);
@@ -321,36 +310,35 @@ export default function Home() {
             <button className="region-collapse" onClick={() => toggleRegion('left')} aria-label={regions.left ? 'Hide left panel' : 'Show left panel'}>{regions.left ? '‹' : '›'}</button>
           </div>
           <div className="rail-body">
+            {error && producers.length === 0 && <div className="st-state st-error">{error} <button className="st-retry" onClick={refetch}>Retry</button></div>}
+            {error && producers.length > 0 && <div className="st-stale" role="alert">Showing last known streams — refresh failed. <button className="st-retry" onClick={refetch}>Retry</button></div>}
             <button className="open-picker" onClick={() => setPickerOpen(true)}>＋ Select streams</button>
-            {playing.length > 0 && (
-              <div className="rail-cards" aria-label="On-wall streams (drag to reorder)">
-                {playing.map((id) => { const p = byId.get(id); return (
-                  <div key={id} className="rail-card" draggable
+            <div className="rail-cards" aria-label="Selected streams (drag to reorder)">
+              {playing.length === 0 && <div className="rail-empty">No streams selected — use “＋ Select streams”.</div>}
+              {playing.map((id) => {
+                const p = byId.get(id);
+                const state = !p ? 'offline' : p.score < 8 ? 'degraded' : 'live';
+                return (
+                  <div key={id} className={`rail-card${state === 'live' ? ' active' : ''}`} draggable
                     onDragStart={(e) => e.dataTransfer.setData('text/plain', id)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => { e.preventDefault(); reorderPlaying(e.dataTransfer.getData('text/plain'), id); }}>
-                    <span className="rc-name">{p ? `${p.room} · ${p.kind}` : id}</span>
+                    <span className={`rc-glyph ${state}`} aria-hidden="true" />
+                    <span className="rc-main">
+                      <span className="rc-name">{p ? p.room : id}</span>
+                      <span className="rc-sub">{p ? `${p.kind} · ${state}` : 'offline'}</span>
+                    </span>
                     <button className="rc-del" onClick={() => closeTile(id)} aria-label={`Remove ${p?.room ?? id}`}>×</button>
                   </div>
-                ); })}
-                <div className="rail-drop-remove" onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) closeTile(id); }}>
-                  Drop here to remove
-                </div>
+                );
+              })}
+              <div className="rail-drop-remove" onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) closeTile(id); }}>
+                Drop here to remove
               </div>
-            )}
+            </div>
             {pinMsg && <div className="rail-pinmsg" role="status">{pinMsg}</div>}
-            <StreamTree
-              producers={producers}
-              loading={loading}
-              error={error}
-              selected={selected}
-              onToggleSelect={toggleSelect}
-              onToggleAll={toggleAll}
-              onPlay={playRoom}
-              onPreview={setModal}
-              onRetry={refetch}
-            />
+            <div className="rail-foot">{playing.length} streams selected</div>
           </div>
         </aside>
 
@@ -392,7 +380,9 @@ export default function Home() {
                     </div>
                   );
                   return (
-                    <div className="wall-cell" key={id} style={cellStyle(idx, id)}>
+                    <div className="wall-cell" key={id} style={cellStyle(idx, id)}
+                      onDragOver={(e) => e.preventDefault()}
+                      onDrop={(e) => { e.preventDefault(); dropToWall(e.dataTransfer.getData('text/plain'), idx); }}>
                       <VideoPlayer
                         roomId={p.room}
                         serverUrl={wsServerUrl()}
@@ -413,7 +403,9 @@ export default function Home() {
                   );
                 })}
                 {Array.from({ length: emptyCount }).map((_, i) => (
-                  <div className="tile-empty" key={`empty-${i}`} style={cellStyle(visible.length + i)}>Empty slot</div>
+                  <div className="tile-empty" key={`empty-${i}`} style={cellStyle(visible.length + i)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); dropToWall(e.dataTransfer.getData('text/plain'), visible.length + i); }}>Empty slot</div>
                 ))}
               </div>
               {layout.elastic && !zoomedId && colWeights.slice(0, -1).map((_, i) => {
@@ -447,7 +439,7 @@ export default function Home() {
       </div>
 
       {pickerOpen && (
-        <Picker producers={producers} playing={playing} onClose={() => setPickerOpen(false)} onAdd={addPlaying} />
+        <Picker producers={producers} playing={playing} onClose={() => setPickerOpen(false)} onAdd={addPlaying} onPlay={playRoom} />
       )}
       {modal && (
         <VideoPlayer

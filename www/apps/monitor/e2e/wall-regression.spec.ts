@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { openPicker } from './flow';
 
-// B1/B2 regression (P3 independent review findings): deterministic via a
-// /api/admin/sfu/stats route mock — no real host needed. Pins the two Blocking
-// fixes so they cannot regress silently (the single-host wall fixture cannot
-// reach multi-room selection or producer-death scenarios).
+// B1/B2 regression (P3 review): deterministic via a /sfu/stats mock. V9b (K12=A): the
+// device list lives in the Picker; per-stream checkbox selection was retired (not in the
+// prototype), so B1 now asserts per-room Play All is independent (no cross-room no-op).
 function producer(id: string, room: string) {
   return {
     room, owner: null, peer_id: 'host', role: 'producer', id, kind: 'video',
@@ -15,23 +15,16 @@ function producer(id: string, room: string) {
 }
 
 test.describe('Monitor wall regressions (B1/B2)', () => {
-  test('B1: selecting in room A does not silence room B Play All', async ({ page }) => {
+  test('B1: room B Play All is independent of room A', async ({ page }) => {
     await page.route('**/api/admin/sfu/stats', (route) => route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ streams: [producer('pa', 'room-a'), producer('pb', 'room-b')] }),
     }));
     await page.goto('/');
+    await openPicker(page);
     await expect(page.locator('.st-device-name', { hasText: 'room-a' })).toBeVisible({ timeout: 15000 });
     await expect(page.locator('.st-device-name', { hasText: 'room-b' })).toBeVisible();
-
-    // select room A's stream → global selected.size > 0
-    await page.locator('.st-group', { hasText: 'room-a' }).locator('.st-check input').check();
-
-    // room B button is per-room "Play All"; clicking it must play room B (not no-op)
-    const roomB = page.locator('.st-group', { hasText: 'room-b' });
-    await expect(roomB.locator('.st-play-all')).toContainText('Play All');
-    await roomB.locator('.st-play-all').click();
-
+    await page.locator('.st-group', { hasText: 'room-b' }).locator('.st-play-all').click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
     await expect(page.locator('.wall-grid .vp-title')).toHaveText('room-b');
   });
@@ -42,13 +35,12 @@ test.describe('Monitor wall regressions (B1/B2)', () => {
       contentType: 'application/json', body: JSON.stringify({ streams }),
     }));
     await page.goto('/');
+    await openPicker(page);
     await expect(page.locator('.st-device-name', { hasText: 'room-x' })).toBeVisible({ timeout: 15000 });
     await page.locator('.st-play-all').first().click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
 
-    // producer dies (device offline / restart uuid churn)
     streams = [];
-    // closable offline placeholder appears, then the grace reconcile frees the slot
     await expect(page.locator('.wall-offline')).toHaveCount(1, { timeout: 10000 });
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(0, { timeout: 15000 });
     await expect(page.locator('.wall-offline')).toHaveCount(0, { timeout: 15000 });
@@ -60,9 +52,9 @@ test.describe('Monitor wall regressions (B1/B2)', () => {
       contentType: 'application/json', body: JSON.stringify({ streams }),
     }));
     await page.goto('/');
+    await openPicker(page);
     await expect(page.locator('.st-device-name', { hasText: 'room-cap' })).toBeVisible({ timeout: 15000 });
     await page.locator('.st-group', { hasText: 'room-cap' }).locator('.st-play-all').click();
-    // 17 > 8 → Confirm dialog (B5 micro-decision); confirm caps at 16
     await page.getByRole('button', { name: 'Play', exact: true }).click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(16, { timeout: 15000 });
     await expect(page.locator('.wt-hint')).toContainText('skipped 1');
