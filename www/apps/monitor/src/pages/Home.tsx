@@ -24,15 +24,20 @@ const LEGACY_COLS_KEY = 'mediaservo_monitor_cols';
 // B2 min-tile width (prototype §2g): narrow screens horizontal-scroll, never shrink tiles to nothing.
 const MIN_TILE_PX = 230;
 
-interface Layout { id: string; name: string; cols: number; slots: number; areas?: string[]; }
+interface Layout { id: string; name: string; cols: number; slots: number; areas?: string[]; elastic?: boolean; }
 const sym = (id: string, n: number): Layout => { const c = Math.round(Math.sqrt(n)); return { id, name: id, cols: c, slots: n }; };
-// K4=A R6 精简集: symmetric 1/4/9/16 + asymmetric 1+3/1+5/1+7 (25/36/custom deferred D3).
+// V6 (K6): full LAYOUTS — R6 set + 25/36 + custom elastic (cap16 + empty-slot parity, K10).
 const LAYOUTS: Layout[] = [
-  sym('1', 1), sym('4', 4), sym('9', 9), sym('16', 16),
+  sym('1', 1), sym('4', 4), sym('9', 9), sym('16', 16), sym('25', 25), sym('36', 36),
   { id: '1+3', name: '1 + 3', cols: 3, slots: 4, areas: ['big big s1', 'big big s2', 'big big s3'] },
   { id: '1+5', name: '1 + 5', cols: 4, slots: 6, areas: ['big big s1 s2', 'big big s3 s4', 'big big s5 .'] },
   { id: '1+7', name: '1 + 7', cols: 4, slots: 8, areas: ['big big s1 s2', 'big big s3 s4', 'big big s5 s6', 'big big s7 .'] },
+  { id: 'custom', name: 'Custom', cols: 3, slots: 9, elastic: true },
 ];
+const WEIGHTS_KEY = 'ms_col_weights';
+const SPANS_KEY = 'ms_tile_spans';
+function loadWeights(): number[] { try { const v = JSON.parse(localStorage.getItem(WEIGHTS_KEY) || 'null'); if (Array.isArray(v) && v.length === 3) return v; } catch { /* silent */ } return [1, 1, 1]; }
+function loadSpans(): Record<string, boolean> { try { return JSON.parse(localStorage.getItem(SPANS_KEY) || '{}'); } catch { return {}; } }
 const autoTemplateId = (n: number) => (n <= 1 ? '1' : n <= 4 ? '4' : n <= 6 ? '1+5' : n <= 9 ? '9' : '16');
 const findLayout = (id: string) => LAYOUTS.find((l) => l.id === id) ?? LAYOUTS[1];
 function loadLayout(): string {
@@ -183,12 +188,44 @@ export default function Home() {
   // so Prev/Next stay responsive instead of walking a stale raw page down.
   useEffect(() => { setPage((p) => Math.min(p, pages - 1)); }, [pages]);
 
+  // V6 (I3): elastic column weights + per-tile 2x2 span, persisted.
+  const [colWeights, setColWeights] = useState(loadWeights);
+  const [tileSpans, setTileSpans] = useState<Record<string, boolean>>(loadSpans);
+  const toggleSpan = (id: string) => setTileSpans((prev) => { const n = { ...prev, [id]: !prev[id] }; try { localStorage.setItem(SPANS_KEY, JSON.stringify(n)); } catch { /* silent */ } return n; });
+  const dragCol = (i: number) => (e: React.PointerEvent) => {
+    e.preventDefault();
+    const wrap = (e.currentTarget as HTMLElement).parentElement!;
+    const r = wrap.getBoundingClientRect();
+    const move = (ev: PointerEvent) => {
+      const frac = Math.min(Math.max((ev.clientX - r.left) / r.width, 0.15), 0.85);
+      setColWeights((prev) => {
+        const total = prev.reduce((a, b) => a + b, 0);
+        const before = prev.slice(0, i).reduce((a, b) => a + b, 0);
+        const pair = prev[i] + prev[i + 1];
+        const wi = Math.max(0.35, frac * total - before);
+        const n = [...prev]; n[i] = wi; n[i + 1] = Math.max(0.35, pair - wi);
+        try { localStorage.setItem(WEIGHTS_KEY, JSON.stringify(n)); } catch { /* silent */ }
+        return n;
+      });
+    };
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+
   const gridStyle: CSSProperties = zoomedId
     ? { gridTemplateColumns: '1fr' }
-    : layout.areas
-      ? { gridTemplateColumns: `repeat(${layout.cols}, minmax(${MIN_TILE_PX}px, 1fr))`, gridTemplateAreas: layout.areas.map((r) => `"${r}"`).join(' ') }
-      : { gridTemplateColumns: `repeat(${layout.cols}, minmax(${MIN_TILE_PX}px, 1fr))` };
-  const cellStyle = (idx: number): CSSProperties => (layout.areas && !zoomedId ? { gridArea: idx === 0 ? 'big' : `s${idx}` } : {});
+    : layout.elastic
+      ? { gridTemplateColumns: colWeights.map((w) => `${w}fr`).join(' ') }
+      : layout.areas
+        ? { gridTemplateColumns: `repeat(${layout.cols}, minmax(${MIN_TILE_PX}px, 1fr))`, gridTemplateAreas: layout.areas.map((r) => `"${r}"`).join(' ') }
+        : { gridTemplateColumns: `repeat(${layout.cols}, minmax(${MIN_TILE_PX}px, 1fr))` };
+  const cellStyle = (idx: number, id?: string): CSSProperties => {
+    const s: CSSProperties = {};
+    if (layout.areas && !zoomedId) s.gridArea = idx === 0 ? 'big' : `s${idx}`;
+    if (layout.elastic && id && tileSpans[id] && !zoomedId) { s.gridColumn = 'span 2'; s.gridRow = 'span 2'; }
+    return s;
+  };
+  const emptyCount = !zoomedId ? Math.max(0, layout.slots - visible.length) : 0;
 
   // B2 fix: reconcile dead playing ids after a grace period.
   const missingSince = useRef<Map<string, number>>(new Map());
@@ -327,18 +364,19 @@ export default function Home() {
             {playHint && <span className="wt-hint" role="status">{playHint}</span>}
           </div>
           {playing.length > 0 ? (
-            <div className={`wall-grid${statsVisible ? '' : ' stats-hidden'}`} style={gridStyle}>
+            <div className="wall-wrap">
+              <div className={`wall-grid${statsVisible ? '' : ' stats-hidden'}`} style={gridStyle}>
                 {visible.map((id, idx) => {
                   const p = byId.get(id);
                   if (!p) return (
-                    <div className="wall-offline" key={id} style={cellStyle(idx)}>
+                    <div className="wall-offline" key={id} style={cellStyle(idx, id)}>
                       <span className="wo-title">SIGNAL LOST</span>
                       <span className="wo-reason">Producer left — stream ended or device offline</span>
                       <button className="wo-close" onClick={() => closeTile(id)}>Close</button>
                     </div>
                   );
                   return (
-                    <div className="wall-cell" key={id} style={cellStyle(idx)}>
+                    <div className="wall-cell" key={id} style={cellStyle(idx, id)}>
                       <VideoPlayer
                         roomId={p.room}
                         serverUrl={wsServerUrl()}
@@ -347,12 +385,23 @@ export default function Home() {
                         nvr
                         onZoom={() => setZoomedId(id)}
                         onRemove={() => closeTile(id)}
+                        onSpan={layout.elastic ? () => toggleSpan(id) : undefined}
+                        spanned={!!tileSpans[id]}
                         onExpand={() => setModal({ room: p.room, producerId: p.id, kind: p.kind })}
                         onClose={() => closeTile(id)}
                       />
                     </div>
                   );
                 })}
+                {Array.from({ length: emptyCount }).map((_, i) => (
+                  <div className="tile-empty" key={`empty-${i}`} style={cellStyle(visible.length + i)}>Empty slot</div>
+                ))}
+              </div>
+              {layout.elastic && !zoomedId && colWeights.slice(0, -1).map((_, i) => {
+                const total = colWeights.reduce((a, b) => a + b, 0);
+                const left = (colWeights.slice(0, i + 1).reduce((a, b) => a + b, 0) / total) * 100;
+                return <span key={i} className="col-handle" style={{ left: `${left}%` }} onPointerDown={dragCol(i)} title="Drag to resize column" />;
+              })}
             </div>
           ) : (
             <div className="canvas-empty">No streams on the wall yet. Pick streams in the left rail and Play All / Watch Selected.</div>

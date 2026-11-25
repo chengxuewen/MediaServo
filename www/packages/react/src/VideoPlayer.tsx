@@ -30,6 +30,9 @@ export interface VideoPlayerProps {
   onZoom?: () => void;
   /** V1/K9: remove this stream from the wall (nvr tile action). */
   onRemove?: () => void;
+  /** V6 (I3): toggle 2x2 span (elastic layouts only); size-b action. */
+  onSpan?: () => void;
+  spanned?: boolean;
 }
 
 type ConnectionStatus = 'connecting' | 'connected' | 'playing' | 'stalled' | 'disconnected' | 'error';
@@ -43,7 +46,7 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
   error: '#e74c3c',
 };
 
-export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand, nvr = false, onZoom, onRemove }: VideoPlayerProps) {
+export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand, nvr = false, onZoom, onRemove, onSpan, spanned = false }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -58,6 +61,34 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   // C1: audio-monitor mute is a real control (video starts muted for autoplay).
   const [muted, setMuted] = useState(true);
   const rootRef = useRef<HTMLDivElement>(null);
+  // V6 (I4): region drag-box zoom on the nvr tile; double-click resets.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const rzStart = useRef<{ x: number; y: number } | null>(null);
+  const [rz, setRz] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [rzView, setRzView] = useState<{ scale: number; ox: number; oy: number } | null>(null);
+  const rzDown = (e: React.PointerEvent) => {
+    if (!nvr || !isTile) return;
+    // don't capture pointer on tile-action buttons (would swallow their click)
+    if ((e.target as HTMLElement).closest('button')) return;
+    const r = bodyRef.current!.getBoundingClientRect();
+    rzStart.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+    setRz({ x: rzStart.current.x, y: rzStart.current.y, w: 0, h: 0 });
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const rzMove = (e: React.PointerEvent) => {
+    if (!rzStart.current) return;
+    const r = bodyRef.current!.getBoundingClientRect();
+    const cx = e.clientX - r.left, cy = e.clientY - r.top;
+    setRz({ x: Math.min(cx, rzStart.current.x), y: Math.min(cy, rzStart.current.y), w: Math.abs(cx - rzStart.current.x), h: Math.abs(cy - rzStart.current.y) });
+  };
+  const rzUp = () => {
+    if (rz && rz.w >= 24 && rz.h >= 24 && bodyRef.current) {
+      const r = bodyRef.current.getBoundingClientRect();
+      const scale = Math.min(8, Math.max(r.width / rz.w, r.height / rz.h));
+      setRzView({ scale, ox: rz.x + rz.w / 2, oy: rz.y + rz.h / 2 });
+    }
+    setRz(null); rzStart.current = null;
+  };
   const popRef = useRef<HTMLDivElement>(null);
   const [popPos, setPopPos] = useState<{ left: number; top: number } | null>(null);
 
@@ -158,7 +189,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         ref={rootRef}
         className={`video-player ${isDisconnected ? 'disconnected' : ''}${isTile ? ' tile' : ''}${nvr && isTile ? ' nvr' : ''}`}
         onClick={(e) => e.stopPropagation()}
-        onDoubleClick={isTile ? onExpand : undefined}
+        onDoubleClick={isTile ? (nvr ? () => setRzView(null) : onExpand) : undefined}
         onMouseMove={handleMouseMove}
         onMouseLeave={() => setShowControls(false)}
       >
@@ -173,14 +204,16 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         </div>
 
         {/* Video */}
-        <div className="vp-body">
-          <video ref={videoRef} autoPlay playsInline muted />
+        <div className="vp-body" ref={bodyRef} onPointerDown={rzDown} onPointerMove={rzMove} onPointerUp={rzUp}>
+          <video ref={videoRef} autoPlay playsInline muted style={rzView ? { transform: `scale(${rzView.scale})`, transformOrigin: `${rzView.ox}px ${rzView.oy}px` } : undefined} />
+          {rz && <span className="zoom-rect" style={{ left: rz.x, top: rz.y, width: rz.w, height: rz.h }} />}
           {status === 'connecting' && <div className="vp-status-msg">Connecting…</div>}
           {isTile && (status === 'connected' || status === 'playing' || status === 'stalled') && (
             <MiniStatsCard status={status} metrics={metrics} onExpand={() => setShowStats(true)} />
           )}
           {nvr && isTile && (
             <div className="tile-actions">
+              {onSpan && <button className={`tile-btn${spanned ? ' on' : ''}`} title="Toggle 2x2 span" aria-label="Toggle 2x2 span" aria-pressed={spanned} onClick={(e) => { e.stopPropagation(); onSpan(); }}><Maximize size={12} /></button>}
               {onZoom && <button className="tile-btn" title="Zoom this stream" aria-label="Zoom this stream" onClick={(e) => { e.stopPropagation(); onZoom(); }}><Maximize size={12} /></button>}
               {onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><X size={12} /></button>}
             </div>

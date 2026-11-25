@@ -123,6 +123,11 @@
 .video-player.nvr .tile-btn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.22); background: rgba(0,0,0,.55); color: rgba(255,255,255,.85); border-radius: 4px; cursor: pointer; }
 .video-player.nvr .tile-btn:hover { background: rgba(0,0,0,.8); color: #fff; }
 .video-player.nvr .tile-del:hover { background: rgba(200,45,45,.9); }
+.video-player.nvr .tile-btn.on { border-color: var(--ms-color-accent); color: var(--ms-color-accent); }
+/* V6 (I4): region drag-box zoom + double-click reset. */
+.video-player.nvr .vp-body { cursor: crosshair; }
+.video-player.nvr .vp-body video { transition: transform .15s; }
+.video-player.nvr .zoom-rect { position: absolute; z-index: 13; border: 1.5px solid var(--ms-color-accent); background: rgba(67,97,238,.18); box-shadow: 0 0 0 999px rgba(4,6,10,.35); pointer-events: none; }
 .video-player.nvr .tile-live { position: absolute; left: 6px; bottom: 6px; z-index: 11; font-size: 10px; font-weight: 600; letter-spacing: .5px; padding: 1px 6px; border-radius: 3px; }
 .video-player.nvr .tile-live.live { background: var(--ms-color-success); color: #04140c; }
 .video-player.nvr .tile-live.off { background: rgba(0,0,0,.4); color: var(--ms-palette-video-ok); border: 1px solid var(--ms-color-success); }
