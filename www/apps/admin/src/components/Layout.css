@@ -9,10 +9,11 @@
 .logo-text { line-height: 1; }
 .header-rule { width: 1px; height: 54px; align-self: center; background: rgba(255,255,255,.18); flex: 0 0 auto; }
 .header-page { display: inline-flex; align-items: center; color: rgba(255,255,255,.66); font-size: 0.8125rem; /* 13px — one step below the 16px brand */ font-weight: 400; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  /* V22g: with box-centring, a 13px run sits ~3px BELOW the 16px brand baseline
-     (measured: 30.5 vs 27.5). Nudge it up so both share the same baseline while the
-     group stays vertically centred. Verified by an e2e canvas-metric baseline check. */
-  transform: translateY(-3px); }
+  /* V22h: pixel-measured from a header crop (ink bbox): with no nudge the 13px run's
+     baseline sat 5px ABOVE the 16px brand's. +2px lands both ink bottoms on the same
+     row (verified by the pixel probe, not by canvas font metrics which mis-modelled
+     the ascent). Re-check with evidence/header-crop.png analysis after any font change. */
+  transform: translateY(2px); }
 .header-right { display: flex; align-items: center; gap: 0.75rem; }
 .logout-btn { background: none; border: 1px solid var(--ms-color-text-secondary); color: var(--ms-color-text-faint); font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 4px; cursor: pointer; }
 .logout-btn:hover { color: var(--ms-color-text-inverse); border-color: var(--ms-color-text-muted); }
