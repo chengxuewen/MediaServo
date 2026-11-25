@@ -70,7 +70,8 @@
 
 /* Bottom collapsible Event feed */
 .bottom-zone { background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); overflow: hidden; }
-.bottom-zone .rail-body { max-height: 40vh; overflow: auto; }
+/* V24: hidden entirely when off (was only hiding its body, leaving a title strip). */
+.bottom-zone.collapsed { display: none; }
 
 /* V3 (L3/I1): on-wall stream cards — whole-row drag to reorder, × / drop-zone to remove. */
 .rail-cards { display: flex; flex-direction: column; gap: var(--ms-space-1); margin-bottom: var(--ms-space-2); }

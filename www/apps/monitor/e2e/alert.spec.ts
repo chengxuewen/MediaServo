@@ -75,8 +75,12 @@ test.describe('Monitor alert panel (B4)', () => {
   });
 
   test('right alerts default OPEN (prototype) + playback transport guarded (K7)', async ({ page }) => {
+    // V24: clear the persisted region memory so the default (playback OFF) is exercised.
+    await page.addInitScript(() => { try { localStorage.removeItem('mediaservo_monitor_regions'); } catch { /* ignore */ } });
     await page.goto('/');
     await expect(page.locator('.mon-alerts')).toBeVisible();
+    await expect(page.locator('.bottom-zone')).toBeHidden();
+    await page.locator('[aria-label="Toggle playback bar"]').click();
     await expect(page.locator('.ctl-bar')).toBeVisible();
     const guarded = page.locator('.ctl-bar [aria-disabled="true"]');
     expect(await guarded.count()).toBeGreaterThan(5);

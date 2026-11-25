@@ -59,8 +59,9 @@ function loadRegions() {
     const raw = localStorage.getItem(REGION_KEY);
     if (raw) { const v = JSON.parse(raw); return { left: v.left !== false, right: v.right !== false, bottom: v.bottom !== false }; }
   } catch { /* fall through */ }
-  // Prototype desktop: left-open, RIGHT ALERTS OPEN, bottom playback open. Narrow: closed.
-  return { left: !narrow, right: !narrow, bottom: true };
+  // Prototype desktop: left rail + right alerts open; the PLAYBACK bar is OFF by default
+  // and is opened from the stage-bar's top-left region toggle (V24).
+  return { left: !narrow, right: !narrow, bottom: false };
 }
 function wsServerUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -434,14 +435,10 @@ export default function Home() {
         </aside>
       </div>
 
+      {/* V24: no "Playback" header — the bar is shown/hidden only by the stage-bar
+          region toggle (prototype has no header row above the timeline). */}
       <div className={`bottom-zone${regions.bottom ? '' : ' collapsed'}`}>
-        <div className="rail-head">
-          <span className="rail-title">Playback</span>
-          <button className="region-collapse" onClick={() => toggleRegion('bottom')} aria-label={regions.bottom ? 'Hide bottom panel' : 'Show bottom panel'}>{regions.bottom ? '⌄' : '⌃'}</button>
-        </div>
-        <div className="rail-body">
-          <PlaybackBar events={events} demo={demo} />
-        </div>
+        <PlaybackBar events={events} demo={demo} />
       </div>
 
       {pickerOpen && (

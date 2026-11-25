@@ -11,6 +11,8 @@ test('demo mode renders rich labeled preview', async ({ page }) => {
   await expect(page.locator('.video-player.degraded')).toHaveCount(1);
   await expect(page.locator('.tile-live.live').first()).toBeVisible();
   await expect(page.locator('.wall-offline')).toHaveCount(1); // SIGNAL LOST
+  // V24: the playback bar is off by default — open it from the stage-bar toggle.
+  await page.locator('[aria-label="Toggle playback bar"]').click();
   await expect(page.locator('.tl-block').first()).toBeVisible();
   await expect(page.locator('.monitor-home h1')).toHaveText(/Monitor Center/);
 });
