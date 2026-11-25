@@ -17,7 +17,8 @@
 .iconbtn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
 .iconbtn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 .iconbtn.on { border-color: var(--ms-color-accent); color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
-.health-chip { font-size: var(--ms-font-size-xs); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-full); border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); background: var(--ms-color-surface); cursor: pointer; white-space: nowrap; }
+.health-chip { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); background: var(--ms-color-surface-muted); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.health-chip .hc-ic { font-size: 12px; line-height: 1; }
 .health-chip.warn { border-color: var(--ms-color-danger); color: var(--ms-color-danger); background: var(--ms-color-danger-soft); font-weight: 600; }
 .live-clock { display: inline-flex; align-items: center; gap: var(--ms-space-1); font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; font-family: var(--ms-font-family-mono); }
 .theme-toggle { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
@@ -33,7 +34,7 @@
 .region-toggles button { position: relative; width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
 .region-toggles button[aria-pressed="true"] { border-color: var(--ms-color-accent); color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
 .region-toggles button:disabled { opacity: .45; cursor: not-allowed; }
-.al-badge { position: absolute; top: -5px; right: -5px; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 999px; background: var(--ms-color-danger); color: var(--ms-color-text-inverse); font-size: 9px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
+.al-badge { position: absolute; top: -5px; right: -5px; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 999px; background: var(--ms-color-danger); color: var(--ms-color-text-inverse); font-size: 10px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; font-variant-numeric: tabular-nums; }
 .mh-note { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); margin: 0; }
 
 /* Three-panel: left stream rail | center canvas (wall) | right alerts */
@@ -122,7 +123,7 @@
 @media (max-width: 767px) {
   .monitor-three-panel { grid-template-columns: 1fr; }
   /* V9f (2): drawers start BELOW the stage-bar so the top-left region toggles stay visible. */
-  .stream-rail, .mon-alerts { position: absolute; top: 60px; /* below the 52px stage-bar so its toggles stay clickable */ bottom: 0; z-index: 30; width: min(248px, 82%); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
+  .stream-rail, .mon-alerts { position: absolute; top: calc(var(--bar-h, 52px) + 8px); /* below the measured stage-bar (ruling B) */ bottom: 0; z-index: 30; width: min(248px, 82%); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
   .stream-rail { left: 0; }
   .mon-alerts { right: 0; width: min(300px, 86vw); }
   .stream-rail.collapsed, .mon-alerts.collapsed { display: none; }
@@ -132,18 +133,24 @@
 
 /* Wall toolbar / grid / offline tile (unchanged mechanics) */
 /* V19: single compact stage-bar row (52px), no wrap, insets 16 to align with the grid. */
-.wall-toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--ms-space-2); font-size: var(--ms-font-size-sm); color: var(--ms-color-text-muted); height: 52px; padding: 0 16px; overflow: hidden; }
+.wall-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px; padding: 4px 16px; font-size: var(--ms-font-size-sm); color: var(--ms-color-text-muted); background: var(--ms-color-surface); border-bottom: 1px solid var(--ms-color-border); }
 .wt-sep { width: 1px; height: 20px; background: var(--ms-color-border); flex: 0 0 auto; }
-.live-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--ms-color-success); background: var(--ms-color-success-soft); color: var(--ms-color-success); border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: .5px; flex: 0 0 auto; }
+.live-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border: 1px solid var(--ms-color-success); background: var(--ms-color-success-soft); color: var(--ms-color-success); border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: .5px; flex: 0 0 auto; }
 .live-chip .live-dot { width: 7px; height: 7px; }
 .wt-label { margin-right: var(--ms-space-1); }
 .wt-hint { margin-left: auto; color: var(--ms-color-text-secondary); font-size: var(--ms-font-size-xs); }
-.layout-menu { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-sm); cursor: pointer; }
+.layout-menu { display: inline-flex; align-items: center; gap: 8px; height: 30px; min-width: 120px; padding: 0 10px; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); border-radius: 6px; color: var(--ms-color-text); font-size: 12px; cursor: pointer; white-space: nowrap; }
+.layout-menu .lm-label { color: var(--ms-color-text-tertiary); }
+.layout-menu .lm-value { font-weight: 600; font-family: var(--ms-font-family-mono); }
+.layout-menu .lm-caret { margin-left: auto; color: var(--ms-color-text-tertiary); }
 .wt-exit-zoom { border: 1px solid var(--ms-color-accent); background: var(--ms-color-accent); color: var(--ms-color-text-inverse); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
 .wt-pager { display: flex; align-items: center; gap: var(--ms-space-1); }
-.wt-pager button { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
+.wt-pager button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 4px; cursor: pointer; }
+.wt-pager button:disabled { opacity: .45; cursor: default; }
+.wt-carousel { width: 30px; height: 30px; border-radius: 6px; }
+.wt-pager .wt-carousel { border-radius: 6px; }
 .wt-pager button:disabled { opacity: .4; cursor: default; }
-.wt-page { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; }
+.wt-page { font-size: 12px; color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; font-family: var(--ms-font-family-mono); letter-spacing: .5px; }
 .wt-carousel.active { border-color: var(--ms-color-accent); color: var(--ms-color-text); }
 .global-stats-toggle { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
 .global-stats-toggle.on { border-color: var(--ms-color-accent); color: var(--ms-color-text); }
@@ -183,21 +190,10 @@
 .wo-close:hover { background: rgba(0,0,0,.7); color: #fff; }
 /* V9e (S6/F1): prototype radius language — cards/buttons r6, chips/pills 999. */
 .rail-card, .open-picker, .region-toggles button, .theme-toggle, .layout-menu, .pb-ctl, .pb-live, .wo-close { border-radius: 6px; }
-.health-chip, .ap-unread, .ap-filter .chip { border-radius: 999px; }
+.ap-unread, .ap-filter .chip { border-radius: 999px; } /* V31: health chip is r6 (prototype) */
 /* V25: the stage-bar adapts to the CANVAS width (container query), not the viewport —
    with both rails open the canvas is narrow even on a wide screen. Secondary controls
    are dropped before anything clips or wraps. */
 .canvas { container-type: inline-size; }
 .layout-menu, .wt-page { white-space: nowrap; }
 .wall-toolbar > * { flex: 0 0 auto; }
-@container (max-width: 820px) {
-  .wall-toolbar .health-chip { display: none; } /* duplicated by the ALERTS panel */
-  .wall-toolbar { gap: var(--ms-space-1); }
-}
-@container (max-width: 700px) {
-  .wall-toolbar .live-clock { display: none; } /* keep the LIVE chip */
-}
-@container (max-width: 620px) {
-  .wall-toolbar .wt-carousel { display: none; }
-  .wall-toolbar .iconbtn { display: none; } /* sync/stats are secondary on tiny walls */
-}

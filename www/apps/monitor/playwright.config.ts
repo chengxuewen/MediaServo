@@ -22,7 +22,7 @@ export default defineConfig({
     // authenticated shell smoke + single-stream wall (admin storageState from globalSetup)
     {
       name: 'monitor-admin',
-      testMatch: /(shell|wall.*|picker|alert|finishing|rail|elastic|demo|pixel-align|responsive-matrix)\.spec\.ts/,
+      testMatch: /(shell|wall.*|picker|alert|finishing|rail|elastic|demo|pixel-align|responsive-matrix|stagebar-metrics)\.spec\.ts/,
       use: { baseURL: 'http://localhost:5176', storageState: '.auth/admin.json' },
     },
   ],

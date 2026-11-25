@@ -127,6 +127,18 @@ export default function Home() {
   const [playing, setPlaying] = useState<string[]>(demo ? DEMO_PLAYING : []);
   const [modal, setModal] = useState<StreamSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  // V31: overlay drawers sit below the stage-bar (ruling B). The bar can wrap to two
+  // rows, so its height is MEASURED and exposed as --bar-h instead of a fixed 60px.
+  const barRef = useRef<HTMLDivElement>(null);
+  const [barH, setBarH] = useState(52);
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setBarH(Math.round(el.getBoundingClientRect().height)));
+    ro.observe(el);
+    setBarH(Math.round(el.getBoundingClientRect().height));
+    return () => ro.disconnect();
+  }, []);
   const [statsVisible, setStatsVisible] = useState(true);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [playHint, setPlayHint] = useState('');
@@ -303,7 +315,7 @@ export default function Home() {
           toolbar (or removed) so the wall gets the height. */}
       <h1 className="sr-only">Monitor Center{canMonitor ? '' : ' (wall access requires admin/dispatcher)'}</h1>
 
-      <div className="monitor-three-panel">
+      <div className="monitor-three-panel" style={{ ['--bar-h' as string]: `${barH}px` } as React.CSSProperties}>
         <aside className={`stream-rail${regions.left ? '' : ' collapsed'}`}>
           <div className="rail-head">
             <span className="rail-title">Selected streams</span>
@@ -344,7 +356,7 @@ export default function Home() {
         </aside>
 
         <div className="canvas">
-          <div className="wall-toolbar">
+          <div className="wall-toolbar" ref={barRef}>
                 <div className="region-toggles">
                   <button aria-pressed={regions.left} onClick={() => toggleRegion('left')} title="Toggle stream rail" aria-label="Toggle stream rail"><PanelLeft size={15} /></button>
                   <button aria-pressed={regions.right} onClick={() => toggleRegion('right')} title="Toggle alert panel" aria-label="Toggle alert panel">
@@ -356,18 +368,21 @@ export default function Home() {
                 <span className="wt-sep" aria-hidden="true" />
                 <div className="layout-combo">
                   <button id="layout-menu" className="layout-menu" aria-haspopup="listbox" aria-expanded={galleryOpen} onClick={() => setGalleryOpen((o) => !o)}>
-                    Layout · {layoutId === 'auto' ? 'Auto' : findLayout(layoutId).name} ▾
+                    <span className="lm-label">Layout</span>
+                    <span className="lm-value">{layoutId === 'auto' ? 'Auto' : findLayout(layoutId).name}</span>
+                    <span className="lm-caret" aria-hidden="true">▾</span>
                   </button>
                   {galleryOpen && <LayoutGallery current={layoutId} onSelect={(id) => { applyLayout(id); setGalleryOpen(false); }} onClose={() => setGalleryOpen(false)} />}
                 </div>
                 <div className="wt-pager">
                   <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={curPage === 0 || pages <= 1 || !!zoomedId} aria-label="Previous page">‹</button>
-                  <span className="wt-page">{curPage + 1}/{pages}</span>
+                  <span className="wt-page">{curPage + 1} / {pages}</span>
                   <button onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={curPage >= pages - 1 || pages <= 1 || !!zoomedId} aria-label="Next page">›</button>
                   <button className={`wt-carousel${carousel ? ' active' : ''}`} aria-pressed={carousel} onClick={() => setCarousel((c) => !c)} title="Carousel" aria-label="Carousel">⟳</button>
                 </div>
                 {(degraded > 0 || offline > 0) && (
                   <button className="health-chip warn" role="status" onClick={focusDegraded} title="Focus first problem stream">
+                    <span className="hc-ic" aria-hidden="true">⚠</span>
                     {[degraded > 0 ? `${degraded} degraded` : '', offline > 0 ? `${offline} offline` : ''].filter(Boolean).join(' · ')}
                   </button>
                 )}

@@ -77,9 +77,10 @@ test.describe('pixel alignment (rendered ink)', () => {
     });
     expect(overflow.worst).toBeLessThanOrEqual(1); // nothing sticks out of the bar
     expect(overflow.scroll).toBeLessThanOrEqual(1); // no hidden overflow
-    expect(overflow.h).toBeLessThanOrEqual(54); // single row (no wrap)
-    // the health chip is the first thing dropped (its info lives in the ALERTS panel)
-    await expect(page.locator('.wall-toolbar .health-chip')).toBeHidden();
+    // V31: the prototype WRAPS instead of hiding controls (max 2 rows)
+    expect(overflow.h).toBeLessThanOrEqual(90);
+    await expect(page.locator('.wall-toolbar .health-chip')).toBeVisible();
+    await expect(page.locator('.live-clock')).toBeVisible();
   });
 
   test('toolbar first control aligns with the grid left edge (one screenshot)', async ({ page }) => {
