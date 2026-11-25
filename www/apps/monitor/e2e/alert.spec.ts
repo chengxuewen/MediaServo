@@ -21,10 +21,17 @@ test.describe('Monitor alert panel (B4)', () => {
     await expect(page.locator('.alert-panel .chip')).toHaveCount(3);
     await expect(page.locator('.ap-row')).toHaveCount(2);
     await expect(page.locator('.ap-unread')).toHaveText('2');
+    // V9c (K11=A): prototype row language — dot + title + mono time + severity word tag.
+    await expect(page.locator('.ap-dot')).toHaveCount(2);
+    await expect(page.locator('.ap-title', { hasText: 'Device offline' })).toHaveCount(1);
+    await expect(page.locator('.ap-title', { hasText: 'Authentication failure' })).toHaveCount(1);
+    await expect(page.locator('.ap-tag', { hasText: 'Alarm' })).toHaveCount(1);
+    await expect(page.locator('.ap-tag', { hasText: 'Warn' })).toHaveCount(1);
+    await expect(page.locator('.ap-time').first()).toHaveText(/^\d{2}:\d{2}:\d{2}$/);
 
-    await page.locator('.alert-panel .chip', { hasText: 'danger' }).click();
+    await page.locator('.alert-panel .chip', { hasText: 'Alarm' }).click();
     await expect(page.locator('.ap-row')).toHaveCount(1);
-    await page.locator('.alert-panel .chip', { hasText: 'all' }).click();
+    await page.locator('.alert-panel .chip', { hasText: 'All' }).click();
     await expect(page.locator('.ap-row')).toHaveCount(2);
 
     await page.locator('.ap-row').first().click();

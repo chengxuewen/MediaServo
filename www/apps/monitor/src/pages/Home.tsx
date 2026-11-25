@@ -268,6 +268,14 @@ export default function Home() {
     setPlaying(merged);
     setPlayHint(dropped > 0 ? `Playback cap of ${MAX_PLAYING} reached; skipped ${dropped} (close tiles to play more)` : '');
   };
+  // V9c (K11=A): alert click focuses ONE camera — add its first producer to the wall if
+  // absent, then zoom that single tile (prototype focusAlertCam).
+  const focusRoom = (room: string) => {
+    const p = producers.find((x) => x.room === room);
+    if (!p) return;
+    setPlaying((prev) => (prev.includes(p.id) ? prev : [...prev, p.id]));
+    setZoomedId(p.id);
+  };
   const playRoom = (room: string) => {
     const ids = producers.filter((p) => p.room === room).map((p) => p.id);
     if (ids.length === 0) return;
@@ -422,7 +430,7 @@ export default function Home() {
             <button className="region-collapse" onClick={() => toggleRegion('right')} aria-label={regions.right ? 'Hide right panel' : 'Show right panel'}>{regions.right ? '›' : '‹'}</button>
           </div>
           <div className="rail-body">
-            <AlertPanel events={events} producers={producers} onPlayRoom={playRoom} />
+            <AlertPanel events={events} producers={producers} onPlayRoom={playRoom} onFocusRoom={focusRoom} />
           </div>
         </aside>
       </div>
