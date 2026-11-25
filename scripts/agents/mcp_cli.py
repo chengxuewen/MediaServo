@@ -43,6 +43,102 @@ def node_bin():
     return shutil.which("node") or "node"
 
 
+OUT_DIR = os.path.join(ROOT, "out")
+RECORD = os.path.join(OUT_DIR, "mcp-browser.json")
+
+
+def load_record():
+    try:
+        with open(RECORD, encoding="utf-8") as handle:
+            data = json.load(handle)
+        return data if isinstance(data, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+def record_resolution(name, entry):
+    """Atomic write (tmp + os.replace): a torn record must never mislead the launcher."""
+    os.makedirs(OUT_DIR, exist_ok=True)
+    data = load_record() or {"record_version": 1, "resolutions": {}}
+    data.setdefault("resolutions", {})[name] = entry
+    tmp = RECORD + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        json.dump(data, handle, indent=2)
+        handle.write("\n")
+    os.replace(tmp, RECORD)
+
+
+def pinned_browser_version(prefix, browser):
+    """Read the pin's expected browser version from its own browsers.json -- never guess."""
+    path = os.path.join(prefix, "node_modules", "playwright-core", "browsers.json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for entry in json.load(handle).get("browsers", []):
+                if entry.get("name") == browser:
+                    return entry.get("browserVersion"), entry.get("revision")
+    except (OSError, ValueError):
+        pass
+    return None, None
+
+
+def browser_ladder(name, spec):
+    """Three rungs: pinned installer (host override) -> live system browser -> WARN.
+
+    Rung 1 uses the pin's own installer and CDN (version-exact, trusted artifact,
+    bounded cache) with PLAYWRIGHT_HOST_PLATFORM_OVERRIDE so a dropped host still
+    receives the build the pin wants. Rung 2 proves a system browser with
+    --version and records its real path. Strict env turns rung 3 red.
+    """
+    prefix = server_prefix(name)
+    browser = spec["browsers"][0]
+    version, revision = pinned_browser_version(prefix, browser)
+
+    cli = os.path.join(prefix, "node_modules", "playwright-core", "cli.js")
+    if os.path.isfile(cli):
+        env = node_env()
+        if sys.platform.startswith("linux") and not env.get("PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"):
+            env["PLAYWRIGHT_HOST_PLATFORM_OVERRIDE"] = os.environ.get(
+                "MCP_PLAYWRIGHT_HOST_OVERRIDE", "ubuntu22.04-x64")
+        print(f"{PREFIX} {name:16s} rung 1: installer {browser} (pin build {revision or '?'}) ...")
+        try:
+            proc = subprocess.run([node_bin(), cli, "install", browser],
+                                  cwd=HERE, env=env, stdin=subprocess.DEVNULL,
+                                  check=False, timeout=1800)
+            rc = proc.returncode
+        except subprocess.TimeoutExpired:
+            rc = 1
+        if rc == 0:
+            record_resolution(name, {"mode": "playwright", "browser": browser,
+                                     "version": version or "unknown", "executable": None})
+            print(f"{PREFIX} {name:16s} resolved: playwright {browser} {version or ''}")
+            return 0
+        print(f"{PREFIX} {name:16s} rung 1 refused (rc={rc})")
+
+    for cand in ("google-chrome", "google-chrome-stable", "chromium", "chromium-browser", "chrome"):
+        found = shutil.which(cand)
+        if not found:
+            continue
+        real = os.path.realpath(found)
+        try:
+            proc = subprocess.run([real, "--version"], capture_output=True, text=True,
+                                  check=False, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if proc.returncode == 0 and proc.stdout.strip():
+            ver = proc.stdout.strip().split()[-1]
+            record_resolution(name, {"mode": "system", "browser": cand,
+                                     "version": ver, "executable": real})
+            print(f"{PREFIX} {name:16s} resolved: system {cand} {ver} "
+                  f"(NOTE: system browsers auto-update; only playwright builds are pinned)")
+            return 0
+
+    print(f"{PREFIX} {name:16s} WARN: no usable browser (installer refused + no system browser)")
+    if os.environ.get("MCP_BROWSER_STRICT"):
+        print(f"{PREFIX} {name:16s} MCP_BROWSER_STRICT set -> failing")
+        return 1
+    return 0
+
+
 def node_env():
     # npm and the installed npm bins (codegraph, playwright-mcp) use
     # `#!/usr/bin/env node` shebangs: resolving the npm path alone is not
@@ -122,7 +218,35 @@ def cmd_status() -> int:
             print(f"{PREFIX} codegraph status: error")
     else:
         print(f"{PREFIX} codegraph binary missing -- run: ./msrtc.sh mcp setup")
+    record = (load_record() or {}).get("resolutions") or {}
+    for name, spec in specs().items():
+        if spec.get("kind") == "npm" and spec.get("browsers"):
+            entry = record.get(name) or {}
+            if entry.get("mode"):
+                print(f"{PREFIX} {name:16s} browser resolved: mode={entry['mode']} "
+                      f"browser={entry.get('browser')} version={entry.get('version')}")
+            else:
+                print(f"{PREFIX} {name:16s} browser UNRESOLVED -- run: ./msrtc.sh mcp setup")
     print(f"{PREFIX} status is read-only")
+    return 0
+
+
+def cmd_latest() -> int:
+    """Report-only: show newer upstream versions. Never installs, never touches pins."""
+    for name, spec in specs().items():
+        if spec.get("kind") != "npm":
+            continue
+        latest = "unknown"
+        try:
+            proc = subprocess.run([npm_bin(), "view", spec["pkg"], "version", "--json"],
+                                  capture_output=True, text=True, check=False,
+                                  env=node_env(), timeout=120)
+            latest = proc.stdout.strip().strip('"') or "unknown"
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        drift = "" if latest == spec["version"] else f"  (pin {spec['version']})"
+        print(f"{PREFIX} {name:16s} latest={latest}{drift}")
+    print(f"{PREFIX} report-only: pins are NOT changed")
     return 0
 
 
@@ -151,29 +275,7 @@ def install_npm(name, spec) -> int:
     # deps are outside the gate (ubuntu20.04 is unsupported; this box already
     # has a system chromium's shared libs the bundled one can run against).
     if spec.get("browsers"):
-        bin_dir = os.path.join(prefix, "node_modules", ".bin")
-        rc2 = 0
-        for tool in ("playwright", "playwright-core"):
-            pw = os.path.join(bin_dir, tool)
-            if os.path.isfile(pw):
-                print(f"{PREFIX} {name:16s} installing browsers: {', '.join(spec['browsers'])} ...")
-                proc = subprocess.run(
-                    [node_bin(), pw, "install", *spec["browsers"]],
-                    cwd=HERE, env=node_env(),
-                    stdin=subprocess.DEVNULL, check=False)
-                rc2 = proc.returncode
-                break
-        if rc2:
-            # Refusals here are host-support refusals (e.g. playwright refusing
-            # ubuntu20.04), not pin failures. The serve side resolves any
-            # cached chromium-* build via --executable-path, so setup stays
-            # green and the runtime fallback chain (cache -> env -> error
-            # hint) does the real work.
-            print(f"{PREFIX} {name:16s} browser install refused/failed (rc={rc2}); "
-                  f"serve-side cache resolution will pick up any cached chromium")
-        else:
-            print(f"{PREFIX} {name:16s} browsers ready ({', '.join(spec['browsers'])})")
-        return 0
+        return browser_ladder(name, spec)
     return 0
 
 
@@ -286,7 +388,9 @@ def main() -> int:
         return cmd_sync()
     if command == "index":
         return cmd_index()
-    print(f"{PREFIX} usage: status|setup|sync|index", file=sys.stderr)
+    if command == "latest":
+        return cmd_latest()
+    print(f"{PREFIX} usage: status|setup|sync|index|latest", file=sys.stderr)
     return 2
 
 

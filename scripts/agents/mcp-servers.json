@@ -11,7 +11,7 @@
     "pkg": "@playwright/mcp",
     "version": "0.0.82",
     "bin": "playwright-mcp",
-    "args": ["--headless", "--no-sandbox", "--browser", "chromium"],
+    "args": ["--no-sandbox"],
     "browsers": ["chromium"],
     "probe": ["playwright-mcp", "--version"]
   },

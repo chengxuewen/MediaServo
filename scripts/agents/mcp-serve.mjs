@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(HERE, '..', '..')
+// Setup writes this record (out/ is gitignored); the launcher only reads it.
+const RECORD_PATH = join(ROOT, 'out', 'mcp-browser.json')
 const PROJECT = process.env.MEDIASERVO_AGENT_ROOT
   || process.env.MEDIASERVO_AGENT_PROJECT_ROOT
   || ROOT
@@ -115,42 +117,61 @@ if (spec.kind === 'pixi') {
     if (res.status !== 0) process.exit(res.status ?? 1)
   }
 
-  spawnAndExit(binPath, resolveBrowsers(spec), { stdio: 'inherit', cwd: PROJECT })
+  spawnNpm(name, spec, binPath)
 } else {
   console.error(`[mcp-serve] unsupported kind "${spec.kind}" for ${name}`)
   process.exit(2)
 }
 
-// --- pinned-browser resolution -------------------------------------------
-// For npm specs declaring `browsers` (e.g. local-playwright), resolve the
-// bundled chromium executable dynamically from the playwright cache instead
-// of a hardcoded --executable-path (which broke on cache clears and new
-// machines). `playwright install` may refuse unsupported hosts (ubuntu20.04);
-// any cached chromium-* build works via --executable-path, and an explicit
-// path already in args (or PLAYWRIGHT_CHROMIUM_EXECUTABLE) always wins.
-function resolveBrowsers(spec) {
+// --- browser env handoff (record written by ./msrtc.sh mcp setup) ---------
+// Setup resolves ONCE; the launcher only reads the record. Browser selection
+// travels by env, never by CLI flags (flags outrank envs and would block every
+// fallback). The opposite env must be unset symmetrically -- a stale shell
+// value must never override the record.
+
+function readResolution(name) {
+  let data
+  try { data = JSON.parse(readFileSync(RECORD_PATH, 'utf8')) } catch { return null }
+  const entry = data && data.resolutions && data.resolutions[name]
+  return entry && entry.mode ? entry : null
+}
+
+function spawnNpm(name, spec, binPath) {
   const args = [...(spec.args || [])]
-  if (!spec.browsers || !spec.browsers.includes('chromium')) return args
-  if (args.includes('--executable-path')) return args
-  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE) {
-    return [...args, '--executable-path', process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE]
-  }
-  const base = process.env.PLAYWRIGHT_BROWSERS_PATH
-    || join(process.env.HOME || '', '.cache', 'ms-playwright')
-  let found = null
-  try {
-    const entries = readdirSync(base)
-      .filter((d) => /^chromium-\d+$/.test(d))
-      .sort((a, b) => parseInt(b.slice(9), 10) - parseInt(a.slice(9), 10))
-    for (const dir of entries) {
-      for (const sub of ['chrome-linux64', 'chrome-linux']) {
-        const exe = join(base, dir, sub, 'chrome')
-        if (existsSync(exe)) { found = exe; break }
-      }
-      if (found) break
+  const env = { ...process.env }
+  // npm bin shims use `#!/usr/bin/env node`; prepend THIS launcher's node so
+  // an ancient GUI-inherited node can never win.
+  env.PATH = `${dirname(process.execPath)}${isWin ? ';' : ':'}${env.PATH || ''}`
+
+  if (spec.browsers && spec.browsers.length) {
+    const res = readResolution(name)
+    if (!res) {
+      console.error(`[mcp-serve] ${name}: no browser resolution record (${RECORD_PATH}) -- run: ./msrtc.sh mcp setup`)
+      process.exit(1)
     }
-  } catch { /* cache absent */ }
-  if (found) return [...args, '--executable-path', found]
-  console.error(`[mcp-serve] no bundled chromium in ${base}; run: ./msrtc.sh mcp setup`)
-  return args
+    if (res.mode === 'playwright') {
+      env.PLAYWRIGHT_MCP_BROWSER = res.browser || spec.browsers[0]
+      delete env.PLAYWRIGHT_MCP_EXECUTABLE_PATH
+    } else if (res.mode === 'system') {
+      if (!res.executable) {
+        console.error(`[mcp-serve] ${name}: record mode=system but no executable -- run: ./msrtc.sh mcp setup`)
+        process.exit(1)
+      }
+      env.PLAYWRIGHT_MCP_EXECUTABLE_PATH = res.executable
+      delete env.PLAYWRIGHT_MCP_BROWSER
+    } else {
+      console.error(`[mcp-serve] ${name}: record mode "${res.mode}" unsupported -- run: ./msrtc.sh mcp setup`)
+      process.exit(1)
+    }
+    // headless rule: explicit overrides win; else the display situation decides.
+    // (A Wayland-only host needs an explicit 0 for a headed session.)
+    if (process.env.MCP_FORCE_HEADED) env.PLAYWRIGHT_MCP_HEADLESS = '0'
+    else if (process.env.MCP_FORCE_HEADLESS) env.PLAYWRIGHT_MCP_HEADLESS = '1'
+    else if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) env.PLAYWRIGHT_MCP_HEADLESS = '1'
+    else if (process.env.WAYLAND_DISPLAY && !process.env.DISPLAY) env.PLAYWRIGHT_MCP_HEADLESS = '0'
+    // absolute scratch dir: the server defaults to ./.playwright-mcp in the cwd
+    args.push('--output-dir', join(ROOT, 'out', name))
+  }
+
+  spawnAndExit(binPath, args, { stdio: 'inherit', cwd: PROJECT, env })
 }

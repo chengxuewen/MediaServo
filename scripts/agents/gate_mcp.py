@@ -63,6 +63,39 @@ def run(root):
     if cap_mcp is not None and len(servers) > cap_mcp:
         fails.append("MCP servers %d > cap %d" % (len(servers), cap_mcp))
 
+    # 2b. Browser resolutions (read-only): setup writes a record; the gate only
+    # reads it. NEVER downloads or launches a browser here.
+    record_path = os.path.join(root, "out", "mcp-browser.json")
+    record = {}
+    try:
+        with open(record_path, encoding="utf-8") as handle:
+            record = (json.load(handle) or {}).get("resolutions") or {}
+    except (OSError, ValueError):
+        record = {}
+    unresolved = 0
+    for name, pin in sorted(pins.items()):
+        if pin.get("kind") != "npm" or not pin.get("browsers"):
+            continue
+        entry = record.get(name) or {}
+        if entry.get("mode"):
+            notes.append("browser %s: %s %s (mode=%s)" % (
+                name, entry.get("browser"), entry.get("version"), entry.get("mode")))
+        else:
+            unresolved += 1
+            # Read-only presence probe (never launches): a managed build without
+            # a record means setup has not run since the last cache change.
+            cache = os.path.join(os.path.expanduser("~"), ".cache", "ms-playwright")
+            managed = False
+            try:
+                managed = any(d.startswith("chromium-") for d in os.listdir(cache))
+            except OSError:
+                pass
+            hint = "managed build present, no record -- run: ./msrtc.sh mcp setup" if managed else "UNRESOLVED -- run: ./msrtc.sh mcp setup"
+            notes.append("SKIP: browser %s %s" % (name, hint))
+    notes.append("browser unresolved: %d" % unresolved)
+    if unresolved and os.environ.get("MCP_BROWSER_STRICT"):
+        fails.append("browser unresolved in strict mode: %d" % unresolved)
+
     # 3. Same-name vs user level (skip VISIBLE when the user file is absent).
     user_path = user_level_path()
     user = load(user_path)
