@@ -85,8 +85,12 @@
   display: block; width: 100%; height: 100%;
 }
 .video-player.tile {
+  /* V16: flex column so the video body fills the (uniform) grid cell below the top bar;
+     without this the tile was taller than an empty slot and rows misaligned. */
+  display: flex; flex-direction: column;
   width: 100%; height: 100%; border-radius: 6px;
 }
+.video-player.tile .vp-body { aspect-ratio: auto; flex: 1 1 auto; min-height: 0; }
 .video-player.tile .vp-body video {
   width: 100%; height: 100%; object-fit: contain;
 }

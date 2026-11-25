@@ -127,6 +127,8 @@
 .global-stats-toggle.on { border-color: var(--ms-color-accent); color: var(--ms-color-text); }
 .wall-grid.stats-hidden .vp-mini-stats { display: none; }
 /* B2: grid columns set inline per layout; min-tile (230px) horizontal-scroll on narrow. V2 gap 12. */
+/* V16: uniform rows — live tiles used to be taller than empty slots (top bar + 16:9
+   body vs pure 16:9), so rows misaligned. Rows now share 1fr and every cell fills. */
 .wall-grid { display: grid; gap: 12px; }
 /* V2 layout gallery combo (Synology-style thumbnails) */
 .layout-combo { position: relative; }
@@ -145,7 +147,7 @@
 .col-handle { position: absolute; top: 0; bottom: 0; width: 12px; margin-left: -6px; cursor: col-resize; z-index: 14; }
 .col-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: var(--ms-color-accent); opacity: 0; transition: opacity .12s; }
 .col-handle:hover::after, .col-handle:active::after { opacity: 1; }
-.wall-cell { position: relative; min-width: 0; min-height: 0; }
+.wall-cell { position: relative; min-width: 0; min-height: 0; aspect-ratio: 16/9; }
 .wall-cell .video-player-overlay.tile { width: 100%; height: 100%; }
 .wc-zoom { position: absolute; right: var(--ms-space-1); bottom: var(--ms-space-1); z-index: 15; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); width: 24px; height: 24px; cursor: pointer; font-size: var(--ms-font-size-sm); line-height: 1; }
 .wc-zoom:hover { background: var(--ms-color-surface-hover); }
