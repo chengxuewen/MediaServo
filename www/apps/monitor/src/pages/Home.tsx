@@ -21,8 +21,7 @@ const REGION_KEY = 'mediaservo_monitor_regions';
 // B2 (R1): named-layout persistence uses a NEW key; migrate the legacy cols key.
 const LAYOUT_KEY = 'mediaservo_monitor_layout';
 const LEGACY_COLS_KEY = 'mediaservo_monitor_cols';
-// B2 min-tile width (prototype §2g): narrow screens horizontal-scroll, never shrink tiles to nothing.
-const MIN_TILE_PX = 230;
+
 
 interface Layout { id: string; name: string; cols: number; slots: number; areas?: string[]; elastic?: boolean; }
 const sym = (id: string, n: number): Layout => { const c = Math.round(Math.sqrt(n)); return { id, name: id, cols: c, slots: n }; };
@@ -231,8 +230,8 @@ export default function Home() {
     : layout.elastic
       ? { gridTemplateColumns: colWeights.map((w) => `${w}fr`).join(' ') }
       : layout.areas
-        ? { gridTemplateColumns: `repeat(${layout.cols}, minmax(${MIN_TILE_PX}px, 1fr))`, gridTemplateAreas: layout.areas.map((r) => `"${r}"`).join(' ') }
-        : { gridTemplateColumns: `repeat(${layout.cols}, minmax(${MIN_TILE_PX}px, 1fr))` };
+        ? { gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))`, gridTemplateAreas: layout.areas.map((r) => `"${r}"`).join(' ') }
+        : { gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))` };
   const cellStyle = (idx: number, id?: string): CSSProperties => {
     const s: CSSProperties = {};
     if (layout.areas && !zoomedId) s.gridArea = idx === 0 ? 'big' : `s${idx}`;

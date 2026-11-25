@@ -122,7 +122,7 @@
 .global-stats-toggle.on { border-color: var(--ms-color-accent); color: var(--ms-color-text); }
 .wall-grid.stats-hidden .vp-mini-stats { display: none; }
 /* B2: grid columns set inline per layout; min-tile (230px) horizontal-scroll on narrow. V2 gap 12. */
-.wall-grid { display: grid; gap: 12px; overflow-x: auto; }
+.wall-grid { display: grid; gap: 12px; }
 /* V2 layout gallery combo (Synology-style thumbnails) */
 .layout-combo { position: relative; }
 .layout-gallery { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: var(--ms-space-2); display: grid; grid-template-columns: repeat(4, auto); gap: var(--ms-space-2); }
