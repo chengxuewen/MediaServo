@@ -91,12 +91,12 @@
 .rail-pinmsg { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); padding: var(--ms-space-1) 0; }
 
 /* V3 (L5): mid-width narrows the rails. */
-@media (min-width: 1200px) and (max-width: 1500px) {
+@media (min-width: 1024px) and (max-width: 1500px) {
   .stream-rail { width: 210px; }
   .mon-alerts { width: 260px; }
 }
 /* V3 (L5): narrow = overlay drawers + pin; mutual exclusion handled in toggleRegion. */
-@media (max-width: 1199px) {
+@media (max-width: 1023px) {
   .monitor-three-panel { grid-template-columns: 1fr; }
   /* V9f (2): drawers start BELOW the stage-bar so the top-left region toggles stay visible. */
   .stream-rail, .mon-alerts { position: fixed; top: 128px; bottom: 0; z-index: 30; width: min(248px, 82vw); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
