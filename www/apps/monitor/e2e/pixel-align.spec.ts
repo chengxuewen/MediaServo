@@ -29,6 +29,25 @@ test.describe('pixel alignment (rendered ink)', () => {
     expect(Math.abs(left.bottom - right.bottom)).toBeLessThanOrEqual(1);
   });
 
+  test('stage-bar never clips or wraps when the canvas is narrow', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 800 }); // both rails open -> narrow canvas
+    await page.goto('/?demo=1');
+    const bar = page.locator('.wall-toolbar');
+    await expect(bar).toBeVisible();
+    const overflow = await page.evaluate(() => {
+      const el = document.querySelector('.wall-toolbar')! as HTMLElement;
+      const r = el.getBoundingClientRect();
+      const kids = [...el.children].filter((c) => getComputedStyle(c).display !== 'none') as HTMLElement[];
+      const worst = Math.max(...kids.map((c) => Math.round(c.getBoundingClientRect().right - r.right)));
+      return { worst, scroll: el.scrollWidth - el.clientWidth, h: Math.round(el.getBoundingClientRect().height) };
+    });
+    expect(overflow.worst).toBeLessThanOrEqual(1); // nothing sticks out of the bar
+    expect(overflow.scroll).toBeLessThanOrEqual(1); // no hidden overflow
+    expect(overflow.h).toBeLessThanOrEqual(54); // single row (no wrap)
+    // the health chip is the first thing dropped (its info lives in the ALERTS panel)
+    await expect(page.locator('.wall-toolbar .health-chip')).toBeHidden();
+  });
+
   test('toolbar first control aligns with the grid left edge (one screenshot)', async ({ page }) => {
     await page.goto('/?demo=1');
     const canvas = page.locator('.canvas');
