@@ -1,5 +1,5 @@
 {
-  "when": "2026-11-25T01:40:32.869Z",
+  "when": "2026-11-25T02:54:00.714Z",
   "mode": "negative",
   "fail": 0,
   "results": {
@@ -622,13 +622,21 @@
       },
       "error": null
     },
+    "remote-unify": {
+      "negative": true,
+      "red": true,
+      "assertions": {
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:80\n@http://127.0.0.1:8201/portal-unified.html:2:1222\n@http://1"
+      },
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:10:80\n@http://127.0.0.1:8201/portal-unified.html:2:1222\n@http://1"
+    },
     "remote-visual": {
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:7:39\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:45:288\n@http://127.0.0.1:8201/portal-unified.html:2:5192\n@http://"
+        "__err": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:7:39\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:45:288\n@http://127.0.0.1:8201/portal-unified.html:2:5281\n@http://"
       },
-      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:7:39\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:45:288\n@http://127.0.0.1:8201/portal-unified.html:2:5192\n@http://"
+      "error": "Window.getComputedStyle: Argument 1 is not an object. @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:7:39\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:45:288\n@http://127.0.0.1:8201/portal-unified.html:2:5281\n@http://"
     },
     "remote-visual-tree": {
       "negative": true,
@@ -680,9 +688,9 @@
       "negative": true,
       "red": true,
       "assertions": {
-        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:18:85\n@http://127.0.0.1:8201/portal-unified.html:2:1666\n@http://1"
+        "__err": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:18:85\n@http://127.0.0.1:8201/portal-unified.html:2:1676\n@http://1"
       },
-      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:18:85\n@http://127.0.0.1:8201/portal-unified.html:2:1666\n@http://1"
+      "error": "document.querySelector(...) is null @window.__result<@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:1:57\n@http://127.0.0.1:8201/portal-unified.html line 2 > injectedScript:18:85\n@http://127.0.0.1:8201/portal-unified.html:2:1676\n@http://1"
     },
     "remote-launcher-visual": {
       "negative": true,

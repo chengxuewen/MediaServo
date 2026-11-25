@@ -1,5 +1,30 @@
 # Prototypes CHANGELOG
 
+## v1.119 — 2026-11-25 (portal-unified) — N-27 component-language unification delivered (D54=A; pending review)
+User dual screenshots: Remote page inharmonious vs Recording/Intercom siblings. MCP forensics:
+remote rows borderless/transparent vs Recording card rows; launcher codeline top 184 overlapped sub
+top 190 and copy sat alone at 215; capability labels wrapped two lines at 1152; bare tiles/dashed
+pills vs Recording square tint icon tiles; boxed "Recent connections" chip; squeezed toolbar.
+- **Device rows = Recording card language**: surface + 1px bd + r6 + left 34px tint icon tile +
+  two-line body + right square icon go-button (tabindex -1, aria-label, bubbles to row click);
+  selected = accent tint + accent border (D25 left-bar superseded); off rows sunken icon tile.
+- **Launcher meta strict three single rows**: explicit grid placement (name r1 / sub r2 span /
+  code r3 + copy r3 via .lm-meta>.lm-actions.lm-copyrow specificity fix); tags row 4; no overlap,
+  no stray copy row; subline rail re-aligned to name start (16px = dot+gap; N-13 36px rule retired).
+- **Capability tiles = square tint icon box (28+6 pad) + single-line nowrap label**; gated = tx3
+  icon + dashed box border + lock corner (D38 bare superseded, semantics unchanged); power keeps
+  square outlined buttons; container thresholds unchanged.
+- **Recent head plain sentence-case text button** (box retired); toolbar sim chip demoted to small
+  borderless text.
+- Verified: harness 70 cases ALL GREEN + NEG all red; adaptations rowBorderless->rowCard read,
+  selectedTintBar->border accent read, hoverChevron->dev-go always-visible square read; new
+  remote-unify case (metaThreeRows/tileLabelNowrap/rowIconTile/recentHeadPlain/devGo) + NEG
+  renderDevRows noop; MCP screenshots n27-light/dark eyeballed harmonized with Recording;
+  node --check + lint clean; stamps x8.
+- Fixes en route: .lm-meta>.lm-actions (row1) out-specified .lm-copyrow -> compound selector;
+  N-13 later .dev-meta padding-left:36px overrode base rail fix -> 16px; tile height threshold
+  70->80 (min-height 72 single-line).
+
 ## v1.118 — 2026-11-25 (portal-unified) — N-26 E-STOP contextual + visual unification delivered (D53=B + user style mandate; pending review)
 User: E-STOP visible in view-only (nothing to stop) + "sizes/styles not unified, don't give it a
 separate size/style". Mainstream remote-desktop (ToDesk/Parsec/RustDesk/TeamViewer, our todesk-01/02/04

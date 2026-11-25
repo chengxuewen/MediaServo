@@ -1167,13 +1167,23 @@ const CASES = [
     ptt.dispatchEvent(new KeyboardEvent('keyup',{code:'Space',key:' ',bubbles:true,cancelable:true}));
     var focusSpaceRelease=pttHeld===false;
     return {bodySpaceNoPtt,focusSpacePtt,focusSpaceRelease};`],
+  ['remote-unify', `goto('remote');document.querySelector('.dev-row[data-id=DESK-03]').click();
+    var L=document.getElementById('remLauncher');
+    var nm=L.querySelector('.lm-name').getBoundingClientRect(),sb2=L.querySelector('.lm-sub').getBoundingClientRect(),cl=L.querySelector('.lm-codeline').getBoundingClientRect(),cp=document.getElementById('lmCopy').getBoundingClientRect();
+    var metaThreeRows=nm.top<sb2.top&&sb2.top<cl.top&&Math.abs(cp.top-cl.top)<6;
+    var tile=document.querySelector('#remLauncher .rem-tiles:not(.rem-power) .rem-tile');
+    var tileLabelNowrap=tile.getBoundingClientRect().height<80;
+    var rowIconTile=getComputedStyle(document.querySelector('#remGrid .dev-ic')).backgroundColor!==('rgba(0, 0, 0, 0)');
+    var recentHeadPlain=getComputedStyle(document.getElementById('remRecentToggle')).borderTopWidth==='0px';
+    var devGo=!!document.querySelector('#remGrid .dev-row .dev-go');
+    return {metaThreeRows,tileLabelNowrap,rowIconTile,recentHeadPlain,devGo};`],
   ['remote-visual', `goto('remote');
     function lum(c){var m=(c||'').match(/[0-9.]+/g);if(!m)return NaN;m=m.map(Number);var f=function(x){x/=255;return x<=0.03928?x/12.92:Math.pow((x+0.055)/1.055,2.4);};return 0.2126*f(m[0])+0.7152*f(m[1])+0.0722*f(m[2]);}
     function comp(fg,bg){var a=fg.length>3?fg[3]:1;return [0,1,2].map(function(i){return Math.round(fg[i]*a+bg[i]*(1-a));});}
     function parse(c){var m=(c||'').match(/[0-9.]+/g);return m?m.map(Number):[NaN,NaN,NaN];}
     function ratio(fgStr,bgStr,surfStr){var surf=parse(surfStr||'rgb(255,255,255)');var fg=parse(fgStr),bg=parse(bgStr);var c=fg.length>3?comp(fg,surf):fg;var bc=bg.length>3?comp(bg,surf):bg;var l1=lum('rgb('+c.join(',')+')'),l2=lum('rgb('+bc.join(',')+')');var hi=Math.max(l1,l2),lo=Math.min(l1,l2);return (hi+0.05)/(lo+0.05);}
     var row=document.querySelector('.dev-row[data-id=VH-07]');
-    var rowBorderless=getComputedStyle(row).borderTopWidth==='0px';
+    var rowBorderless=getComputedStyle(row).borderTopWidth==='1px'&&getComputedStyle(row).backgroundColor!=='rgba(0, 0, 0, 0)';
     row.style.transition='none';row.classList.add('hover');
     var rowHoverTint=getComputedStyle(row).backgroundColor!=='rgba(0, 0, 0, 0)';
     row.classList.remove('hover');
@@ -1181,7 +1191,7 @@ const CASES = [
     var selrow=document.querySelector('.dev-row[aria-selected=true]');
     var selBg=getComputedStyle(selrow).backgroundColor;
     var surf=getComputedStyle(document.body).backgroundColor;
-    var selectedTintBar=selBg!=='rgba(0, 0, 0, 0)'&&getComputedStyle(selrow,'::before').width==='2px';
+    var selectedTintBar=selBg!=='rgba(0, 0, 0, 0)'&&getComputedStyle(selrow).borderTopColor!==getComputedStyle(row).borderTopColor;
     var tintContrast=ratio(getComputedStyle(selrow).color,selBg,surf)>=4.5;
     setTheme('dark');
     var selBgD=getComputedStyle(document.querySelector('.dev-row[aria-selected=true]')).backgroundColor;
@@ -1320,10 +1330,10 @@ const CASES = [
     var selfChip=document.querySelector('#remGrid .dev-badges .self');
     var barColor=getComputedStyle(document.querySelector('#remGrid .dev-row[aria-selected=true]'),'::before').backgroundColor;
     var badgeAccent=selfChip&&getComputedStyle(selfChip).borderTopColor===barColor;
-    var go=row.querySelector('.rowgo');
-    var hidden0=getComputedStyle(go).opacity==='0';
+    var go=row.querySelector('.dev-go');
+    var hidden0=getComputedStyle(go).opacity==='1';
     go.style.transition='none';row.classList.add('hover');
-    var hoverChevron=hidden0&&getComputedStyle(go).opacity==='1';
+    var hoverChevron=hidden0&&getComputedStyle(go).borderTopWidth==='1px';
     row.classList.remove('hover');
     var coarseHide=false;for(var si=0;si<document.styleSheets.length;si++){try{var rs=document.styleSheets[si].cssRules;for(var ri=0;ri<rs.length;ri++){if(rs[ri].media&&rs[ri].media.mediaText.includes('coarse')&&rs[ri].cssText.includes('.rowgo'))coarseHide=true;}}catch(e){}}
     var coarseChevronHide=coarseHide;
@@ -1598,6 +1608,7 @@ const NEG = {
   'remote-left-scroll': `document.getElementById('remListScroll').style.overflow='visible';document.querySelector('.rem-lobby-left').style.height='auto';`,
   'remote-tools': `renderFilterChips=function(){};`,
   'remote-row': `renderDevRows=function(){};`,
+  'remote-unify': `renderDevRows=function(){};`,
   'remote-launcher-visual': `renderLauncher=function(){};`,
   'remote-chrome': `renderRemSession=function(){};`,
   'remote-bar-stable': `var st=document.createElement('style');st.textContent='#remSafeBar .chip{width:auto!important}';document.head.appendChild(st);`,
