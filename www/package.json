@@ -13,6 +13,8 @@
     "lint": "turbo run lint"
   },
   "devDependencies": {
+    "pixelmatch": "^8.0.0",
+    "pngjs": "^7.0.0",
     "turbo": "^2.0.0"
   },
   "pnpm": {
