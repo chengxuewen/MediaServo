@@ -4,6 +4,14 @@
 /* Top bar (V2 stage-bar): title + healthChip + LIVE clock + iconbtn region toggles */
 .mh-bar { display: flex; align-items: center; gap: var(--ms-space-3); flex-wrap: wrap; min-height: 52px; position: relative; z-index: 40; }
 .mh-bar h1 { font-size: var(--ms-font-size-md); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); margin: 0; }
+.mh-sub { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); }
+.demo-toggle { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; padding: 0 var(--ms-space-2); height: 30px; cursor: pointer; font-size: var(--ms-font-size-xs); }
+.demo-toggle.on { border-color: var(--ms-color-warning); color: var(--ms-color-warning); background: var(--ms-color-warning-soft); }
+.demo-note { font-size: var(--ms-font-size-xs); color: var(--ms-color-info); background: var(--ms-color-primary-soft); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); }
+.wt-spacer { margin-left: auto; }
+.iconbtn { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
+.iconbtn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+.iconbtn.on { border-color: var(--ms-color-accent); color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
 .health-chip { font-size: var(--ms-font-size-xs); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-full); border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); background: var(--ms-color-surface); cursor: pointer; }
 .health-chip.warn { border-color: var(--ms-color-warning); color: var(--ms-color-text); background: var(--ms-color-warning-soft); }
 .live-clock { display: inline-flex; align-items: center; gap: var(--ms-space-1); font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; font-family: var(--ms-font-family-mono); }

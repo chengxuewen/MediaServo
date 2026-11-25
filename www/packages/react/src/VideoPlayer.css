@@ -124,6 +124,10 @@
 .video-player.nvr .tile-btn:hover { background: rgba(0,0,0,.8); color: #fff; }
 .video-player.nvr .tile-del:hover { background: rgba(200,45,45,.9); }
 .video-player.nvr .tile-btn.on { border-color: var(--ms-color-accent); color: var(--ms-color-accent); }
+/* V8: degraded amber dashed border + signal-bars glyph; center idle codec text. */
+.video-player.nvr.degraded { border: 1px dashed var(--ms-color-warning); }
+.video-player.nvr .tile-glyph { margin-left: auto; color: var(--ms-color-warning); font-size: 10px; letter-spacing: 1px; }
+.video-player.nvr .tile-idle { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.45); font-family: var(--ms-font-family-mono); font-size: 11px; letter-spacing: 1px; pointer-events: none; }
 /* V6 (I4): region drag-box zoom + double-click reset. */
 .video-player.nvr .vp-body { cursor: crosshair; }
 .video-player.nvr .vp-body video { transition: transform .15s; }

@@ -33,6 +33,12 @@ export interface VideoPlayerProps {
   /** V6 (I3): toggle 2x2 span (elastic layouts only); size-b action. */
   onSpan?: () => void;
   spanned?: boolean;
+  /** V8: labeled simulated preview (demo) — badge/idle reflect prototype look, not real media. */
+  simulated?: boolean;
+  /** V8: degraded stream -> amber dashed border + signal-bars glyph. */
+  degraded?: boolean;
+  /** V8: center idle text (codec · res · fps · bit) for connecting/simulated tiles. */
+  idleText?: string;
 }
 
 type ConnectionStatus = 'connecting' | 'connected' | 'playing' | 'stalled' | 'disconnected' | 'error';
@@ -46,7 +52,7 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
   error: '#e74c3c',
 };
 
-export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand, nvr = false, onZoom, onRemove, onSpan, spanned = false }: VideoPlayerProps) {
+export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand, nvr = false, onZoom, onRemove, onSpan, spanned = false, simulated = false, degraded = false, idleText }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -187,7 +193,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   const playerInner = (
       <div
         ref={rootRef}
-        className={`video-player ${isDisconnected ? 'disconnected' : ''}${isTile ? ' tile' : ''}${nvr && isTile ? ' nvr' : ''}`}
+        className={`video-player ${isDisconnected ? 'disconnected' : ''}${isTile ? ' tile' : ''}${nvr && isTile ? ' nvr' : ''}${nvr && degraded ? ' degraded' : ''}`}
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={isTile ? (nvr ? () => setRzView(null) : onExpand) : undefined}
         onMouseMove={handleMouseMove}
@@ -197,6 +203,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         <div className="vp-top-bar" style={{ background: isDisconnected ? '#c0392b' : '#2c3e50' }}>
           <span className="vp-status-dot" style={{ background: statusColor }} />
           <span className="vp-title">{streamLabel ? `${roomId} · ${streamLabel}` : roomId}</span>
+          {nvr && isTile && <span className="tile-glyph" aria-hidden="true">{degraded ? '▮▮▯' : isDisconnected ? '⊘' : ''}</span>}
           {!isTile && metrics && !isDisconnected && (
             <span className="vp-bitrate">{metrics.resolution} · {Math.round(metrics.bitrate)}Kbps</span>
           )}
@@ -207,9 +214,10 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         <div className="vp-body" ref={bodyRef} onPointerDown={rzDown} onPointerMove={rzMove} onPointerUp={rzUp}>
           <video ref={videoRef} autoPlay playsInline muted style={rzView ? { transform: `scale(${rzView.scale})`, transformOrigin: `${rzView.ox}px ${rzView.oy}px` } : undefined} />
           {rz && <span className="zoom-rect" style={{ left: rz.x, top: rz.y, width: rz.w, height: rz.h }} />}
-          {status === 'connecting' && <div className="vp-status-msg">Connecting…</div>}
-          {isTile && (status === 'connected' || status === 'playing' || status === 'stalled') && (
-            <MiniStatsCard status={status} metrics={metrics} onExpand={() => setShowStats(true)} />
+          {status === 'connecting' && !idleText && <div className="vp-status-msg">Connecting…</div>}
+          {idleText && (simulated || status === 'connecting' || status === 'stalled') && <div className="tile-idle">{idleText}</div>}
+          {isTile && (simulated || status === 'connected' || status === 'playing' || status === 'stalled') && (
+            <MiniStatsCard status={simulated ? 'playing' : status} metrics={metrics} onExpand={() => setShowStats(true)} />
           )}
           {nvr && isTile && (
             <div className="tile-actions">
@@ -219,7 +227,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
             </div>
           )}
           {nvr && isTile && (
-            <span className={`tile-live${status === 'playing' ? ' live' : ' off'}`}>{status === 'playing' ? '■ LIVE' : '□ OFF'}</span>
+            <span className={`tile-live${simulated || status === 'playing' ? ' live' : ' off'}`}>{simulated || status === 'playing' ? '■ LIVE' : '□ OFF'}</span>
           )}
           {isDisconnected && <DisconnectedOverlay status={status} />}
         </div>

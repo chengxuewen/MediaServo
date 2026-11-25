@@ -5,6 +5,8 @@
 .pb-ctl { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); opacity: .45; cursor: not-allowed; }
 .pb-live { border: 1px solid var(--ms-color-success); background: var(--ms-color-success-soft); color: var(--ms-color-success); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); font-weight: 600; opacity: .6; cursor: not-allowed; }
 .tl-track { position: relative; height: 34px; background: var(--ms-color-surface-muted); border: 1px solid var(--ms-color-border); border-radius: 6px; }
+.tl-block { position: absolute; top: 4px; bottom: 4px; background: var(--ms-color-primary-soft); border-radius: 2px; }
+.pb-win, .pb-date { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; padding: 0 var(--ms-space-1); }
 .tl-event { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ms-color-warning); }
 .tl-head-mark { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ms-color-accent); box-shadow: 0 0 8px var(--ms-color-accent); }
 .tl-scale { display: flex; justify-content: space-between; font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); font-variant-numeric: tabular-nums; }

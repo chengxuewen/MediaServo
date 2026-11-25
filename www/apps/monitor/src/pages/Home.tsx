@@ -10,6 +10,7 @@ import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
 import Timeline from '../components/Timeline';
 import PlaybackBar from '../components/PlaybackBar';
+import { isDemo, DEMO_PRODUCERS, DEMO_PLAYING, DEMO_EVENTS } from '../demo';
 import { PanelLeft, Bell, Rows3, RefreshCw } from 'lucide-react';
 import './Home.css';
 
@@ -105,15 +106,22 @@ function LayoutGallery({ current, onSelect, onClose }: { current: string; onSele
  */
 export default function Home() {
   const { username, role, canMonitor } = useAuth();
-  const { producers, loading, error, refetch } = useStreams();
+  // V8: opt-in labeled simulated preview (?demo=1) for like-for-like visual parity.
+  const demo = isDemo();
+  const real = useStreams();
+  const producers = demo ? DEMO_PRODUCERS : real.producers;
+  const loading = demo ? false : real.loading;
+  const error = demo ? null : real.error;
+  const refetch = real.refetch;
   // M6: single audit poll + single admin WS owned here; Timeline/AlertPanel are
   // presentational (was 3 WS connections across components, now 1).
   const audit = useAudit();
+  const events = demo ? DEMO_EVENTS : audit.events;
   const onWsEvent = useCallback(() => { refetch(); audit.refetch(); }, [refetch, audit.refetch]);
   useAdminWS(onWsEvent);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [playing, setPlaying] = useState<string[]>([]);
+  const [playing, setPlaying] = useState<string[]>(demo ? DEMO_PLAYING : []);
   const [modal, setModal] = useState<StreamSelection | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [statsVisible, setStatsVisible] = useState(true);
@@ -171,7 +179,7 @@ export default function Home() {
   const degraded = producers.filter((p) => p.score < 8).length;
   // V2 (I6): unread-style alert badge count from the audit ring (alert-worthy kinds).
   const ALERT_KINDS = ['device_offline', 'estop_audit', 'emergency_command', 'auth_failure', 'authorization_denied', 'stream_destroy', 'device_revoked'];
-  const alertCount = audit.events.filter((e) => ALERT_KINDS.includes(e.kind)).length;
+  const alertCount = events.filter((e) => ALERT_KINDS.includes(e.kind)).length;
   const focusDegraded = () => { const d = producers.find((p) => p.score < 8); if (d) { if (!playing.includes(d.id)) addPlaying([d.id]); setZoomedId(d.id); } };
 
   // B2 effective layout + pagination.
@@ -282,11 +290,10 @@ export default function Home() {
   return (
     <section className="monitor-home">
       <div className="mh-bar">
-        <h1>Monitor</h1>
-        <button className={`health-chip${degraded > 0 ? ' warn' : ''}`} role="status" onClick={focusDegraded} title={degraded > 0 ? 'Focus first degraded stream' : 'All streams healthy'}>
-          {degraded > 0 ? `${degraded} degraded` : 'Healthy'}
-        </button>
+        <h1>Monitor Center</h1>
+        <span className="mh-sub">Surveillance wall + timeline review</span>
         <span className="live-clock"><span className="live-dot" aria-hidden="true" />LIVE {clock.toLocaleTimeString('en-GB', { hour12: false })}</span>
+        <button className={`demo-toggle${demo ? ' on' : ''}`} aria-pressed={demo} onClick={() => { try { localStorage.setItem('ms_demo', demo ? '0' : '1'); } catch { /* silent */ } window.location.reload(); }} title="Toggle labeled simulated preview">Demo</button>
         <button className="theme-toggle" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Toggle light/dark theme" title="Toggle theme">{theme === 'dark' ? '☀' : '◐'}</button>
         <div className="region-toggles">
           <button aria-pressed={regions.left} onClick={() => toggleRegion('left')} title="Toggle stream rail" aria-label="Toggle stream rail"><PanelLeft size={15} /></button>
@@ -301,6 +308,7 @@ export default function Home() {
       <p className="mh-note" role="note">
         Signed in as {username ?? 'unknown'}{role ? ` [${role}]` : ''}. {canMonitor ? '' : 'Wall access requires admin/dispatcher. '}Cap {MAX_PLAYING}; PSK host rooms are single-producer. Alert panel at right; playback scrubber/Recording deferred.
       </p>
+      {demo && <div className="demo-note" role="note">Simulated demo — prototype-style preview, NOT real streams. Toggle Demo off for live data.</div>}
 
       <div className="monitor-three-panel">
         <aside className={`stream-rail${regions.left ? '' : ' collapsed'}`}>
@@ -351,17 +359,20 @@ export default function Home() {
                   </button>
                   {galleryOpen && <LayoutGallery current={layoutId} onSelect={(id) => { applyLayout(id); setGalleryOpen(false); }} onClose={() => setGalleryOpen(false)} />}
                 </div>
-                <button className={`global-stats-toggle${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)}>Stats</button>
+                <div className="wt-pager">
+                  <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={curPage === 0 || pages <= 1 || !!zoomedId} aria-label="Previous page">‹</button>
+                  <span className="wt-page">{curPage + 1}/{pages}</span>
+                  <button onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={curPage >= pages - 1 || pages <= 1 || !!zoomedId} aria-label="Next page">›</button>
+                  <button className={`wt-carousel${carousel ? ' active' : ''}`} aria-pressed={carousel} onClick={() => setCarousel((c) => !c)} title="Carousel" aria-label="Carousel">⟳</button>
+                </div>
+                <button className={`health-chip${degraded > 0 ? ' warn' : ''}`} role="status" onClick={focusDegraded} title={degraded > 0 ? 'Focus first degraded stream' : 'All streams healthy'}>
+                  {degraded > 0 ? `${degraded} degraded` : 'Healthy'}
+                </button>
                 {zoomedId && <button className="wt-exit-zoom" onClick={() => setZoomedId(null)}>Exit zoom</button>}
-                {pages > 1 && !zoomedId && (
-                  <div className="wt-pager">
-                    <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={curPage === 0} aria-label="Previous page">‹</button>
-                    <span className="wt-page">{curPage + 1}/{pages}</span>
-                    <button onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={curPage >= pages - 1} aria-label="Next page">›</button>
-                    <button className={`wt-carousel${carousel ? ' active' : ''}`} aria-pressed={carousel} onClick={() => setCarousel((c) => !c)}>Carousel</button>
-                  </div>
-                )}
-            {playHint && <span className="wt-hint" role="status">{playHint}</span>}
+                {playHint && <span className="wt-hint" role="status">{playHint}</span>}
+                <span className="wt-spacer" />
+                <button className="iconbtn" aria-disabled="true" title="Drift sync display — deferred (RECORDING_READY=false)" aria-label="Sync (deferred)">⇄</button>
+                <button className={`global-stats-toggle iconbtn${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)} title="Stats" aria-label="Stats">ⓘ</button>
           </div>
           {playing.length > 0 ? (
             <div className="wall-wrap">
@@ -387,6 +398,9 @@ export default function Home() {
                         onRemove={() => closeTile(id)}
                         onSpan={layout.elastic ? () => toggleSpan(id) : undefined}
                         spanned={!!tileSpans[id]}
+                        simulated={demo}
+                        degraded={p.score < 8}
+                        idleText={demo ? `H.265 · 1080p · 25 fps · ${((p.available_incoming_bitrate ?? 0) / 1e6).toFixed(1)} Mbps` : undefined}
                         onExpand={() => setModal({ room: p.room, producerId: p.id, kind: p.kind })}
                         onClose={() => closeTile(id)}
                       />
@@ -414,7 +428,7 @@ export default function Home() {
             <button className="region-collapse" onClick={() => toggleRegion('right')} aria-label={regions.right ? 'Hide right panel' : 'Show right panel'}>{regions.right ? '›' : '‹'}</button>
           </div>
           <div className="rail-body">
-            <AlertPanel events={audit.events} producers={producers} onPlayRoom={playRoom} />
+            <AlertPanel events={events} producers={producers} onPlayRoom={playRoom} />
           </div>
         </aside>
       </div>
@@ -425,8 +439,8 @@ export default function Home() {
           <button className="region-collapse" onClick={() => toggleRegion('bottom')} aria-label={regions.bottom ? 'Hide bottom panel' : 'Show bottom panel'}>{regions.bottom ? '⌄' : '⌃'}</button>
         </div>
         <div className="rail-body">
-          <PlaybackBar events={audit.events} />
-          <Timeline events={audit.events} loading={audit.loading} error={audit.error} refetch={audit.refetch} />
+          <PlaybackBar events={events} demo={demo} />
+          <Timeline events={events} loading={audit.loading} error={audit.error} refetch={audit.refetch} />
         </div>
       </div>
 
