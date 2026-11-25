@@ -13,6 +13,8 @@ import IntercomSession from './pages/IntercomSession';
 import Rooms from './pages/Rooms';
 import AdminHub from './pages/AdminHub';
 import Evidence from './pages/Evidence';
+// A (shell-stays): monitor realtime face as an in-shell SPA route (shared source).
+import MonitorPage from '@monitor/pages/Home';
 import { FloorNotifProvider } from './notifications';
 import { hasToken } from './api/client';
 import { useAuth } from './hooks/useAuth';
@@ -41,6 +43,7 @@ export default function App() {
         <Route path="/accounts" element={<RequireAdmin><Accounts /></RequireAdmin>} />
         <Route path="/apikeys" element={<RequireAdmin><ApiKeys /></RequireAdmin>} />
         <Route path="/audio" element={<Navigate to="/intercom" replace />} />
+        <Route path="/monitor" element={<MonitorPage />} />
         <Route path="/intercom" element={<Intercom />} />
         <Route path="/intercom/:roomId" element={<IntercomSession />} />
         <Route path="/rooms" element={<Rooms />} />

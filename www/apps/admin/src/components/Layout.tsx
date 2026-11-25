@@ -64,9 +64,9 @@ export default function Layout() {
             <span className="nav-group-label">Surveillance</span>
             {/* D11=B: prototype shape kept; unavailable domains are disabled WITH a reason */}
             {canMonitor ? (
-              <a href="/monitor/" className="nav-item" title="Monitor: realtime surveillance wall (same-origin app, shared login)">
+              <NavLink to="/monitor" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'} title="Monitor: realtime surveillance wall (in-shell)">
                 <MonitorCog size={15} /> Monitor
-              </a>
+              </NavLink>
             ) : (
               <span className="nav-item disabled" title="Monitor: requires admin/dispatcher" aria-disabled="true">
                 <MonitorCog size={15} /> Monitor
