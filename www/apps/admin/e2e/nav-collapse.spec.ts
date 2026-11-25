@@ -47,25 +47,22 @@ test('header shows the current page name beside the brand', async ({ page }) => 
   const geo = await page.evaluate(() => {
     const b = (s: string) => document.querySelector(s)!.getBoundingClientRect();
     const rule = b('.header-rule'); const head = b('.header');
-    // baseline of the brand text vs the page label (Range rect bottoms differ by ascent;
-    // comparing baseline via same line box is the practical check)
-    const baseline = (sel: string) => {
-      const el = document.querySelector(sel)!;
-      const r = document.createRange(); r.selectNodeContents(el);
-      const rect = r.getBoundingClientRect();
-      const lh = parseFloat(getComputedStyle(el).lineHeight) || parseFloat(getComputedStyle(el).fontSize);
-      return rect.bottom - Math.max(0, lh - parseFloat(getComputedStyle(el).fontSize)) / 2;
-    };
+    const logos = b('.header .logo'); // icon+text flex box = the visual brand block
+    const pageBox = b('.header-page');
     return {
       ruleSpans: Math.abs(Math.round(rule.height) - Math.round(head.height)) <= 1,
       ruleWidth: getComputedStyle(document.querySelector('.header-rule')!).width,
       align: getComputedStyle(document.querySelector('.header-left')!).alignItems,
-      baselineDelta: Math.abs(baseline('.logo-text') - baseline('.header-page')),
+      // V22f: both texts must be vertically CENTRED in the bar (not riding high).
+      brandToCentre: Math.abs((logos.top + logos.height / 2) - (head.top + head.height / 2)),
+      pageToCentre: Math.abs((pageBox.top + pageBox.height / 2) - (head.top + head.height / 2)),
     };
   });
   expect(geo.ruleSpans).toBe(true);
   expect(geo.ruleWidth).toBe('1px');
-  expect(geo.align).toBe('baseline');
+  expect(geo.align).toBe('center');
+  expect(geo.brandToCentre).toBeLessThanOrEqual(1);
+  expect(geo.pageToCentre).toBeLessThanOrEqual(1);
   // hierarchy: the page name must be visibly smaller than the brand
   const sizes = await page.evaluate(() => ({
     brand: parseFloat(getComputedStyle(document.querySelector('.header .logo')!).fontSize),

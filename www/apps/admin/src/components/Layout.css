@@ -3,13 +3,12 @@
 .header { display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; height: 54px; background: var(--ms-color-text); color: var(--ms-color-text-inverse); }
 .header .logo { font-size: 1rem; font-weight: 600; }
 /* V22: current page name beside the brand (prototype topbar). */
-/* V22e (reference topbar): brand | vertical rule | page name. Alignment is by TEXT
-   BASELINE (centring different font sizes leaves the baselines ~1.5px apart, which
-   reads as "vertically off"). The rule is its own element spanning the 54px bar. */
-.header-left { display: flex; align-items: baseline; align-self: stretch; gap: var(--ms-space-3); min-width: 0; }
+/* V22f (reference topbar): brand | vertical rule | page name, VERTICALLY CENTRED in
+   the bar (user requirement: do not ride high). The rule is its own 54px element. */
+.header-left { display: flex; align-items: center; align-self: stretch; gap: var(--ms-space-3); min-width: 0; }
 .logo-text { line-height: 1; }
 .header-rule { width: 1px; height: 54px; align-self: center; background: rgba(255,255,255,.18); flex: 0 0 auto; }
-.header-page { color: rgba(255,255,255,.66); font-size: 0.8125rem; /* 13px — one step below the 16px brand */ font-weight: 400; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.header-page { display: inline-flex; align-items: center; color: rgba(255,255,255,.66); font-size: 0.8125rem; /* 13px — one step below the 16px brand */ font-weight: 400; line-height: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .header-right { display: flex; align-items: center; gap: 0.75rem; }
 .logout-btn { background: none; border: 1px solid var(--ms-color-text-secondary); color: var(--ms-color-text-faint); font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 4px; cursor: pointer; }
 .logout-btn:hover { color: var(--ms-color-text-inverse); border-color: var(--ms-color-text-muted); }
