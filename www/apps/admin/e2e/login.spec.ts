@@ -64,6 +64,7 @@ test.describe('Login Page', () => {
     await login(page, { username: 'dispatcher', password: 'dispatch123', role: 'dispatcher' });
     await expect(page.locator('.dashboard')).toBeVisible();
 
+    await page.locator('[aria-label="User menu"]').click(); // V32: sign-out lives in the user menu
     await page.locator('.logout-btn').click();
 
     await expect(page).toHaveURL(/\/login$/);

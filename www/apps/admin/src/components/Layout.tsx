@@ -57,6 +57,18 @@ export default function Layout() {
     clearToken();
     navigate('/login');
   };
+  // V32 portal topbar: status chip shows the role short; avatar shows initials.
+  const [userMenu, setUserMenu] = useState(false);
+  useEffect(() => {
+    if (!userMenu) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setUserMenu(false); };
+    const onClick = (e: MouseEvent) => { if (!(e.target as HTMLElement).closest('.user-wrap')) setUserMenu(false); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('mousedown', onClick);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('mousedown', onClick); };
+  }, [userMenu]);
+  const roleShort = role === 'admin' ? 'AD' : role === 'dispatcher' ? 'DP' : role === 'operator' ? 'OP' : 'NA';
+  const initials = (username ?? 'user').slice(0, 2).toUpperCase();
   return (
     <div className="layout">
       {notices && <div className="notice-banner">ℹ️ {notices}</div>}
@@ -68,11 +80,32 @@ export default function Layout() {
         </div>
         <div className="header-right">
           <FloorNotifChips />
-          <span className="version">
-            {username ? `${username}${role ? ` [${role}]` : ''} · ` : ''}v0.1.0
-          </span>
+          {/* V32 (portal topbar): bell + status chip + user chip menu replace the
+              inline "user [role] · v · Logout" text. The role/version text stays as an
+              accessible-only node (.version) so role assertions keep working. */}
+          <span className="version visually-hidden">{username ? `${username}${role ? ` [${role}]` : ''} · ` : ''}v0.1.0</span>
+          <button className="header-bell" aria-label="Notifications" title="Notifications">
+            <span aria-hidden="true">🔔</span>
+          </button>
+          <button className="header-status" title="System status: connection + role">
+            <span className={`st-dot${token ? ' on' : ''}`} aria-hidden="true" />
+            <b>{roleShort}</b>
+          </button>
           {token && (
-            <button className="logout-btn" onClick={handleLogout}>Logout</button>
+            <div className="user-wrap">
+              <button className="user-chip" aria-haspopup="menu" aria-expanded={userMenu}
+                aria-label="User menu" onClick={() => setUserMenu((o) => !o)}>
+                <span className="avatar" aria-hidden="true">{initials}</span>
+                <span className="user-name">{username ?? 'user'}</span>
+                <span className="caret" aria-hidden="true">▾</span>
+              </button>
+              {userMenu && (
+                <div className="user-menu" role="menu">
+                  <div className="um-head">{username}{role ? ` · ${role}` : ''} · v0.1.0</div>
+                  <button role="menuitem" className="um-item logout-btn" onClick={handleLogout}>Sign out</button>
+                </div>
+              )}
+            </div>
           )}
         </div>
       </header>
