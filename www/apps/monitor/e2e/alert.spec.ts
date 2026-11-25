@@ -16,6 +16,7 @@ test.describe('Monitor alert panel (B4)', () => {
   test('filter chips + unread badge + filter + click marks read', async ({ page }) => {
     await page.route('**/api/admin/audit', (r) => r.fulfill({ json: MOCK_AUDIT }));
     await page.goto('/');
+    await page.locator('.region-toggles [aria-label="Toggle alert panel"]').click(); // V4: right default closed
     await expect(page.locator('.alert-panel')).toBeVisible({ timeout: 15000 });
     await expect(page.locator('.alert-panel .chip')).toHaveCount(3);
     await expect(page.locator('.ap-row')).toHaveCount(2);
@@ -33,6 +34,7 @@ test.describe('Monitor alert panel (B4)', () => {
   test('auto-wall toggle arms (aria-pressed)', async ({ page }) => {
     await page.route('**/api/admin/audit', (r) => r.fulfill({ json: MOCK_AUDIT }));
     await page.goto('/');
+    await page.locator('.region-toggles [aria-label="Toggle alert panel"]').click(); // V4: right default closed
     await expect(page.locator('.alert-panel')).toBeVisible({ timeout: 15000 });
     const aw = page.locator('.ap-autowall');
     await expect(aw).toHaveAttribute('aria-pressed', 'false');
@@ -45,6 +47,7 @@ test.describe('Monitor alert panel (B4)', () => {
       json: { events: [{ kind: 'device_offline', ts: 1700000000, room_id: hostProducer.room }], count: 1, source: 'core', retention: 'memory' },
     }));
     await page.goto('/');
+    await page.locator('.region-toggles [aria-label="Toggle alert panel"]').click();
     await expect(page.locator('.ap-row')).toHaveCount(1, { timeout: 15000 });
     await page.locator('.ap-row').first().click();
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
@@ -56,10 +59,20 @@ test.describe('Monitor alert panel (B4)', () => {
       json: { events: auditEvents, count: auditEvents.length, source: 'core', retention: 'memory' },
     }));
     await page.goto('/');
+    await page.locator('.region-toggles [aria-label="Toggle alert panel"]').click(); // V4: right default closed
     await expect(page.locator('.alert-panel')).toBeVisible({ timeout: 15000 });
     // arm first (no alerts yet), then inject a NEW estop alert for the live host room
     await page.locator('.ap-autowall').click();
     auditEvents = [{ kind: 'estop_audit', ts: 1700000000, room_id: hostProducer.room }];
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
+  });
+
+  test('V4 right default closed + playback transport guarded (K7)', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('.mon-alerts')).toBeHidden();
+    await expect(page.locator('.ctl-bar')).toBeVisible();
+    const guarded = page.locator('.ctl-bar [aria-disabled="true"]');
+    expect(await guarded.count()).toBeGreaterThan(5);
+    await expect(guarded.first()).toHaveAttribute('data-reason', /RECORDING_READY=false/);
   });
 });

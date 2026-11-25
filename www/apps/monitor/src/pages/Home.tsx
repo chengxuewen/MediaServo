@@ -9,6 +9,7 @@ import { useAudit } from '../hooks/useAudit';
 import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
 import Timeline from '../components/Timeline';
+import PlaybackBar from '../components/PlaybackBar';
 import { PanelLeft, Bell, Rows3, RefreshCw } from 'lucide-react';
 import './Home.css';
 
@@ -52,7 +53,8 @@ function loadRegions() {
     const raw = localStorage.getItem(REGION_KEY);
     if (raw) { const v = JSON.parse(raw); return { left: v.left !== false, right: v.right !== false, bottom: v.bottom !== false }; }
   } catch { /* fall through */ }
-  return { left: !narrow, right: !narrow, bottom: true };
+  // V4 (I7): prototype desktop defaults left-open / right-CLOSED / bottom-open.
+  return { left: !narrow, right: false, bottom: true };
 }
 function wsServerUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -358,6 +360,7 @@ export default function Home() {
           <button className="region-collapse" onClick={() => toggleRegion('bottom')} aria-label={regions.bottom ? 'Hide bottom panel' : 'Show bottom panel'}>{regions.bottom ? '⌄' : '⌃'}</button>
         </div>
         <div className="rail-body">
+          <PlaybackBar events={audit.events} />
           <Timeline events={audit.events} loading={audit.loading} error={audit.error} refetch={audit.refetch} />
         </div>
       </div>

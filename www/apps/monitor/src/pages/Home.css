@@ -20,7 +20,8 @@
 .stream-rail, .mon-alerts { background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); overflow: hidden; transition: width .18s; }
 .stream-rail { width: 248px; }
 .mon-alerts { width: 300px; }
-.stream-rail.collapsed, .mon-alerts.collapsed { width: auto; }
+/* V4: collapsed rail takes zero grid track (prototype), reopen via topbar toggle. */
+.stream-rail.collapsed, .mon-alerts.collapsed { display: none; }
 .collapsed .rail-body { display: none; }
 .rail-head { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-2); border-bottom: 1px solid var(--ms-color-border-subtle); }
 .rail-title { flex: 1; font-size: var(--ms-font-size-sm); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); white-space: nowrap; }
