@@ -142,8 +142,13 @@
 .wall-cell .video-player-overlay.tile { width: 100%; height: 100%; }
 .wc-zoom { position: absolute; right: var(--ms-space-1); bottom: var(--ms-space-1); z-index: 15; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); width: 24px; height: 24px; cursor: pointer; font-size: var(--ms-font-size-sm); line-height: 1; }
 .wc-zoom:hover { background: var(--ms-color-surface-hover); }
-.wall-offline { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--ms-space-2); aspect-ratio: 16/9; background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-sm); }
-.wo-title { font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-danger); letter-spacing: .05em; }
-.wo-reason { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); }
-.wo-close { background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
-.wo-close:hover { background: var(--ms-color-surface-hover); }
+/* V9e: offline tile = dark video island (prototype), radius0 + SIGNAL LOST + slash. */
+.wall-offline { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--ms-space-2); aspect-ratio: 16/9; background: var(--ms-palette-video-bg); border: 1px solid var(--ms-color-border); border-radius: 0; color: rgba(255,255,255,.5); font-size: var(--ms-font-size-sm); overflow: hidden; }
+.wall-offline::before { content: '⊘'; position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 84px; color: rgba(255,255,255,.06); }
+.wo-title { position: relative; font-weight: 600; color: var(--ms-color-danger); letter-spacing: 2px; font-family: var(--ms-font-family-mono); }
+.wo-reason { position: relative; font-size: var(--ms-font-size-xs); color: rgba(255,255,255,.4); }
+.wo-close { position: relative; background: rgba(0,0,0,.4); border: 1px solid rgba(255,255,255,.22); color: rgba(255,255,255,.8); border-radius: 6px; padding: 2px 8px; font-size: var(--ms-font-size-xs); cursor: pointer; }
+.wo-close:hover { background: rgba(0,0,0,.7); color: #fff; }
+/* V9e (S6/F1): prototype radius language — cards/buttons r6, chips/pills 999. */
+.rail-card, .open-picker, .region-toggles button, .theme-toggle, .layout-menu, .pb-ctl, .pb-live, .wo-close { border-radius: 6px; }
+.health-chip, .ap-unread, .ap-filter .chip { border-radius: 999px; }
