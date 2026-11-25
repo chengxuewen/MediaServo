@@ -163,9 +163,11 @@ export default function Home() {
   const [clock, setClock] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(t); }, []);
 
-  // V5 (F3/K8): light+dark theme toggle (tokens dark preset), persisted per origin.
-  const [theme, setTheme] = useState(() => { try { return localStorage.getItem('msrv_theme') || 'light'; } catch { return 'light'; } });
-  useEffect(() => { document.documentElement.dataset.theme = theme; try { localStorage.setItem('msrv_theme', theme); } catch { /* silent */ } }, [theme]);
+  // V20: theme is now set in admin Settings (Appearance) — the monitor only APPLIES the
+  // persisted choice (single source of truth, no theme button on the wall toolbar).
+  useEffect(() => {
+    try { document.documentElement.dataset.theme = localStorage.getItem('msrv_theme') || 'light'; } catch { /* silent */ }
+  }, []);
 
   // V5 (I8): Esc hierarchical close — gallery -> zoom (modal/picker ride kit Modal LIFO).
   useEffect(() => {
@@ -371,8 +373,7 @@ export default function Home() {
                 <span className="wt-spacer" />
                 <button className="iconbtn" aria-disabled="true" title="Drift sync display — deferred (RECORDING_READY=false)" aria-label="Sync (deferred)">⇄</button>
                 <button className={`global-stats-toggle iconbtn${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)} title="Stats" aria-label="Stats">ⓘ</button>
-                <button className={`demo-toggle${demo ? ' on' : ''}`} aria-pressed={demo} onClick={() => { try { localStorage.setItem('ms_demo', demo ? '0' : '1'); } catch { /* silent */ } window.location.reload(); }} title={demo ? 'Simulated demo (NOT real streams)' : 'Enable labeled simulated preview'}>{demo ? 'DEMO' : '◻'}</button>
-                <button className="theme-toggle" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Toggle light/dark theme" title="Toggle theme">{theme === 'dark' ? '☀' : '◐'}</button>
+                {/* V20: no Demo / theme buttons on the wall toolbar (prototype right = sync/stats). */}
           </div>
           <div className="wall-wrap">
               <div className={`wall-grid${statsVisible ? '' : ' stats-hidden'}`} style={gridStyle}>

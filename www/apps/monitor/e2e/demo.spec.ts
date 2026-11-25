@@ -4,8 +4,8 @@ import { test, expect } from '@playwright/test';
 // codec text, degraded border, LIVE badges, recording blocks) and is clearly labeled.
 test('demo mode renders rich labeled preview', async ({ page }) => {
   await page.goto('/?demo=1');
-  await expect(page.locator('.demo-toggle.on')).toBeVisible();
-  await expect(page.locator('.demo-toggle')).toHaveAttribute('title', /NOT real streams/);
+  // V20: Demo/theme buttons removed from the wall toolbar (theme lives in admin Settings).
+  await expect(page.locator('.demo-toggle')).toHaveCount(0);
   await expect(page.locator('.wall-grid .video-player')).toHaveCount(5);
   await expect(page.locator('.tile-idle').first()).toBeVisible();
   await expect(page.locator('.video-player.degraded')).toHaveCount(1);

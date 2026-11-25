@@ -48,6 +48,12 @@ export default function Settings() {
   const [saved, setSaved] = useState(hasToken());
   const [showSaved, setShowSaved] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  // V20: theme lives here (single source of truth) — the monitor wall applies it.
+  const [theme, setThemeState] = useState<string>(() => { try { return localStorage.getItem('msrv_theme') || 'light'; } catch { return 'light'; } });
+  const applyTheme = (t: string) => {
+    setThemeState(t);
+    try { localStorage.setItem('msrv_theme', t); document.documentElement.dataset.theme = t; } catch { /* silent */ }
+  };
   const [loggingIn, setLoggingIn] = useState(false);
   const [clearOpen, setClearOpen] = useState(false);
   const currentUser = getUsername();
@@ -154,6 +160,15 @@ export default function Settings() {
   return (
     <section>
       <h1 style={{ margin: '0 0 var(--ms-space-3)' }}>Settings</h1>
+
+      <section style={cardStyle} aria-label="Appearance">
+        <h2 style={cardTitle}>Appearance</h2>
+        <p style={descStyle}>Theme applies to the whole console, including the monitor wall.</p>
+        <div style={rowStyle} role="group" aria-label="Theme">
+          <Button variant={theme === 'light' ? 'primary' : undefined} aria-pressed={theme === 'light'} data-theme-choice="light" onClick={() => applyTheme('light')}>Light</Button>
+          <Button variant={theme === 'dark' ? 'primary' : undefined} aria-pressed={theme === 'dark'} data-theme-choice="dark" onClick={() => applyTheme('dark')}>Dark</Button>
+        </div>
+      </section>
 
       <section style={cardStyle} aria-label="Account Login">
         <h2 style={cardTitle}>Account Login</h2>
