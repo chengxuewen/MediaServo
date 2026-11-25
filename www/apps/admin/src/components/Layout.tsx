@@ -22,6 +22,8 @@ export default function Layout() {
     };
     return map[p] ?? (p ? p.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Overview');
   })();
+  // Mainstream practice: keep the browser tab title in sync with the current page.
+  useEffect(() => { document.title = `${pageLabel} · MediaServo`; }, [pageLabel]);
   // V21 (prototype nav): collapsible sidebar -> 58px icon rail; auto-rail at <=900px.
   const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem('msrv_nav_collapsed') === '1'; } catch { return false; } });
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
@@ -59,8 +61,10 @@ export default function Layout() {
     <div className="layout">
       {notices && <div className="notice-banner">ℹ️ {notices}</div>}
       <header className="header">
-        <span className="logo"><span className="logo-mark" aria-hidden="true"><Radio size={16} /></span> MediaServo</span>
-        <span className="header-page" aria-current="page">{pageLabel}</span>
+        <div className="header-left">
+          <span className="logo"><span className="logo-mark" aria-hidden="true"><Radio size={16} /></span> MediaServo</span>
+          <span className="header-page" aria-current="page">{pageLabel}</span>
+        </div>
         <div className="header-right">
           <FloorNotifChips />
           <span className="version">

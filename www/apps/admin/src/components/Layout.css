@@ -3,7 +3,8 @@
 .header { display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; height: 54px; background: var(--ms-color-text); color: var(--ms-color-text-inverse); }
 .header .logo { font-size: 1rem; font-weight: 600; }
 /* V22: current page name beside the brand (prototype topbar). */
-.header-page { margin-left: var(--ms-space-4); color: rgba(255,255,255,.62); font-size: var(--ms-font-size-sm); font-weight: 400; white-space: nowrap; }
+.header-left { display: flex; align-items: center; gap: var(--ms-space-3); min-width: 0; }
+.header-page { color: rgba(255,255,255,.62); font-size: var(--ms-font-size-sm); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .header-right { display: flex; align-items: center; gap: 0.75rem; }
 .logout-btn { background: none; border: 1px solid var(--ms-color-text-secondary); color: var(--ms-color-text-faint); font-size: 0.75rem; padding: 0.25rem 0.6rem; border-radius: 4px; cursor: pointer; }
 .logout-btn:hover { color: var(--ms-color-text-inverse); border-color: var(--ms-color-text-muted); }
