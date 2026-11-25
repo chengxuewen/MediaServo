@@ -56,4 +56,10 @@ test('header shows the current page name beside the brand', async ({ page }) => 
   expect(geo.cyDelta).toBeLessThanOrEqual(2);
   expect(geo.ruleSpans).toBe(true);
   expect(geo.border).toBe('1px');
+  // hierarchy: the page name must be visibly smaller than the brand
+  const sizes = await page.evaluate(() => ({
+    brand: parseFloat(getComputedStyle(document.querySelector('.header .logo')!).fontSize),
+    page: parseFloat(getComputedStyle(document.querySelector('.header-page')!).fontSize),
+  }));
+  expect(sizes.page).toBeLessThanOrEqual(sizes.brand - 2);
 });
