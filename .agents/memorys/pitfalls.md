@@ -2108,3 +2108,63 @@ encoder_status 回调缺浏览器字段 → 连接质量显示 0）。非渲染�
 **解法**: 交付面任何镜像内容变更（Rust/入口/烤入手册/EXPOSE）后，**双品牌各自 `build image prod`**（父壳 msrtc.sh + 子仓 mediaservo.sh），再各自 `package image`；判定哪个面在跑看容器路径 `/opt/<brand>/` 或 PID1 cmdline。冒烟=mediaservo 面金丝雀，天然兜底。
 
 **验证**: mediaservo 面重建（315s）后全链冒烟 PASS（PSK 三断言+正控+scrub 全绿）；两品牌 tar 的镜像内 grep 均含新串。
+
+## PIT-253: 转述的"已验证事实"换机/换版本必须重测——命令名都会变 (2026-11-25)
+
+**症状**: 任务书以"实测事实"给出 playwright 安装命令 `install-browser chromium`，本机照抄执行报 `error: unknown command 'install-browser'`。
+
+**根因**: 事实来自另一会话的另一版本（0.0.82 → playwright 1.64-alpha），CLI 命令面是 `install [options] [browser...]`；"已验证"只对来源环境成立。
+
+**解法**: 任何来自转述的命令，先跑其 `--help` 核对命令面与参数形态，再接线；命令名/旗标进断言（测试里钉 `install`，钉死 `--browser/--headless` 不进 args）。
+
+**验证**: `node <pin>/node_modules/playwright-core/cli.js --help | grep -E '^  (install|install-deps)'` 输出 `install [options] [browser...]`，无 `install-browser`；`python3 -m unittest scripts.agents.test_mcp_browser` 的 RegistryTests 钉注册表形状。
+
+## PIT-254: 长任务（下载/安装）输出不得 pipe 到 head/tail——SIGPIPE 会杀进程 (2026-11-25)
+
+**症状**: 187MB 浏览器下载跑到 70% 突然终止（rc=1），缓存里没有产物；命令形如 `node cli.js install chromium 2>&1 | head -10`。
+
+**根因**: `head` 读够行数即关管道，写端收到 SIGPIPE 终止——进度条输出恰好每行都写，第 10 行后整进程被杀。
+
+**解法**: 长任务一律 `> /tmp/x.log 2>&1 &`（或 nohup）后台跑 + 轮询 `tail -2` 与产物存在性；判完成看退出码/产物，不看输出行数。
+
+**验证**: 下载后 `ls ~/.cache/ms-playwright/ | grep chromium-<rev>` 存在且 `du -sh` 为实测量级（本机 394M）；轮询命令只用 `tail` 读文件，不接在被跑进程的管道上。
+
+## PIT-255: `node --check` 只验语法——ESM 顶层调用早于 const 初始化（TDZ）是运行时错 (2026-11-25)
+
+**症状**: `mcp-serve.mjs` 顶层 `spawnNpm()` 调用引用了文件后部声明的 `const RECORD_PATH`；`node --check` 通过，真跑报 `ReferenceError: Cannot access 'RECORD_PATH' before initialization`。
+
+**根因**: `const/let` 有暂时性死区（TDZ），函数声明会提升但 const 不会；语法检查不执行代码，抓不到。
+
+**解法**: 常量声明统一提到模块顶部（import 之后、任何顶层调用之前）；改完 ESM **必须真跑一次入口**（launcher/probe），不能只 --check。
+
+**验证**: `bash scripts/agents/mcp-launch.sh local-playwright` 3 秒内无 `ReferenceError`；`python3 scripts/agents/mcp_probe.py` 出 `PROBE OK`。
+
+## PIT-256: 浏览器二进制安装与系统依赖安装是两件事——unsupported host 走 platform override，不追 deps (2026-11-25)
+
+**症状**: `playwright install chromium`（无 --with-deps）在 ubuntu20.04 报 `Playwright does not support chromium on ubuntu20.04-x64`；加 `--with-deps` 同样被拒且要 sudo apt。
+
+**根因**: Playwright 对掉出支持面的 OS 拒装"官方支持"路径；但 `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64` 会让安装器下载**同一 pin 构建**的 fallback（CfT，本机 154.0.8037.0 / chromium-1246），该构建真能启动——系统级 lib 依赖由宿主已有环境满足，不需要 playwright 的 apt 安装。
+
+**解法**: 安装逻辑分两段：浏览器二进制（override + 自家安装器 + 自家 CDN/缓存）+ 系统依赖（缺时才 install-deps，且视为 OS 运维面，不阻塞 setup）。unsupported 判据走 override 默认值，env 可覆写。
+
+**验证**: `PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64 node <pin>/node_modules/playwright-core/cli.js install chromium` rc=0 且缓存出现 pin 对应 rev；`python3 -c "from playwright-core 启动 about:blank"` → `LAUNCH_OK`（真启动，非 --version）。
+
+## PIT-257: 验收负证明用环境覆盖模拟缺失——不移动真实缓存，才可重复 (2026-11-25)
+
+**症状**: 负证明（"记录缺失/缓存缺失必须红"）若靠 `mv` 真实缓存 + 事后恢复，任何中断都破坏环境，且难进自动化。
+
+**根因**: 被测读取面是 `HOME`（缓存路径）与记录文件；二者都可用环境变量/临时文件替换，无需动真身。
+
+**解法**: 负证明统一用：① 记录文件 = 备份→写空→恢复（try/finally）；② 缓存缺失 = 子进程 `HOME=<空临时目录>`（gate 读的正是 `~/.cache/ms-playwright`）。断言"红"的判据写进脚本，可反复跑。
+
+**验证**: `python3 scripts/agents/mcp_selftest.py` 的 8n/9n 组即此形态：14/14 PASS，连跑两次不改环境。
+
+## PIT-258: 经 shell heredoc 内嵌 Python 改文件，转义会写进字面量——改完必看首行 (2026-11-25)
+
+**症状**: 用 heredoc 跑 Python 在文件头插入声明，写入后文件首行出现字面 `\n` 串（整段声明挤成一行），markdown 结构坏。
+
+**根因**: heredoc 与 Python 字符串双层转义叠加，`"\\n".join(...)` 在 shell 层已折算，Python 收到的是字面 `\n`。
+
+**解法**: 文件头/结构化插入优先用编辑器替换工具（非 heredoc）；确需 heredoc 时，写完立刻 `head -3 <file>` 验收形态（应见真实换行与预期行数），发现字面 `\n` 立即修。
+
+**验证**: `head -3 .agents/rules/common/code-review.md` 显示标题与引用块各自成行；`grep -cF '\\n' <file>` 为 0（字面反斜杠 n 不得出现）。
