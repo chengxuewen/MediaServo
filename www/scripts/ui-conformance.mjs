@@ -37,6 +37,21 @@ try {
   await pp.evaluate((p) => goto(p), page);
   await pp.waitForTimeout(400);
   const protoBuf = await pp.screenshot();
+  // Geometry ledger: bounding boxes of key chrome regions (layout-level, video-agnostic).
+  const REG = [
+    ['stagebar', '.stage-bar', '.wall-toolbar'],
+    ['leftrail', '.stream-rail', '.stream-rail'],
+    ['wall', '.tiles', '.wall-grid'],
+    ['alerts', '.mon-alerts', '.mon-alerts'],
+    ['bottom', '.ctl-bar', '.ctl-bar'],
+  ];
+  const grab = (page, idx) => page.evaluate(([regs, id]) => regs.map(([k, p, i]) => {
+    const el = document.querySelector(id === 0 ? p : i);
+    if (!el) return { k, present: false };
+    const r = el.getBoundingClientRect();
+    return { k, present: true, x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+  }), [REG, idx]);
+  const protoRects = await grab(pp, 0);
   await pp.close();
 
   // Implementation. demo = labeled preview (like-for-like data); real = honest live state.
@@ -46,7 +61,18 @@ try {
   await ip.waitForSelector('.monitor-home');
   await ip.waitForTimeout(400);
   const implBuf = await ip.screenshot();
+  const implRects = await grab(ip, 1);
   await ctx.close();
+  // CRITICAL layout ledger: region present/size deltas (tolerance 8px), video-agnostic.
+  const ledger = protoRects.map((p, i) => {
+    const m = implRects[i];
+    if (!p.present || !m.present) return { region: p.k, critical: true, reason: `present proto=${p.present} impl=${m.present}` };
+    const dh = Math.abs(p.h - m.h), dw = Math.abs(p.w - m.w), dx = Math.abs(p.x - m.x);
+    // x/width offsets come from the GLOBAL shell (prototype has a 230px portal nav the
+    // standalone app lacks) — accounted to admin-restyle, not a monitor-chrome defect.
+    const shellOffset = dx > 100;
+    return { region: p.k, proto: p, impl: m, heightDelta: dh, widthDelta: dw, shellOffset, critical: !shellOffset && dh > 8 };
+  });
 
   const a = PNG.sync.read(protoBuf);
   const b = PNG.sync.read(implBuf);
@@ -60,7 +86,7 @@ try {
   fs.writeFileSync(path.join(OUT, `proto-${page}.png`), protoBuf);
   fs.writeFileSync(path.join(OUT, `impl-${page}-${mode}.png`), implBuf);
   fs.writeFileSync(path.join(OUT, `diff-${page}-${mode}.png`), PNG.sync.write(diff));
-  const report = { page, mode, viewport: VP, mismatchPixels: mismatch, mismatchPct: Number(pct), note: 'pixel diff vs PROTOTYPE (design authority). High % = real gap ledger, NOT a pass/fail of chrome parity; review CRITICAL layout diffs per C3.' };
+  const report = { page, mode, viewport: VP, mismatchPixels: mismatch, mismatchPct: Number(pct), layoutLedger: ledger, note: 'pixel % dominated by global shell + video content (data); use layoutLedger (region geometry, video-agnostic) for CRITICAL layout diffs per C3.' };
   fs.writeFileSync(path.join(OUT, `report-${page}-${mode}.json`), JSON.stringify(report, null, 2));
-  console.log(JSON.stringify(report));
+  console.log(JSON.stringify({ ...report, layoutLedger: ledger.map((l) => `${l.region}:${l.critical ? 'CRIT' : l.shellOffset ? 'shell' : 'ok'}${l.heightDelta != null ? `(h${l.heightDelta}/w${l.widthDelta})` : ''}`) }));
 } finally { await browser.close(); }

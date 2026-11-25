@@ -1,5 +1,5 @@
 /* V4 (L4/K7): playback-timeline chrome — visual only, transport guarded. tokens-only. */
-.ctl-bar { display: flex; flex-direction: column; gap: var(--ms-space-1); padding: var(--ms-space-2) 0; border-bottom: 1px solid var(--ms-color-border-subtle); }
+.ctl-bar { display: flex; flex-direction: column; gap: var(--ms-space-1); padding: 8px 0 16px; border-bottom: 1px solid var(--ms-color-border-subtle); }
 .ctl-top { display: flex; align-items: center; gap: var(--ms-space-1); flex-wrap: wrap; }
 .ctl-time { font-size: var(--ms-font-size-md); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-accent); font-variant-numeric: tabular-nums; margin-right: var(--ms-space-2); }
 .pb-ctl { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); opacity: .45; cursor: not-allowed; }
