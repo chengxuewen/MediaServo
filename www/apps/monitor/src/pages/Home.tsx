@@ -105,7 +105,7 @@ function LayoutGallery({ current, onSelect, onClose }: { current: string; onSele
  * min-tile horizontal scroll, pager + carousel (default off), single-tile zoom (K5).
  */
 export default function Home() {
-  const { username, role, canMonitor } = useAuth();
+  const { canMonitor } = useAuth();
   // V8: opt-in labeled simulated preview (?demo=1) for like-for-like visual parity.
   const demo = isDemo();
   const real = useStreams();
@@ -291,17 +291,10 @@ export default function Home() {
 
   return (
     <section className="monitor-home">
-      <div className="mh-bar">
-        <h1>Monitor Center</h1>
-        <span className="mh-sub">Surveillance wall + timeline review</span>
-        <span className="live-clock"><span className="live-dot" aria-hidden="true" />LIVE {clock.toLocaleTimeString('en-GB', { hour12: false })}</span>
-        <button className={`demo-toggle${demo ? ' on' : ''}`} aria-pressed={demo} onClick={() => { try { localStorage.setItem('ms_demo', demo ? '0' : '1'); } catch { /* silent */ } window.location.reload(); }} title="Toggle labeled simulated preview">Demo</button>
-        <button className="theme-toggle" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Toggle light/dark theme" title="Toggle theme">{theme === 'dark' ? '☀' : '◐'}</button>
-      </div>
-      <p className="mh-note" role="note">
-        Signed in as {username ?? 'unknown'}{role ? ` [${role}]` : ''}. {canMonitor ? '' : 'Wall access requires admin/dispatcher. '}Cap {MAX_PLAYING}; PSK host rooms are single-producer. Alert panel at right; playback scrubber/Recording deferred.
-      </p>
-      {demo && <div className="demo-note" role="note">Simulated demo — prototype-style preview, NOT real streams. Toggle Demo off for live data.</div>}
+      {/* V19: top area compacted to the prototype's single toolbar row. The page title
+          stays for a11y/SEO only (visually hidden); identity/notes/Demo moved into the
+          toolbar (or removed) so the wall gets the height. */}
+      <h1 className="sr-only">Monitor Center{canMonitor ? '' : ' (wall access requires admin/dispatcher)'}</h1>
 
       <div className="monitor-three-panel">
         <aside className={`stream-rail${regions.left ? '' : ' collapsed'}`}>
@@ -353,6 +346,7 @@ export default function Home() {
                   </button>
                   <button aria-pressed={regions.bottom} onClick={() => toggleRegion('bottom')} title="Toggle playback bar" aria-label="Toggle playback bar"><Rows3 size={15} /></button>
                 </div>
+                <span className="wt-sep" aria-hidden="true" />
                 <div className="layout-combo">
                   <button id="layout-menu" className="layout-menu" aria-haspopup="listbox" aria-expanded={galleryOpen} onClick={() => setGalleryOpen((o) => !o)}>
                     Layout · {layoutId === 'auto' ? 'Auto' : findLayout(layoutId).name} ▾
@@ -372,11 +366,14 @@ export default function Home() {
                 )}
                 {zoomedId && <button className="wt-exit-zoom" onClick={() => setZoomedId(null)}>Exit zoom</button>}
                 {playHint && <span className="wt-hint" role="status">{playHint}</span>}
+                <span className="live-chip" title="Live"><span className="live-dot" aria-hidden="true" />LIVE</span>
+                <span className="live-clock">{clock.toLocaleTimeString('en-GB', { hour12: false })}</span>
                 <span className="wt-spacer" />
                 <button className="iconbtn" aria-disabled="true" title="Drift sync display — deferred (RECORDING_READY=false)" aria-label="Sync (deferred)">⇄</button>
                 <button className={`global-stats-toggle iconbtn${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)} title="Stats" aria-label="Stats">ⓘ</button>
+                <button className={`demo-toggle${demo ? ' on' : ''}`} aria-pressed={demo} onClick={() => { try { localStorage.setItem('ms_demo', demo ? '0' : '1'); } catch { /* silent */ } window.location.reload(); }} title={demo ? 'Simulated demo (NOT real streams)' : 'Enable labeled simulated preview'}>{demo ? 'DEMO' : '◻'}</button>
+                <button className="theme-toggle" onClick={() => setTheme((t) => (t === 'dark' ? 'light' : 'dark'))} aria-label="Toggle light/dark theme" title="Toggle theme">{theme === 'dark' ? '☀' : '◐'}</button>
           </div>
-          {playing.length === 0 && <div className="canvas-empty">No live streams yet — this is the wall layout; add streams at left or toggle Demo.</div>}
           <div className="wall-wrap">
               <div className={`wall-grid${statsVisible ? '' : ' stats-hidden'}`} style={gridStyle}>
                 {visible.map((id, idx) => {

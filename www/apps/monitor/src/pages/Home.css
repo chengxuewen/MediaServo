@@ -2,7 +2,8 @@
 /* V18: page fills the viewport exactly (no document scrollbar); the wall grid scales
    its rows to the remaining height instead of growing past the screen.
    --monitor-chrome = app header + content padding, set per host app. */
-.monitor-home { display: flex; flex-direction: column; gap: var(--ms-space-3); height: calc(100vh - var(--monitor-chrome, 86px)); min-height: 0; overflow: hidden; }
+.monitor-home { display: flex; flex-direction: column; gap: 8px; height: calc(100vh - var(--monitor-chrome, 86px)); min-height: 0; overflow: hidden; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 /* Top bar (V2 stage-bar): title + healthChip + LIVE clock + iconbtn region toggles */
 .mh-bar { display: flex; align-items: center; gap: var(--ms-space-3); flex-wrap: wrap; min-height: 52px; position: relative; z-index: 40; }
@@ -62,8 +63,10 @@
 .open-picker:hover { opacity: .9; }
 
 /* Center canvas: wall always visible (V2 padding 16) */
-.canvas { min-width: 0; display: flex; flex-direction: column; gap: var(--ms-space-2); padding: 16px; min-height: 0; overflow: hidden; }
-.canvas-empty { padding: var(--ms-space-6); text-align: center; color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-sm); border: 1px dashed var(--ms-color-border); border-radius: var(--ms-radius-md); }
+/* V19: canvas has no padding; the toolbar and the wall each inset 16 so their left/right
+   edges line up exactly (prototype stage-bar aligns with the grid). */
+.canvas { min-width: 0; display: flex; flex-direction: column; gap: 8px; padding: 0; min-height: 0; overflow: hidden; }
+.canvas-empty { margin: 0 16px 8px; } { padding: var(--ms-space-6); text-align: center; color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-sm); border: 1px dashed var(--ms-color-border); border-radius: var(--ms-radius-md); }
 
 /* Bottom collapsible Event feed */
 .bottom-zone { background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); overflow: hidden; }
@@ -116,7 +119,11 @@
 }
 
 /* Wall toolbar / grid / offline tile (unchanged mechanics) */
-.wall-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--ms-space-2); font-size: var(--ms-font-size-sm); color: var(--ms-color-text-muted); min-height: 52px; padding: 8px 16px; }
+/* V19: single compact stage-bar row (52px), no wrap, insets 16 to align with the grid. */
+.wall-toolbar { display: flex; flex-wrap: nowrap; align-items: center; gap: var(--ms-space-2); font-size: var(--ms-font-size-sm); color: var(--ms-color-text-muted); height: 52px; padding: 0 16px; overflow: hidden; }
+.wt-sep { width: 1px; height: 20px; background: var(--ms-color-border); flex: 0 0 auto; }
+.live-chip { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; border: 1px solid var(--ms-color-success); background: var(--ms-color-success-soft); color: var(--ms-color-success); border-radius: 6px; font-size: 11px; font-weight: 700; letter-spacing: .5px; flex: 0 0 auto; }
+.live-chip .live-dot { width: 7px; height: 7px; }
 .wt-label { margin-right: var(--ms-space-1); }
 .wt-hint { margin-left: auto; color: var(--ms-color-text-secondary); font-size: var(--ms-font-size-xs); }
 .layout-menu { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-sm); cursor: pointer; }
@@ -143,7 +150,7 @@
 .lo-grid { display: grid; gap: 2px; width: 48px; height: 32px; }
 .lo-cell { background: var(--ms-color-border-strong); border-radius: 1px; }
 .lo-thumb[aria-selected="true"] .lo-cell, .lo-cell.big { background: var(--ms-color-accent); }
-.wall-wrap { position: relative; flex: 1; min-height: 0; }
+.wall-wrap { position: relative; flex: 1; min-height: 0; padding: 0 16px 16px; }
 /* V6 (K10): empty-slot parity for 25/36/custom under cap16. */
 /* V8: empty slots are part of the dark video island (prototype look), honest placeholders. */
 .tile-empty { display: flex; align-items: center; justify-content: center; height: 100%; border: 1px solid var(--ms-color-border); background: var(--ms-palette-video-bg); border-radius: 0; color: rgba(255,255,255,.35); font-size: var(--ms-font-size-xs); font-family: var(--ms-font-family-mono); letter-spacing: 1px; }
