@@ -26,6 +26,30 @@ test.describe.serial('Monitor picker (B3)', () => {
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
   });
 
+  // V15 geometry guard: both panes must stretch to the SAME bottom (the right list
+  // previously ended early and the two columns misaligned). Mock producers so this is
+  // deterministic and independent of a live host.
+  test('two panes share the same height/bottom (no misalignment)', async ({ page }) => {
+    const streams = Array.from({ length: 6 }, (_, i) => ({
+      room: 'cam-geo', owner: null, peer_id: `host-${i}`, role: 'producer', id: `g${i}`, kind: 'video',
+      byte_count: 1, packet_count: 1, score: 10, transport_id: `t${i}`, local_port: 1,
+      remote_ip: '127.0.0.1', remote_port: 1, rtp_packet_loss_sent: 0, rtp_packet_loss_received: 0,
+      available_outgoing_bitrate: null, available_incoming_bitrate: 1000000,
+    }));
+    await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams } }));
+    await page.goto('/');
+    await openPicker(page);
+    await page.locator('.picker-dev .pick-caret').first().click();
+
+    const box = (s: string) => page.locator(s).boundingBox();
+    const l = await box('.picker-avail');
+    const rr = await box('.picker-chosen');
+    expect(l && rr).toBeTruthy();
+    expect(Math.abs((l!.height) - (rr!.height))).toBeLessThanOrEqual(2);
+    expect(Math.abs((l!.y + l!.height) - (rr!.y + rr!.height))).toBeLessThanOrEqual(2);
+    expect(l!.height).toBeGreaterThan(200);
+  });
+
   test('M1 stale banner + Retry keeps last known streams on fetch error', async ({ page, hostProducer }) => {
     await page.goto('/');
     await openPicker(page);

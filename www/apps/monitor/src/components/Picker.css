@@ -1,15 +1,17 @@
 /* V10 prototype-parity add-stream dialog — tokens only (PIT-258). */
 /* V10: prototype dialog is wide (~860px); the kit Modal caps narrower, so force it. */
 .picker-modal, .picker-modal[class] { width: min(860px, 94vw) !important; max-width: min(860px, 94vw) !important; }
-.picker-cols { display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--ms-space-3); align-items: stretch; }
-.picker-pane { display: flex; flex-direction: column; min-width: 0; }
-.picker-pane-head { display: flex; align-items: center; justify-content: space-between; font-size: var(--ms-font-size-xs); font-weight: 600; color: var(--ms-color-text-tertiary); padding: 0 var(--ms-space-1) var(--ms-space-1); }
-.picker-swap { display: flex; align-items: center; justify-content: center; color: var(--ms-color-text-muted); font-size: 18px; }
+/* V15: both panes share a definite height so the lists stretch to the same bottom
+   (previously the shorter right pane ended early and the two columns misaligned). */
+.picker-cols { display: grid; grid-template-columns: 1fr auto 1fr; gap: var(--ms-space-3); align-items: stretch; height: min(66vh, 520px); }
+.picker-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.picker-pane-head { display: flex; align-items: center; justify-content: space-between; gap: var(--ms-space-2); min-height: 26px; font-size: var(--ms-font-size-xs); font-weight: 600; color: var(--ms-color-text-tertiary); padding: 0 var(--ms-space-1) var(--ms-space-1); }
+.picker-swap { display: flex; align-items: center; justify-content: center; align-self: stretch; color: var(--ms-color-text-muted); font-size: 18px; }
 .picker-head-right { display: inline-flex; align-items: center; gap: var(--ms-space-2); }
 .picker-playall { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: 6px; padding: 0 8px; height: 22px; font-size: 11px; cursor: pointer; }
 .picker-playall:hover { border-color: var(--ms-color-accent); color: var(--ms-color-accent); }
 .picker-search { width: 100%; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text); border-radius: 6px; padding: var(--ms-space-2); font-size: var(--ms-font-size-sm); margin-bottom: var(--ms-space-2); }
-.picker-avail, .picker-chosen { border: 1px solid var(--ms-color-border); border-radius: 6px; min-height: 220px; max-height: 380px; overflow: auto; padding: var(--ms-space-1); background: var(--ms-color-surface); }
+.picker-avail, .picker-chosen { border: 1px solid var(--ms-color-border); border-radius: 6px; flex: 1; min-height: 0; overflow: auto; padding: var(--ms-space-1); background: var(--ms-color-surface); }
 .picker-avail:focus-visible { outline: var(--ms-focus-ring-width) solid var(--ms-focus-ring-color); outline-offset: 1px; }
 .picker-empty { padding: var(--ms-space-2); font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); }
 
