@@ -1,5 +1,502 @@
 # Prototypes CHANGELOG
 
+## v1.118 — 2026-11-25 (portal-unified) — N-26 E-STOP contextual + visual unification delivered (D53=B + user style mandate; pending review)
+User: E-STOP visible in view-only (nothing to stop) + "sizes/styles not unified, don't give it a
+separate size/style". Mainstream remote-desktop (ToDesk/Parsec/RustDesk/TeamViewer, our todesk-01/02/04
+evidence) has no permanent E-STOP; our teleop domain does (ISO 13850 latching emergency stop semantics
+= hold 400ms + typed resume + lease inert), so D53=B contextual rather than removal.
+- **Contextual visibility**: E-STOP shows only when there is control to stop — body.rem-captured or
+  teleop session or latched; view-only/idle hides it (safety info there = VIEW-ONLY badge + STOPPED
+  banner + Safety resume). D10/§3m never-hide forward note: "never-hide WHILE control possible".
+- **Visual unification (user mandate)**: 44h/120min-width/2px border/r8 special box -> same language
+  as safe-bar buttons: 30h, padding 0 12, r6, 1px border, nowrap, 12px/600; danger conveyed by COLOR
+  (video-danger border+ink on video-scrim) not by size; coarse 44 applies to it like every bar button;
+  hold ring/progress/SR mirror unchanged.
+- **Root fix en route**: renderRemSession never called renderRemState, so rem-captured body class
+  lagged session open -> contextual display wrong at open; now renderRemSession ends with
+  renderRemState().
+- Verified: harness 69 cases ALL GREEN + NEG all red; remote-chrome += estopContextual
+  (captured flex / view hidden / recaptured flex) + estopUnified (30h + 1px border); estopOpaqueBase
+  re-specified to scrim alpha .85; remote-estop captures first; remote-launcher view leg re-specified
+  to estopHiddenInView; MCP: view none / captured flex 30h; screenshot n26-captured; lint clean;
+  stamps x8.
+- Fixes en route: hidden Take .click() unreliable under Firefox Marionette -> leg calls remCapture()
+  directly (precedent remote-estop).
+
+## v1.117 — 2026-11-24 (portal-unified) — N-25 banner-stack + button uniformity micro-fix (pending review)
+User crop: released toast overlaps LINK-LOST banner (both anchored top:0 translateY(-100%-8px) ->
+same rect 630-658, MCP overlap=true); Take control wrapped to two lines in user's font fallback
+(height 44 vs Expand 30 = "sizes not unified").
+- **Banner stack**: #remBannerStack absolute upper-anchor flex-column gap 6; health/stopped/released
+  become static children -> simultaneous banners stack vertically, never overlap (MCP re-measure:
+  health bottom 624 <= released top 630, overlap=false).
+- **Button uniformity**: safebar buttons white-space:nowrap; opswap 96->100px; Expand width auto
+  min 68; Take/Expand both 30h single line (MCP takeOneLine=true); E-STOP 44h kept as deliberate
+  safety weight difference (existence itself pending D53).
+- Verified: harness 69 cases ALL GREEN + NEG all red; remote-bar-stable += bannerStackNoOverlap
+  (rule-scan: stack absolute+column; Firefox reflow-hang on layout-triggering leg avoided, MCP
+  behavioral evidence recorded) + btnNoWrap; releasedOutOfFlow now reads stack anchor + .show rule;
+  stamps x8; screenshot n25-stack.
+- E-STOP existence question opened as D53 (mainstream remote-desktop vs teleoperation domain analysis).
+
+## v1.116 — 2026-11-24 (portal-unified) — N-24 safe-bar stability board delivered (D52=B'; panel re-analysis after host min-width oversight; pending review)
+User: bottom bar "jumps back and forth" + still ugly. MCP measured jitter: fit-content width 787 ->
+grace 809 -> graceMirror 932 -> released 1040 with height 42->69 (second row); digits not tabular.
+Host's first fix (min-width slots) only prevented shrink-jitter, not growth-jitter — user caught it;
+expert panel (3 seats) re-analysis falsified 6 more host claims (only released de-flowed while
+health/stopped share the flex-basis:100% mechanism; released->toast would swallow the permanent
+latched notice reused on the same node; fixed 44/72 heights arithmetically impossible with coarse44
++ pad12; 780 magic number < worst-case slot sum; space padding collapses without white-space:pre;
+clock hh:mm:ss after 1h and Take/Release non-mutual-exclusion unreserved).
+- **Fixed-width slots pinned by MCP canvas measureText** (11px mono / 12px sans 600): state 74 /
+  lat-jit 104 / conn 64 / lease 180 (grace full text + leasebar + bell reserved) / input 64 /
+  clock 57 (8ch) / Esc 24 / Take-Release swap 96 / Expand 68; budget 830 -> bar width
+  min(830px, 100vw-170px); values right-aligned mono (no space padding); content bounded:
+  999+/99+ caps with title true value, grace countdown inside reserved lease slot, conn/state enums.
+- **All three banners out of flow, upper-anchored** (health/stopped/latched permanent while their
+  state; released = dedicated #remReleased toast TTL 6s role=status, NOT merged into global toast);
+  latched notice moved to #remLatchedNote inside #remStopped (inline, single box); anchor =
+  top:0 + translateY(calc(-100% - 8px)) (Firefox reflow hang on bottom:calc(100%+8px) over auto-height
+  fixed container — root-caused by bisect, filed).
+- **graceMirror retired** (lease slot bell+warn+text+remSay carry dual channel; harness graceMirror
+  leg adapted to hudLease; N-5a/D51 forward notes); **bar sim chip retired** (corner chip carries,
+  D51 no-touch-list forward note).
+- **Groups + right-anchored actions**: G1 state / G2 link / G3 lease / G4 time-meta, 1px vertical
+  separators between groups; opswap = grid same-cell stack width 96 (Take/Release hidden-attr swap
+  cannot change geometry); buttons unified 30h fine / 44 coarse, pad 0 12, r6; Expand ghost blue.
+- **Breakpoints**: >=1024 single row (measured budget 830 fits 854 available); <1024 wrap + auto
+  height; slots-inside-bar assertion blocks clip false-green; heights derived (fine 42 / coarse 56).
+- Verified: harness 69 cases ALL GREEN + NEG all red; new remote-bar-stable case = bar rect
+  pixel-equal across grace/999+/clock-1h/CONTROLLED/LATCHED/swap injections (MCP Chrome: 820x42
+  constant) + slotsInsideBar + releasedOutOfFlow rule-scan; NEG = slot width:auto injection;
+  graceMirror adaptation; MCP screenshots n24-latched/dark (banner above bar, single row, groups);
+  node --check + lint clean; stamps x8.
+- Fixes en route: substring replace landed the released absolute rule inside a combined selector
+  list and it was deleted with the remnant -> restored standalone; Firefox Marionette profile lock
+  after killed runs (fresh profile swap); released-leg layout trigger replaced by CSS rule scan.
+
+## v1.115 — 2026-11-24 (portal-unified) — N-23 safe-bar de-framing micro-batch delivered (D51=A; pending review)
+User bottom-crop "too ugly": outer 1px border + r10 + nine chips each 1px same-color border = uniform
+emphasis frame-wall; Take filled vs Expand outlined = two button languages; latent contrast violations
+(Esc hint theme --tx3 on constant dark scrim ~2.9:1 light; grace-warn --warn-ink ~1.4:1; leasebar --ok
+~2.9:1) — D49 video-ink family had missed these.
+- **De-frame (D51=A)**: inner border:none + radius 8; chips de-framed scoped
+  #remSafeBar .chip:not(#remStateChip) (specificity trap pinned: .cap/.ctl only set border-color, a
+  blanket .chip{border:none} would silently kill the badge frame); label dim / value full ink split;
+  group separators = 1px vertical line via ::before (pseudo, out of a11y tree); **single framed
+  #remStateChip kept = our own invention (ToDesk-02 has no framed badge; note filed)** — isolated
+  frame strengthens the state anchor.
+- **Button language unified**: Take keeps filled primary; Expand/Release ghost border:none + hover
+  tint; Expand ink --video-ring (ToDesk "expand" = borderless blue link, real-device anchor).
+- **Contrast floor absorbed**: Esc hint / grace-warn / grace mirror / leasebar / conn value migrated
+  to constant video family (--video-scrim-ink-dim / --video-warn / --video-ok / --video-danger);
+  conn ok green / lost red semantic; Esc slot pinned (after HUD group, before Take, gap 8, margin-left
+  retired).
+- **Shared-shell assertion adapted**: borderRadius-equality leg removed (meet visual not adjudicated,
+  fork note already on file), double session-bar class leg kept.
+- Verified: harness 68 cases ALL GREEN + NEG all red; new assertions barBorderless (four sides) /
+  chipBorderless / stateChipFramed (positive) / expandGhost / escInkContrast (composite light+dark);
+  cover re-measured within 6%; MCP screenshots n23-light/dark eyeballed: horizontal de-framed row
+  reads without cross-talk (separators + dual ink); node --check + lint clean; stamps x8.
+- D41 "chips border alpha .28" forward-supersession note filed (§3z); horizontal de-framed scanning
+  has no real-device anchor (ToDesk panel is vertical rows) -> MCP eyeball leg recorded.
+
+## v1.114 — 2026-11-24 (portal-unified) — N-22 session full-bleed micro-fix delivered (pending review)
+User screenshot: big white band on top (~54px) + white margins around the session video. Forensics:
+(1) body.rem-session page-body kept padding:8px 12px; (2) #app grid-template-rows var(--top-h) auto 1fr
+kept the fixed 54px topbar row even with topbar display:none (row height survives hidden child);
+(3) #remStage kept 1px border + r6 radius (card look, not edge-to-edge).
+- Fix: session page-body padding:0; body.rem-session #app{grid-template-rows:0 0 1fr} (+ #body rows 1fr);
+  session stage border:none;border-radius:0 -> video fills viewport edge-to-edge (ToDesk full-bleed).
+- Verified: harness 68 cases ALL GREEN + NEG all red; new sessionFullBleed assertion (stage rect
+  0/0/vw/vh within 1px); MCP measured stage 0,0,1280,720 and screenshots n22-light/dark show zero white
+  margins; node --check + lint clean; stamps x8.
+
+## v1.113 — 2026-11-23 (portal-unified) — N-21 ball-only session chrome delivered (D48-D50=A one-by-one; pending review)
+ToDesk real-device (todesk-01/03): session content area has ZERO client topbar — always-visible ball
+(incl. view-only) + on-demand dark diagnostics. Our 12-control woken topbar + wake tab + tooltip bubble
+retired; ball is the single chrome entry.
+- **Retirement (D48)**: #remTop/#remWake nodes + inert/dwell/rem-topwake logic + boot wiring +
+  remMorePop + remKeysBtn2 hard anchor deleted; remLeaveSession extracted (release+clear session+body
+  classes+four intervals+estop/resume cancel) and rewired at remBack2/remBack3/remViewBack (3 sites);
+  ball display body.rem-captured -> body.rem-session (view-only now has ball); renderRemSession chip
+  writes retired (feed label/details carry identity); remToggleZoom/remToggleOsd write ball-menu
+  instances with aria-pressed on Fit rows/OSD row; view-session control rows gated (double-hook
+  refresh: renderRemSession + menu open).
+- **Missing pieces (D48)**: Safety submenu gains holder line ("Controlled by X / no holder") +
+  Force release (admin) row (effRole guard + runtime recheck + recheck INSIDE confirm callback +
+  refresh on menu open); novice first-session ball hint ("Session menu", hides on first menu open or
+  3s) + always-on identity micro-dot.
+- **Color honesty (D49)**: --video-danger-tint rgba(255,90,95,.16) both themes -> estop gradient
+  composite base stays dark, constant #FFB4B4 ink >=7:1 light+dark (was 1.48:1 light); safebar state
+  badges consume --video-ring/--video-ok/--video-danger; global --danger-tint untouched (white-bg
+  consumers unchanged); composite-pixel assertion (gradient stop parse + alpha over backgroundColor)
+  light+dark + known-value self-test (light rgb(64,47,69) / dark rgb(53,32,47)) kills both false greens.
+- **Telemetry honesty (D50)**: renderRemHud skips ONLY lat/jit/input while connecting (lease/conn/clock
+  keep real updates); interval inherits guard; --video-scrim-ink-dim/--video-shadow tokens replace raw
+  rgba; safebar chips 10px->11px. v1.109 "connecting shows dashes" over-claim corrected: guard now real.
+- Verified: harness 68 cases ALL GREEN + NEG all red; migrations registered (14 remBack.click sites ->
+  remLeaveSession; topbarGroups/overflow* -> ball menu root-only sampling; overflowEsc root-only;
+  select host -> safebar; holderBadge/noHolderGuard/guardDescribedBy -> Safety row; wideHidden/moreWorks
+  -> ball menu; wakeScrim/topHiddenDefault/wakeWorks retired-reads); new assertions ballSessionVisible /
+  forceAdminGate / forceGateNoDlg / forceClickExecutes / estopInkContrastDark / compositeSelfTest /
+  connectingGuard; NEG retargets (remote-menu confirmDlg noop because onclick holds old forceRelease
+  reference; remote-layout-narrow CSS sabotage); NEG inject-error now visible; node --check + lint
+  clean; stamps x8; MCP screenshots n21-light/safety/view/dark.
+- Fixes en route: remLeaveSession nested-in-wire declaration not visible to early wire lines -> moved
+  to top-level; template-literal ate regex backslashes (connectingGuard) -> double escape; confirm ok
+  button id cfmOk; Firefox hangs on manual remConnecting toggle + renderRemHud inside ExecuteScript
+  (root cause unknown, Chrome/MCP fine) -> connecting honesty asserted via guard-presence scan +
+  MCP behavioral evidence; open item filed.
+
+## v1.112 — 2026-11-23 (portal-unified) — N-20 hover grace + safe triangle delivered (D47=A; pending review)
+User report "submenu disappears too fast, hard to click into". MCP path-injection forensics: crossing
+a sibling non-branch row in the parent instantly killed the child (synchronous close-deeper); no
+grace/intent timers; no safe triangle; no re-entry recovery; the 4px gap was ruled out as false root.
+Anchors: macOS/Windows ~0.5s submenu grace, Amazon safe triangle (Kamens 2013), Radix DropdownMenu
+grace + safe polygon, Material/Fluent 100-300ms open / 300-500ms close delays.
+- **Close grace 300ms** (cancellable): entering any chain pop or a branch row cancels; leaving the
+  whole menu schedules close-all after 300ms; Esc/click/keyboard stay immediate.
+- **Safe triangle**: pointermove tracker + anchor captured when a child opens; triangle(anchor,
+  child top-left, child bottom-left); while current pointer inside, sibling hover switch/close is
+  suppressed (slow diagonal paths survive).
+- **Open intent 120ms** when switching between sibling branches (anti-flicker while skimming);
+  first-open stays immediate.
+- **Re-entry recovery**: grace-period entry into the child cancels the pending close.
+- Guards: menuPtrSeen gate (synthetic pointerover without any pointermove must not degenerate the
+  triangle into "always inside"); timers cancelled on menuOpen/menuCloseDeepest/menuReset.
+- Verified: harness 67 cases ALL GREEN (remote-menu now 23 assertions incl siblingCrossKeepsChild /
+  graceExpires / triangleSuppress / openIntentDelay / clickImmediate; hoverOpens leg adapted to await
+  the intent delay) + NEG all red; MCP slow-diagonal feel check: opened / midCross keeps child /
+  reachedChild / leftCloses after grace all true; node --check + lint clean; stamps x8.
+- Fixes en route: default pointer (0,0) made the triangle degenerate and suppress ALL hover opens
+  (seen-gate); harness intent leg needed a realistic pointermove to the target row (pointer lingering
+  in the triangle zone legitimately suppresses switching).
+
+## v1.111 — 2026-11-23 (portal-unified) — N-19 menu cascade infra fork delivered (D46=A; pending review)
+User question "why click-to-enter instead of ToDesk second-level submenus?" forensics: openTbPop
+first line closeTbPop(null,true) killed the parent (toolbar mutual-exclusion semantics borrowed for
+menus = reuse-boundary mismatch); rem-pop anchor = below-trigger not right-of-parent; no hover open;
+no branch aria/highlight; tbPopStack never >1 so Esc layering degenerate.
+- **Forked cascade infra (toolbar openTbPop untouched)**: menuChain logical ancestor stack;
+  menuOpen keeps ancestors, closes sibling branches, anchors child at parent.right+4 / row top with
+  left-flip on viewport overflow; menuCloseDeepest (Esc/ArrowLeft) focuses parent row; menuRoot on
+  ball open; menuSync on closeTbPop keeps chain/aria consistent.
+- **Branch rows**: data-menu + aria-haspopup + aria-expanded + .bm-open highlight (ToDesk row state).
+- **Hover cascade**: pointerover on branch row opens without stealing focus; entering a parent pop
+  closes deeper sibling branches; click/Enter/ArrowRight open with focus; ArrowLeft/Esc close deepest.
+- **Logical ancestor fix**: pops are body-level siblings, DOM ancestor walk lost the ball root when
+  opening third level (parent vanished) -> ancestors now derived from menuChain order, not DOM.
+- Verified: harness 67 cases ALL GREEN (remote-menu now 18 assertions incl parentStaysOnChildOpen /
+  childRightOfParent / thirdLevelRight / hoverOpens / ArrowRight / ArrowLeft / escLayered) + NEG all
+  red; MCP screenshot n19-cascade shows ball+Display+Window-fit three panels right-cascaded with
+  branch highlights = todesk-04 geometry; node --check + lint clean; stamps x8.
+- 1:1 completeness: IA (N-18) + visuals (N-18) + cascade behavior (N-19) all three now match ToDesk.
+
+## v1.110 — 2026-11-23 (portal-unified) — N-18 ball menu ToDesk 1:1 delivered (D44/D45=A; pending review)
+User directive: "not compared against ToDesk; implement UI 1:1". Slot-by-slot diff vs todesk-04 real
+device drove a full menu rebuild (structure/layout/hierarchy/states 1:1; labels English per U2).
+- **Top icon strip 4** (ToDesk order): cast / remote audio / minimize = gated+reason; fullscreen real.
+- **Two state tiles**: Mute remote audio / Privacy & virtual displays = gated dashed tiles + lock
+  corner; green check reserved for real enabled capabilities only (never fake checks).
+- **Nine borderless rows in ToDesk order**: Office mode+Switch (gated) / Safety (dynamic red badge =
+  estop+latched count) / Control / Display / File transfer (gated) / Peripherals (gated) /
+  Interaction + NEW badge (gated) / Copy device info (real) / End session red (real = back to lobby
+  releases control). Rows = icon+label+right chevron, hover tint, no borders (ToDesk row language).
+- **Display submenu 1:1**: Image quality / Refresh rate / Resolution (gated, third-level quality pop
+  Smooth/HD/Ultra/Original/Auto all gated) / Window fit (REAL Fit+Original sub-pop) / Multi-display
+  window mode + Trial badge (gated menuitemcheckbox) / True color 4:4:4 (gated) / Extreme refresh
+  (gated) / Advanced (REAL sub-pop: OSD toggle + Device details + gated Encoder).
+- **Control submenu** hosts our real extras per D45: Gamepad map / Touch joystick / Sessions /
+  Special keys (zero new main rows, 1:1 preserved).
+- Guard tip inside pops re-anchored BELOW target (was covering menu rows).
+- Verified: harness 67 cases ALL GREEN (remote-menu 12 assertions: strip gated+fs real / tiles gated
+  +checks hidden / row order / borderless / display 8 rows / toggles gated / gated never toggles /
+  fit real / adv real+encoder gated / control real / badge dynamic / end releases) + NEG all red
+  (updateBmBadge noop; setGuard noop proven immune because guards wire at init - retargeted);
+  menuIaTemplate legacy assertion survives via kept ids (zero adaptation); remote-window sessions
+  leg adapted to Control submenu path; node --check + lint clean; stamps x8; MCP screenshots
+  n18-menu/n18-display vs todesk-04.
+- Fixes en route: updateBmBadge scoped inside wire() -> globalThis (harness reach); gQuality/gRefresh/
+  gRes dropped from setGuard list during rebuild -> restored; SVGElement has no .hidden property ->
+  hasAttribute read.
+
+## v1.109 — 2026-11-23 (portal-unified) — N-17 session-chrome visual board delivered (D41-D43=A; expert panel + MCP; pending review)
+User light-theme session screenshot ("problem"): white safe-bar card over dark video (950x82 = 12%
+feed cover @1120), estop tint bleeding feed, dead-black feed. ToDesk-02 real device = DARK translucent
+diagnostics panel (anchor); todesk-04 = light ball menu over dark video (menu may stay light).
+- **Video-scrim token family (both themes constant)**: --video-scrim rgba(28,39,64,.85), ink #E7ECF5
+  constant (theme --video-ink dark value fails 3.63:1 over white feed - panel falsification), line
+  rgba(231,236,245,.28), ring/primary #8EA3F9, primary-ink #0B0E14, danger-ink #FFB4B4, --r8:8px
+  (was undefined -> hold rings silently square).
+- **Safe bar compact**: scrim surface both themes; chips no fill / line border / ink alpha .78;
+  lat+jit merged into ONE chip with BOTH ids visible (D10 forbids splitting, not merging); Esc hint
+  shortened to "Esc" chip (full sentence in title + Expand popover; touchReleaseHintDual adapted to
+  dual-channel read); single row >=1024, wrap allowed <480 (D10 never-hide outranks cover%);
+  cover 12% -> 2.78% @1440 (MCP measured, stage denominator); banners flex-basis:100%; coarse 26px
+  specificity kill fixed (44px).
+- **E-STOP opaque base**: video-bg solid + danger-tint overlay + 2px danger border + #FFB4B4 ink
+  (7.27:1; theme danger-ink light 2.37:1 and white-on-red 3.05:1 both falsified); hold progress gets
+  "Hold N%" sr-only aria-live mirror (throttled 25%); dead font-weight:600 + duplicate position removed.
+- **Wake/topbar/ball scrim**: wake 11px/24px fine (44 coarse); topbar+ball scrim (ball MENU stays
+  light per todesk-04); OSD scrim 45%->85%; scrim focus ring #8EA3F9; reduced-motion extended to
+  remTop/remBall/toast; stage background = video-bg both themes (letterbox bands retired).
+- **Simulated desktop mock (D43)**: static wallpaper gradient + taskbar + 2 window rects, no
+  animation/fake cursor/fake clock; pointer-events:none, z<3, no focusable children; center label
+  kept; **corner simulated chip constant + H-hide exempt** (honesty hole closed: H used to hide the
+  only simulated marker); connecting HUD shows dashes not fake live stats; session-face "(simulated)"
+  unified to simulated dagger.
+- Verified: harness 66 cases ALL GREEN (remote-chrome 12 assertions: scrim light+dark / cover<=6%
+  stage-denominator / estop opaque+ink contrast / wake scrim / sim corner never-hide / mock
+  non-interactive / Esc chip / pair visible / hold mirror / stage scrim) + NEG all red
+  (renderRemSession noop); harness runner upgraded to conditional-async wrap + result polling
+  (sync cases keep microtask-free timing - meet-exit/remote-timing regressions caught and fixed);
+  node --check + lint clean; stamps x8; MCP screenshots n17-light-1120/dark-1120/400.
+- Fixes en route: routeSession is TWO nested 300ms timeouts (600ms) - 450ms wait left connecting=true
+  so estop guard denied (750ms wait); connecting guard must not early-return (lease chip updates);
+  Esc initial markup text; synthetic pointer events need isPrimary:true.
+
+## v1.108 — 2026-11-23 (portal-unified) — N-16 optimization bundle delivered (D40=A; expert panel + Playwright MCP measured; pending review)
+User screenshot at vw1060 showed sparse 2-col tiles + orphan third power pill. Playwright MCP live
+measurement: launcher clientWidth 457 -> tiles 2 / power 2 (root: @container 480 threshold too
+aggressive AND leaked into .rem-power via shared class); panel corrected the proposal math (.btn
+24px horizontal padding inherited by tiles -> 4-col minimum content 432, not 340).
+- **Fold math fixed**: tile padding 0 4px + 2-col threshold 380 (min 360, margin 20); power pill
+  padding 0 8px + vertical threshold 325 (D39 320->325 supersession note); @container scope
+  .rem-tiles:not(.rem-power); cq = content-box (flex-17 parallel / vw-98 stacked) documented.
+- **Fallback mapped**: @supports not (container-type) { @media480 tiles2+skel2; @media423 power
+  vertical } (was @media900 tiles2 = over-aggressive for stacked full-width launcher).
+- **Legacy hover block deleted** (translateY(-2px) + raw rgba shadow survived N-15 restyle); hover
+  now background-only; reduced-motion adds transform:none + global kill of navpulse/pulse/wv loops.
+- **Skeleton follows fold** (.lm-skel in same @container 2-col rule) - no loading->loaded shape jump.
+- **Info escape hatch**: lmInfo popover now includes note + tags; lm-sub gets sr-only full string
+  (generic-span aria-label proposal withdrawn per ARIA naming rules; ellipsis does not truncate the
+  a11y tree).
+- **Console hygiene**: password inputs associated to hidden form (form owner verified via MCP);
+  data-URI favicon (404 error gone).
+- **Tile label weight 500**; tile max-width cap REJECTED (ToDesk real device = full-width equal
+  columns, cap would tear power rhythm); shell light tells (body radial gradients / nav uppercase)
+  registered as open item, not in this batch.
+- Verified: harness 65 cases ALL GREEN with 3 new legs (flex360 dual tiles2+power3 mid-band leak
+  guard / flex397 label no-wrap / flex342 power no-overflow) + NEG all red; Playwright MCP re-measure
+  vw1060: tiles 4 (tileW 104) / power 3 / no wrap / no overflow / hover transform+shadow none /
+  favicon present / form owner present / info note+tags present; node --check + lint clean; stamps x8;
+  screenshots n16-1060/400/dark (MCP-captured).
+
+## v1.107 — 2026-11-23 (portal-unified) — N-15 launcher visual board delivered; §3v round complete (pending final review)
+Implements web-portal-ui §3v B-V2 N-15a-e (D37-D39 adjudicated; plan v2 post 4-seat review; ToDesk
+launcher real-device evidence todesk-12; RustDesk#7097 cited with correction).
+- **Meta three single rows + tags row 4**: name 15px/500 tx1 + right Rename(pencil)/info icon buttons
+  with aria-labels; sub row keeps kind word (modeChip assertion); Code row + Copy icon button; tags
+  chips row 4 (D19 compatibility note); row-gap 8; focus order DOM = visual order; coarse44 registered.
+- **Bare capability tiles**: 28px accent icon + 11px label, no box; hover/focus tint via background
+  (not ::before, keeps darkHoverTint read); gated = tx3 icon/label + 12px lock corner (button child,
+  aria-hidden) + reason tip; gated has NO hover tint; min-height 72 (contains 44 target); guardTip
+  text cleared on hide (screen-reader stale-reason fix) + tipClearedOnHide invariant.
+- **Borderless panel + left divider**: new --sep-panel token (light #7E8798 / dark #5C6A85, >=3:1 vs
+  both surfaces) + sepContrast assertions light+dark; left column nav/footer/in-session separators
+  retro-fixed to same token (N-11a ">=3:1" claim was numerically false for --sep-strong; corrected).
+- **Container queries**: container-type inline-size on launcher; <480px tiles 2 cols; <360px power
+  vertical; fallback wrapped in @supports not (container-type:inline-size) with @media 900/480 so
+  wide-viewport-narrow-column no longer squeezed by viewport breakpoint; power = 3 equal outlined
+  pills 44h, single lock icon + full words nowrap; scrollWidth legs @320/360.
+- **Three states**: error = role=alert banner (danger-tint bg + danger border + alert icon + tx1 body
+  + 'offline or revoked' + Back); loading = remLoading-driven static skeleton (28px circles + label
+  bars, no box, same min72 grid) + sr-only; empty top-aligned (regression guard).
+- Verified: harness 65 cases ALL GREEN (remote-launcher-visual 11 assertions incl container injection
+  legs flex-basis 400/300, sepContrast light+dark, errorBanner, loadingSkeleton, focusOrder,
+  iconAriaLabels) + NEG all red (renderLauncher noop); 3 adaptations (tileRealFilled->icon color,
+  tileGatedDashed/tileDashedNarrow->lock+no-dashed); powerHoverTint re-specified as gated-no-hover
+  invariant (D38); remote-launcher 15 assertions all alive; node --check + lint clean; stamps x8;
+  screenshots n15-1440/400/dark/error/loading.
+- Fixes en route: gated power hover tint contradicted D38 (assertion re-specified to no-tint
+  invariant); compareDocumentPosition bitmask needed boolean coercion.
+- **Round §3v complete**: N-15 v1.107. Open items: container-query support matrix, gated bare
+  discoverability user test, dark bare dim real-device eyeball.
+
+## v1.106 — 2026-11-23 (portal-unified) — safety micro-fix: gated opacity cascade killer + opacity-aware contrast gate
+Expert-panel (4 seats) forensics on the launcher "ugly" report found a LIVE false-green: a duplicate
+.rem-tiles/.rem-tile block later in the sheet re-declared [aria-disabled]{opacity:.55}, overriding
+the N-9d opacity:1 fix -> gated labels actually ~2.2:1, while gatedContrast read computed color
+without compositing opacity (opacity-blind = false green).
+- Removed the duplicate tile block (also retired its .ic 14px override; 16px keeps).
+- gatedContrast upgraded: composites effective color over launcher bg AND asserts opacity===1
+  invariant so any future opacity-dim regression turns the gate red.
+- Verified: harness 64 cases ALL GREEN + NEG all red; stamps x8. Launcher visual redesign itself
+  pending adjudication (panel proposals D37-D39, plan-only).
+
+## v1.105 — 2026-11-23 (portal-unified) — N-13 row-level micro-optimizations delivered (D36=A; pending review)
+User row-crop screenshot question "any optimizations?" -> six findings, all fixed:
+- **Left rail aligned**: subline padding-left 36px = name start (dot+OS+gaps), killing the ragged
+  two-line left edge (ToDesk/MDUI two-line rail precedent).
+- **Subline order**: status · OS · IP · owner (identity before address, ToDesk precedent);
+  end-truncation now cuts owner -> IP -> OS with status word kept first (consistent, predictable).
+- **This device badge semantic color restored** per D27: accent outline + accent tint (was default
+  gray); In control green / STOPPED red unchanged.
+- **Hover/focus reveal chevron** at line-1 right (shadcn showOnHover precedent; opacity 0 default,
+  1 on hover/focus/.hover); **coarse pointer hides it** (whole row tappable already; rule-scanned).
+- Dot/OS center alignment + uniform 6px gap pinned.
+- Verified: harness 64 cases ALL GREEN (remote-row 5 assertions: sublineAlign/sublineOrder/
+  badgeAccent/hoverChevron/coarseChevronHide) + NEG all red (renderDevRows noop); node --check +
+  lint clean; stamps x8; screenshots n13-1440 (hover chevron visible)/n13-400.
+- Fixes en route: opacity read mid-transition (transition:none before .hover leg); CSSOM mediaText
+  carries a space ("pointer: coarse") so substring match uses 'coarse'.
+
+## v1.104 — 2026-11-23 (portal-unified) — N-12 left-toolbar de-clutter delivered (D34/D35=A; pending review)
+User crop screenshot ("very ugly") diagnosed as desktop 320px left column toolbar bloat (not a
+narrow-fold regression): 11 filter chips inline 4-row wall, native title tooltip bubble over search,
+truncated placeholder, two wasted icon rows, gray nav block noise.
+- **D34=A filters popover**: #remFilterPop = anchored tb-pop panel (Esc/outside-close via existing
+  tbPopStack); filter button carries active-count badge (#remFilterCount); inline chip wall removed
+  so the list keeps its vertical space; chip clicks stopPropagation (innerHTML rebuild detached the
+  click target and the document outside-close handler mis-closed the pop — fixed).
+- **D35=A row merge + nav flatten**: search+sort+filter+sim chip merged into ONE toolbar row
+  (.rem-listhead.rem-searchrow); tree refresh/add icons moved into nav block head right ("Groups"
+  label); nav gray block retired -> flat list + sep-strong bottom separator; hover = --hover token
+  both themes (sunken-on-sunken inverse rule retired with the block).
+- Micro fixes: placeholder shortened to "Search devices" (full hint kept in aria-label); native
+  title tooltips removed from sort/filter/refresh/add (aria-labels retained for screen readers).
+- Verified: harness 63 cases ALL GREEN (remote-tools 7 assertions: filterPopAnchored/filterBadgeCount/
+  filterEscCloses/noTitleTooltips/placeholderShort/navFlat/mergedSingleRow) + NEG all red
+  (renderFilterChips noop added); navHoverDelta adaptation samples unselected group (selected rule
+  outranks hover); node --check + lint clean; stamps x8; screenshots n12-1440/filters/400.
+
+## v1.103 — 2026-11-23 (portal-unified) — Remote left-column structure board N-11 delivered; §3u round complete (pending final review)
+Implements web-portal-ui §3u B-L1 N-11a-e (D30-D33 adjudicated; plan v2 post 4-seat review; research
+anchors RustDesk#7097 / shadcn Sidebar / macOS HIG source-list / MDUI drawer / Slack spacing /
+ToDesk+Sunflower row structure).
+- **Three-section left column (fixed slots, not sticky)**: remote page-body overflow hidden;
+  lobby wrap stretch full height; left column flex column min-height:0 = search row + icon row +
+  group nav + in-session fixed slot + independent-scroll list + fixed footer; narrow <=900 degrades
+  to normal flow (specificity-pinned so base rules cannot override); scroll-shadow hints; scrollTop
+  preserved across re-render + selected row scrollIntoView.
+- **Group nav**: sunken block (light) / raised (dark) + inverse hover (surface light / sunken dark)
+  fixing sunken-on-sunken zero delta; dedicated --sep-strong separator (light #C6CEDC / dark #4A5670,
+  >=3:1 vs both surfaces); selected group = bold name + count pill accent-tint/accent-ink, NO row
+  tint (nav semantics); device selected keeps tint + left bar (content semantics).
+- **Rows two-line always (all tiers)**: name flex:1 full width ellipsis + title/aria-label (150px
+  hard limit and >=1600 single-line right-meta overrides retired); subline single-line nowrap =
+  status word · IP · OS · owner (11px tertiary tabular-nums, truncation order owner->OS->IP, status
+  word kept first) + badges flex:none NEVER truncated (safety invariant); .dev-badges/.chip classes
+  retained; rows roving tabindex (Up/Down + Enter) replacing hundreds of Tab stops.
+- **Status semantics purified (device-row scope)**: new .dot-on filled green / .dot-off hollow gray
+  ring (--dot-off light #6B7484 / dark #98A2B3 >=3:1) / .dot-deg half-filled amber via linear-gradient;
+  orange triangle retired for device rows only (g-warn shared by wsBanner/glyph pending untouched);
+  OS icons fixed tx3; badges text-only.
+- **Footer**: "All devices: N · M online" full-fleet (not filter-dependent; online = status online
+  only), no aria-live (no per-keystroke announcement noise).
+- **In-session/stopped section = fixed slot** between nav and scroll (never scrolls away, D20 safety
+  exemption preserved); recent section inside scroll; empty state centered in scroll container;
+  error Retry reachable below fixed header.
+- Verified: harness 62 cases ALL GREEN (remote-left 19 assertions incl overflow-injection leg /
+  badge zero-truncation@320 / dot three-shape computed reads / dotOffContrast / navHoverDelta /
+  rowRoving / emptyCentered / errorRetryReachable; remote-left-scroll 3 with CSS-sabotage NEG)
+  + NEG all red (renderDevRows / renderDevTree / CSS injection three targets); adaptations registered
+  (tier2Subline reads unselected row, tier3TwoLine >44 both narrow cases, tier1RightMeta reads
+  two-line, treeSelectedTint reads bold+pill, narrowDegrade added); node --check + lint clean;
+  stamps x8; screenshots n11-1440/1600/400/dark.
+- Fixes en route: startup Marionette flake retry (precedent); narrow degrade rules overridden by
+  later base rules -> #page-remote specificity pin; error-retry leg needed sync remLoading reset.
+- **Round §3u complete**: N-11 v1.103. Open items: virtual scroll for hundreds, ultra-narrow group
+  select fallback, dark partition real-device eyeball (numbers pinned >=3:1).
+
+## v1.102 — 2026-11-23 (portal-unified) — N-10 dead-collapse removal delivered (D29=A; pending review)
+User report: "device group expand/collapse does nothing". Forensics: remCollapsed only drove
+aria-expanded + chevron rotation; no rows hidden (single-layer group model = groups are filters,
+not containers) -> dead control / fake affordance; harness treeCollapse asserted the attribute only
+= false-green lesson (assert visible effect, not attribute literals).
+- **D29=A**: chevron / remCollapsed / aria-expanded / ArrowLeft-Right collapse branch removed;
+  #remTree role=tree -> **listbox**, group rows role=treeitem -> **option** (APG: no aria-expanded
+  without children); selected tint / count pill / 16px indent / folder+stack glyphs kept; group
+  selection + roving Up/Down + Enter/Space unchanged; refresh/add-group head unchanged.
+- Alternatives analyzed and not chosen: B sectioned collapsible list (needs default-expanded +
+  non-persisted collapse + auto-expand selected + STOPPED dot guard; hides devices = error mode),
+  C two-level tree (premature: backend group has no parent; dual selection-surface drift).
+- Assertions: treeCollapse -> **treeNoDeadControl** (no [data-tw], no aria-expanded on options);
+  remote-visual-tree += groupListbox; treeRoving role read treeitem -> option; narrow tree selector
+  treeitem -> option; stale tw click leg removed.
+- Verified: harness 60 cases ALL GREEN + NEG all red; node --check + lint clean; stamps x8;
+  screenshot n10-tree (flat filter list, no chevrons).
+
+## v1.101 — 2026-11-20 (portal-unified) — Remote list visual-language board N-9 delivered; §3t round complete (pending final review)
+Implements web-portal-ui §3t B-V1 N-9a-e (D25-D28 adjudicated; plan v2 post 4-seat review; research
+anchors: RustDesk address book / ToDesk + Sunflower real-device screenshots / HPE Lists / UI Craft
+dense-dashboard / Setproduct data-table guide / community inspection-page writeup).
+- **Rows (D25)**: borderless + 6px radius + hover tint (--sunken, .hover injection leg mirrors :hover)
+  + selected --accent-tint + left 2px accent bar via ::before + 2px row gap; rows never elevate;
+  offline tertiary kept; focus-visible ring survives; tint contrast asserted light+dark with alpha
+  composition over surface.
+- **Tree (D26)**: chevron rotate (reduced-motion guarded) + i-folder/i-stack glyphs + group rows
+  indented 16px relative to All-devices (single-layer model, no nested function change) + count pill
+  (tabular-nums, tx2 on surface, flex:none) + selected accent tint (green ok-tint retired) + head
+  refresh/add icon buttons with aria-label (ids kept) + simulated chip moved to list head + narrow
+  tree chips borderless + group name ellipsis span with full aria-label.
+- **Badges/info (D27)**: row badges only In control (green tint) / STOPPED / This device (literals
+  preserved for assertions); Same account demoted to subline sans "owner: you"; subline = status word
+  · IP · OS (11px tertiary tabular-nums) + sans owner segment; name 13px/600; filter chip pressed
+  green -> accent tint (single-accent closure); row aria-label carries owner so screen readers lose
+  nothing.
+- **Launcher/toolbar/heads (D28)**: real tiles accent-tint filled + icon + hover elevate (box-shadow
+  + transform, hit area stable) + dark hover tint fallback; gated tiles dashed border + lock +
+  color tx3 (opacity .55 retired, ~3.95:1 fix) + gatedContrast assertion; power row compact with
+  danger-tint hover; toolbar single row nowrap (search full-width with hit count inside right,
+  padding-right reserved; sort/filter icon buttons, ids kept, sort JS overwrite fixed to
+  aria-label/title + sr-only word); section heads 14px/500 sentence case tx2 scoped to remote
+  list/launcher; in-session section hidden when 0; reduced-motion guard.
+- Verified: harness 60 cases ALL GREEN (remote-visual 18 assertions incl light+dark tint contrast /
+  gated+pill contrast / hover legs / reduced-motion rule scan; remote-visual-tree 4;
+  remote-visual-narrow 4 @400) + NEG all red (renderDevRows / renderDevTree / renderLauncher noop
+  split across three cases); 4 registered adaptations (lobby+devlist simTag sampling moved to list
+  head, lobby holderBadge + devlist rowBadges Same account -> subline); other 53 functional cases
+  unchanged; node --check + lint clean; stamps x8; screenshots n9-1440/1600/400/dark.
+- Fixes en route: template-literal ate regex \d (-> [0-9.]); computed style read mid-transition
+  returned pre-hover value (transition:none before .hover leg); toolbar single-row judged by vertical
+  center (center-aligned heights differ); hidden Retry child excluded; ratio alpha-composites BOTH
+  fg and bg over surface (dark accent-tint uncomposited); tree/tile .ic had no global width (giant
+  glyphs) -> scoped sizes; narrow visual case needed a selected device for launcher tiles.
+- **Round §3t complete**: N-9 v1.101. Open items: dark tint real-device contrast, owner filter chip,
+  table view phase 2.
+
+## v1.100 — 2026-11-20 (portal-unified) — Tower W4 board N-8 delivered; §3s round complete (pending final review)
+Implements web-portal-ui §3s B-T1 N-8a-e (D21-D24 adjudicated; plan v2 post 4-seat review; board =
+retrofit+completion of existing renderTower/renderTowerTalk, baseline corrected per review).
+- **Shell**: grid wall-left-spans-2-rows + intercom right-top + alerts right-bottom; grid-rows switch
+  with collapse state (collapse frees neighbor space, asserted); panel heads moved INTO renderTower
+  (static mk baked counts retired); region+aria-label per panel; collapse buttons aria-expanded +
+  coarse44; natural Tab order; panel bodies scroll; <=900 vertical stack + page scroll + ack
+  reachability asserted; collapse persistence localStorage (simulated note); all-collapsed empty
+  copy; panel-title sentence case; goto('tower') nav-min note.
+- **Live wall panel**: <=4 mini-wall tiles; tile click/Enter deep-links Monitor via gotoStream +
+  zoomed selection; body-level "Back to Tower" return chip (admin data-back precedent); offline/online
+  badges + tile labels use video semantic ink (--video-ink/--video-ok/--video-bg, light ~3:1 fix);
+  simulated honesty chip; panel-level three states + towerPanelError('wall') injection leg + Retry;
+  wall tick refresh; badge inset stretch fix (left/bottom auto).
+- **Intercom panel**: channel rows = listbox/option, click selects towerChan; PTT acts on SELECTED
+  channel (chanOpen set by tower selection = single floor-grant source, no enterChannel side effects);
+  +N overflow entry (slice(0,5) silent truncation fixed); held count matches full list; PTT hold
+  countdown with <5s warn color+shape; ON AIR inherit; pointerdown/up/leave/cancel + capture re-hooked
+  on new button; Space/Enter only while PTT button focused (GLOBAL Space PTT now focus-guarded =
+  intercom behavior change, registered + new intercom-space baseline case); chanOpen cleared across
+  goto away from intercom/tower (recClear preserved) + vox/scan timers page-guarded (double-channel
+  misfire / VOX residue closed); channel deep-link Intercom + Back to Tower; single announcer.
+- **Alerts panel**: ALERTS schema extended id/sev/device/cam/acked; Ack = local simulated + audit
+  alert.ack; acked rows gray + acked mark (not hidden); Unacked-only filter default; head count + nav
+  Tower badge = dynamic unacked count (fake '3' retired); severity shape diff (danger filled octagon
+  glyph + severity word, info lucide); device/cam deep-links + Back to Tower; panel three states +
+  injection; alerts tick; dual-source note (tower ALERTS vs monitor MON_ALERTS, authority
+  monitor-center R5, single-sourcing open).
+- Verified: harness 57 cases ALL GREEN (tower 16 assertions + tower-narrow 3 @400 + intercom-space 3)
+  + NEG all red (renderTower noop x2 / pttDown noop); intercom regression 11 cases unchanged
+  (floor/queue/replay/emergency/tabs-size/groups/evidence/notif/board-1000/1100/1200) with behavior
+  changes registered (chanOpen cross-goto clear incl recClear, Space focus guard, vox/scan page
+  guard); node --check + lint clean; stamps x8; screenshots n8-wide/collapsed/narrow/ptt/ack.
+- Fixes en route: goto cleanup nulled chanOpen before existing recClear (replay xpageClears red) ->
+  recClear moved into cleanup; narrow inline grid styles overrode media stack -> matchMedia gate;
+  ternary paren imbalance killed eval (57 FAIL) -> balanced; tile-live four-inset stretch hid labels
+  -> left/bottom auto; alert octagon glyph giant -> .alert-item .ic 16px flex:none.
+- **Round §3s complete**: N-8 v1.100. Open items: drag/resize layout phase 2, alert ack backend,
+  panel custom composition, alert single-sourcing, Overview/Recordings micro-round.
+
 ## v1.99 — 2026-11-20 (portal-unified) — Remote N-7 device-list board delivered; §3r round complete (pending final review)
 Implements web-portal-ui §3r B-R2 N-7a-e (D17-D20 adjudicated; plan v2 post 4-seat review; Sunflower group-tree + ToDesk list screenshots evidence).
 - **Object layer**: device list replaces session room-cards; DEVICES seed extended (group/os/alias/note/

@@ -1,6 +1,6 @@
 # Unified baseline — MediaServo Portal (single page)
 
-> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.99 见 sidecar)**
+> Surface: web · Theme: light+dark · Status: **THE single iteration baseline (v1.0 创建标签；现迭代 v1.118 见 sidecar)**
 > Carrier: `../prototypes/portal-unified.html` · Supersedes the fragmented boards for iteration.
 
 ## Why this exists (user directive 11-13)
@@ -16,11 +16,11 @@ surface: web
 theme: [light, dark]
 density: [comfortable, compact]
 status: baseline
-version: v1.99
+version: v1.118
 pages: [admin, accounts, overview, monitor, recordings, intercom, meeting, remote, tower, devices, rooms, sessions, streams, config, keys, audit, settings, signaling]
-e2e_hooks: [".nav-item", ".active", ".page", ".active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg", "#meetGrid", "#meetScrim", "#prejoinScrim", "#meetCanvas", "#meetTiles", "#meetRail", "#meetPip", "#muteChip", "#meetBar", "#mkLeave", "#holdRing", "#holdBar", "#meetExitHint", "#meetPanel", "#mpBody", "#mpTabs", "#mpBadge", "#mpChatBadge", "#meetInfo", "#meetTransScrim", "#remGrid", "#remSession", "#remTile", "#remBar", "#remTake", "#remRelease", "#remCtlState", "#remGraceMirror", "#remLive", "#remHealth", "#remEstop", "#remEstopRing", "#remReqChip", "#remHolderChip", "#remForce", "#remResumeScrim", "#remResumeName", "#remStopped", "#remPerimeter", "#remMapPanel", "#remTouch", "#remHud", "#remStateChip", "#remEscHint", "#remTop", "#remZoom", "#remClock", "#remOsdBtn", "#remKeysBtn", "#remInfoBtn", "#remMoreBtn", "#remFs", "#remKeysPop", "#remInfoPop", "#remMorePop", "#remOsd", "#remStage", "#cfgIndex", "#ktVal", "#ktSave", "#ktClear", "#liUser", "#liPass", "#liRole", "#liBtn", "#liOut", "#liErr", "#aboutVer", "#sigResult", "#remLauncher", "#remLauncherEmpty", "#remLauncherTitle", "#lmCode", "#lmCopy", "#lmInfo", "#remDevPop", "#remTiles", ".rem-tile", ".rem-card", "#remViewHint", "#remViewBack", "#remSafeBar", "#remBall", "#remBallPop", "#remSessPop", "#remDetailsPop", "#remWake", "#remConnecting", "#remPanHint", "#remDisplayPop", "#remInputPop", "#remSecPop", "#remTree", "#remSearch", "#remHitCount", "#remSortBtn", "#remSortPop", "#remFilterBtn", "#remFilters", "#remActiveRows", "#remActiveCount", "#remRecentRows", "#remRecentToggle", "#remDevEmpty", "#remClearFilters", "#remRenameScrim", "#rnAlias", "#rnNote", "#rnTagIn", "#rnTags", "#rnSave", "#remGroupScrim", "#rgName", "#lmRename", ".dev-row", ".dev-meta", ".dev-badges"]
-regions: [remote-lobby-cards, remote-session-topbar, view-group, semantic-line, gamepad-map-row, feed-tile-letterbox, osd-overlay, bottom-bar-state-grace-take-release, estop-never-hide, health-banner, stopped-banner-resume, req-chip, perimeter-latched, info-popover, settings-login-card, settings-config-index, keys-admin-token, remote-launcher-panel, capability-tiles, power-row-gated, pure-view-safebar-variant, device-group-tree, device-row-tiers, rename-modal, search-sort-filter, recent-section, in-session-section]
-open_questions: [quality-codec-fps-adjust-backend, B-lease-server-batch, real-pointer-lock-fullscreen-UA-Esc-device, real-gamepad-device, special-keys-real-channel, R6-five-backendization, view-wall-fullscreen-cross-plan, PROGRAM-memorys-parallel-owned, devtools-hidden-in-session, ball-dock-dwell-micro, C-switch-carrier-phase2, launcher-breakpoint, launcher-tile-grid, launcher-code-copy-format, launcher-info-fields]
+e2e_hooks: [".nav-item", ".active", ".page", ".active", "#tiles", "#colsTrigger", "#pgPrev", "#pgNext", "#boardList", "#devBody", "#themeSeg", "#meetGrid", "#meetScrim", "#prejoinScrim", "#meetCanvas", "#meetTiles", "#meetRail", "#meetPip", "#muteChip", "#meetBar", "#mkLeave", "#holdRing", "#holdBar", "#meetExitHint", "#meetPanel", "#mpBody", "#mpTabs", "#mpBadge", "#mpChatBadge", "#meetInfo", "#meetTransScrim", "#remGrid", "#remSession", "#remTile", "#remBar", "#remTake", "#remRelease", "#remCtlState", "#remLive", "#remHealth", "#remEstop", "#remEstopRing", "#remReqChip", "#remHolderChip", "#remForce", "#remResumeScrim", "#remResumeName", "#remStopped", "#remPerimeter", "#remMapPanel", "#remTouch", "#remHud", "#remStateChip", "#remEscHint", "#remOsd", "#remStage", "#cfgIndex", "#ktVal", "#ktSave", "#ktClear", "#liUser", "#liPass", "#liRole", "#liBtn", "#liOut", "#liErr", "#aboutVer", "#sigResult", "#remLauncher", "#remLauncherEmpty", "#remLauncherTitle", "#lmCode", "#lmCopy", "#lmInfo", "#remDevPop", "#remTiles", ".rem-tile", ".rem-card", "#remViewHint", "#remViewBack", "#remSafeBar", "#remBall", "#remBallPop", "#remSessPop", "#remDetailsPop", "#remConnecting", "#remPanHint", "#remDisplayPop", "#remInputPop", "#remSecPop", "#remTree", "#remSearch", "#remHitCount", "#remSortBtn", "#remSortPop", "#remFilterBtn", "#remFilters", "#remActiveRows", "#remActiveCount", "#remRecentRows", "#remRecentToggle", "#remDevEmpty", "#remClearFilters", "#remRenameScrim", "#rnAlias", "#rnNote", "#rnTagIn", "#rnTags", "#rnSave", "#remGroupScrim", "#rgName", "#lmRename", ".dev-row", ".dev-meta", ".dev-badges", "#towerGrid", "#towerWall", "#towerTalk", "#towerAlerts", "#towerHeld", "#twWallCount", "#twAlertCount", "#twAckFilter", "#twPtt", "#twCountdown", "#twMore", "#twOpenChan", "#backTower", ".tw-collapse", ".tw-ack", "[data-col]", "[data-chan]", "[data-ack]", ".rem-hitwrap", "#remSortWord", ".dev-row.hover", ".rem-tile.hover", "#remTree .tname", "#remTree .cnt", ".rem-searchrow", "#remListScroll", "#remLeftFoot", ".dot-on", ".dot-off", ".dot-deg", ".dev-line1", ".metatxt", "#remFilterPop", "#remFilterCount", "#remTreeNav", ".nav-glabel", ".fbadge", ".rowgo", ".dev-badges .self", ".lm-meta", ".lm-name", ".lm-sub", ".lm-codeline", ".btn-icon", ".lockcorner", ".lm-skel", ".lm-error", "#lmBackList", "#pwForm", "#remSimCorner", ".sim-desktop", "#remEstopHoldTxt", ".hudpair", "#remSafeBar .inner", "#bmCast", "#bmVol", "#bmMin", "#bmMute", "#bmPrivacy", "#bmMode", "#bmFile", "#bmPeriph", "#bmInteract", "#bmMulti", "#bmTrue", "#bmExtreme", "#bmSafeBadge", "#remFitRow", "#remFitPop", "#remQualityPop", "#remAdvRow", "#remAdvPop", "#remSessRow2", "#remKeysRow2", ".bm-row", ".bm-tile", ".bm-open", "[data-menu]", "#bmForce", "#bmHolder", "#ballHint", "#ballDot", "#remZoomFit", "#remZoomOrig", "#remOsdBtn3", "remLeaveSession", ".hudgroup", ".opswap", "#remLatchedNote", "#hudPair"]
+regions: [remote-lobby-cards, ball-only-session-chrome, safety-holder-force, session-full-bleed, safebar-deframed, state-badge-single-frame, safebar-fixed-slots, banners-out-of-flow, banner-stack-no-overlap, estop-contextual-unified], semantic-line, gamepad-map-row, feed-tile-letterbox, osd-overlay, bottom-bar-state-grace-take-release, estop-never-hide, health-banner, stopped-banner-resume, req-chip, perimeter-latched, info-popover, settings-login-card, settings-config-index, keys-admin-token, remote-launcher-panel, capability-tiles-bare, power-row-pills, pure-view-safebar-variant, device-group-tree, device-row-tiers, rename-modal, search-sort-filter, recent-section, in-session-section, tower-shell-grid, tower-wall-panel, tower-intercom-panel, tower-alerts-panel, back-to-tower-chip, device-row-visual-language, device-tree-visual, launcher-tile-bare-weights, list-toolbar-single-row, left-column-three-section, group-nav-block, device-row-two-line, status-dot-shapes, left-footer-summary, filters-popover, merged-toolbar-row, flat-group-nav, row-rail-aligned, row-hover-chevron]
+open_questions: [quality-codec-fps-adjust-backend, B-lease-server-batch, real-pointer-lock-fullscreen-UA-Esc-device, real-gamepad-device, special-keys-real-channel, R6-five-backendization, view-wall-fullscreen-cross-plan, PROGRAM-memorys-parallel-owned, devtools-hidden-in-session, launcher-code-copy-format, launcher-info-fields, launcher-container-queries, sep-panel-token]
 ```
 
 ## Unified navigation taxonomy (reconciles new-design groups + workbudy features)
@@ -421,6 +421,73 @@ placeholder (in-page cross-page hotkey done now). Full backlog + Phase 6 in pare
   for right-edge collapse); now region-collapse + i-chevron (right), aria-label/title synced in
   renderDrawer. Precedent: region-collapse chevrons point toward collapse edge; modal dismiss = X.
   harness device-drawer += ddIcon assertion; 27 cases + NEG green.
+- v1.118 (N-26 E-STOP contextual + unified, D53=B, PENDING REVIEW): shows only with control possible
+  (captured/teleop/latched); 30h/r6/1px same language as bar buttons, danger by color; renderRemSession
+  now ends with renderRemState. 69 cases + NEG green.
+- v1.117 (N-25 banner stack + button uniformity, PENDING REVIEW): simultaneous banners stack
+  vertically (no overlap); safebar buttons nowrap single-line 30h; opswap 100px. 69 cases + NEG green.
+- v1.116 (N-24 safe-bar stability, D52=B', PENDING REVIEW): measureText-pinned fixed slots + bounded
+  content + three banners out-of-flow upper-anchored + released 6s toast + latched note permanent +
+  graceMirror/bar-sim retired + groups/right-anchored opswap grid + >=1024 single row / <1024 wrap;
+  barStable pixel-equality case. 69 cases + NEG green.
+- v1.115 (N-23 safe-bar de-framing, D51=A, PENDING REVIEW): outer+chip frames retired (scoped), single
+  framed state badge (own invention note), ghost Expand/Release blue link, Esc/grace/leasebar/conn on
+  constant video ink family, separators + Esc slot pinned; shared-shell radius leg adapted.
+  68 cases + NEG green.
+- v1.114 (N-22 session full-bleed micro-fix, PENDING REVIEW): session page-body padding 0 + #app grid
+  topbar row zeroed + stage border/radius retired -> edge-to-edge video; sessionFullBleed assertion.
+  68 cases + NEG green.
+- v1.113 (N-21 ball-only session chrome, D48-D50=A, PENDING REVIEW): topbar/wake/tooltip retired, ball
+  always visible incl view; Safety holder line + admin Force row (callback recheck); novice hint +
+  identity dot; video-danger-tint composite estop + video-ink badges + composite assertions; connecting
+  three-item guard + tokens + 11px chips. 68 cases + NEG green.
+- v1.112 (N-20 hover grace + safe triangle + intent, D47=A, PENDING REVIEW): 300ms cancellable close
+  grace + re-entry recovery + safe-triangle suppression + 120ms sibling open intent; Esc/click
+  immediate. 67 cases (remote-menu 23) + NEG green; MCP slow-diagonal feel check true.
+- v1.111 (N-19 cascade infra fork, D46=A, PENDING REVIEW): menuChain logical ancestors + right-of-
+  parent anchor + flip + hover open + branch aria/highlight + ArrowRight/Left + Esc deepest; toolbar
+  openTbPop untouched. 67 cases (remote-menu 18) + NEG green; MCP three-panel cascade screenshot.
+- v1.110 (N-18 ball menu ToDesk 1:1, D44/D45=A, PENDING REVIEW): strip 4 / two state tiles / nine
+  borderless rows ToDesk order / Display 8-row submenu + quality third level / Control hosts real
+  extras / dynamic Safety badge / guard tip below-target in pops. 67 cases + NEG green.
+- v1.109 (N-17 session chrome, D41-D43=A, PENDING REVIEW): video-scrim family both themes; safe bar
+  compact single row (cover 2.78%) + lat/jit merged dual-id + Esc chip; estop opaque base + hold SR
+  mirror + --r8; wake/topbar/ball scrim (menu light kept); OSD 85%; stage video-bg; simulated desktop
+  mock + corner sim chip H-exempt; connecting dashes. 66 cases + NEG green; runner async-aware.
+- v1.108 (N-16 optimization bundle, D40=A, PENDING REVIEW): fold math 380/325 + scope fix + fallback
+  mapping; legacy hover lift/raw shadow deleted; reduced-motion global loop kill; skeleton follows
+  fold; lmInfo note+tags + sr-only sub; password form owner + data-URI favicon; label weight 500.
+  65 cases + 3 new legs + NEG green; MCP re-measured 457->4/3 cols.
+- v1.107 (N-15 launcher visual, §3v round complete pending final review): meta 3 single rows + tags
+  row; bare tiles + lock corner + no gated hover; borderless + --sep-panel divider (left column
+  retro-fixed); container queries + @supports fallback; power 3 pills; error alert banner / loading
+  skeleton / empty top; guardTip stale-reason fix. 65 cases + NEG green.
+- v1.106 (safety micro-fix, PENDING REVIEW): duplicate tile block opacity:.55 cascade removed
+  (gated labels were ~2.2:1 despite N-9d fix); gatedContrast now opacity-composited + opacity===1
+  invariant. 64 cases + NEG green. Launcher redesign pending D37-D39.
+- v1.105 (N-13 row micro-optimizations, D36=A, PENDING REVIEW): subline rail aligned + status/OS/IP/
+  owner order + This device accent badge + hover/focus chevron (coarse hidden) + dot/OS alignment.
+  64 cases + NEG green.
+- v1.104 (N-12 left-toolbar de-clutter, D34/D35=A, PENDING REVIEW): filters anchored popover +
+  active-count badge; single merged toolbar row; nav flattened with separator; placeholder shortened;
+  native title tooltips removed. 63 cases + NEG green.
+- v1.103 (Remote left-column structure N-11; §3u round complete pending final review): fixed-slot
+  three-section column + independent scroll + nav inverse hover + sep-strong + two-line rows with
+  never-truncated badges + three-shape status dots + group bold/pill vs device tint + full-fleet
+  footer + in-session fixed slot + roving rows. 62 cases + NEG green.
+- v1.102 (N-10 dead-collapse removal, D29=A, PENDING REVIEW): group tree -> flat filter listbox
+  (chevron/collapse state/aria-expanded removed; APG-correct); treeNoDeadControl + groupListbox
+  assertions; 60 cases + NEG green.
+- v1.101 (Remote list visual language N-9; §3t round complete pending final review): borderless rows
+  + hover/selected accent tint + left bar; tree folder/chevron/indent/count pill; badges demoted
+  (Same account -> subline); tiles filled/dashed-gated/power danger hover; toolbar single row icon
+  buttons; sentence-case heads; empty section hidden; light+dark contrast assertions. 60 cases + NEG
+  green; 4 adaptations registered.
+- v1.100 (Tower W4 N-8; §3s round complete pending final review): shell grid+collapse+region/Tab+
+  narrow stack+ack reachability; wall deep-links+video ink+three states+tick; intercom selected-channel
+  PTT single floor-grant source+overflow+countdown+Space focus guard+chanOpen/vox/scan page guards;
+  alerts schema+ack local sim+audit+dynamic counts+severity shapes+deep-links. 57 cases + NEG green;
+  intercom 11-case regression unchanged with behavior changes registered.
 - v1.99 (Remote N-7 device-list; §3r round complete pending final review): device object layer + group
   tree (APG) + row three tiers + STOPPED badge + rename modal + search/sort/filter/recent/in-session
   (filter-exempt) + three states + sim head chip. 54 cases + NEG green.
