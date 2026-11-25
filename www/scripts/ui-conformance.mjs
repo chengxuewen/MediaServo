@@ -23,7 +23,7 @@ const arg = (n, d) => process.argv.includes(n) ? process.argv[process.argv.index
 const page = arg('--page', 'monitor');
 const mode = arg('--mode', 'demo');
 const APP = arg('--app', 'http://localhost:5176/');
-const OUT = arg('--out', path.join(SUB, '../docs/plans/monitor-nvr-visual-parity/evidence/conformance'));
+const OUT = arg('--out', '/home/maxsense/Documents/ms_rtc/docs/plans/monitor-nvr-visual-parity/evidence/conformance');
 const PROTO = path.join(SUB, 'docs/ui/prototypes/portal-unified.html');
 const VP = { width: 1600, height: 900 };
 fs.mkdirSync(OUT, { recursive: true });
