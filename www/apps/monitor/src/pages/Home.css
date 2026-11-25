@@ -113,7 +113,8 @@
 .lo-thumb[aria-selected="true"] .lo-cell, .lo-cell.big { background: var(--ms-color-accent); }
 .wall-wrap { position: relative; }
 /* V6 (K10): empty-slot parity for 25/36/custom under cap16. */
-.tile-empty { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/9; border: 1px dashed var(--ms-color-border-strong); background: var(--ms-color-surface-muted); border-radius: 0; color: var(--ms-color-text-tertiary); font-size: var(--ms-font-size-xs); }
+/* V8: empty slots are part of the dark video island (prototype look), honest placeholders. */
+.tile-empty { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/9; border: 1px solid var(--ms-color-border); background: var(--ms-palette-video-bg); border-radius: 0; color: rgba(255,255,255,.35); font-size: var(--ms-font-size-xs); font-family: var(--ms-font-family-mono); letter-spacing: 1px; }
 /* V6 (I3): elastic column-weight drag handles. */
 .col-handle { position: absolute; top: 0; bottom: 0; width: 12px; margin-left: -6px; cursor: col-resize; z-index: 14; }
 .col-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: var(--ms-color-accent); opacity: 0; transition: opacity .12s; }

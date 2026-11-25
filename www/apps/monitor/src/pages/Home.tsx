@@ -39,7 +39,9 @@ const WEIGHTS_KEY = 'ms_col_weights';
 const SPANS_KEY = 'ms_tile_spans';
 function loadWeights(): number[] { try { const v = JSON.parse(localStorage.getItem(WEIGHTS_KEY) || 'null'); if (Array.isArray(v) && v.length === 3) return v; } catch { /* silent */ } return [1, 1, 1]; }
 function loadSpans(): Record<string, boolean> { try { return JSON.parse(localStorage.getItem(SPANS_KEY) || '{}'); } catch { return {}; } }
-const autoTemplateId = (n: number) => (n <= 1 ? '1' : n <= 4 ? '4' : n <= 6 ? '1+5' : n <= 9 ? '9' : '16');
+// V8: with zero streams Auto still shows the prototype's featured 1+5 grid (dark empty
+// slots), so the real default page is a layout, not an empty box.
+const autoTemplateId = (n: number) => (n === 0 ? '1+5' : n <= 1 ? '1' : n <= 4 ? '4' : n <= 6 ? '1+5' : n <= 9 ? '9' : '16');
 const findLayout = (id: string) => LAYOUTS.find((l) => l.id === id) ?? LAYOUTS[1];
 function loadLayout(): string {
   try {
@@ -374,8 +376,8 @@ export default function Home() {
                 <button className="iconbtn" aria-disabled="true" title="Drift sync display — deferred (RECORDING_READY=false)" aria-label="Sync (deferred)">⇄</button>
                 <button className={`global-stats-toggle iconbtn${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)} title="Stats" aria-label="Stats">ⓘ</button>
           </div>
-          {playing.length > 0 ? (
-            <div className="wall-wrap">
+          {playing.length === 0 && <div className="canvas-empty">No live streams yet — this is the wall layout; add streams at left or toggle Demo.</div>}
+          <div className="wall-wrap">
               <div className={`wall-grid${statsVisible ? '' : ' stats-hidden'}`} style={gridStyle}>
                 {visible.map((id, idx) => {
                   const p = byId.get(id);
@@ -416,10 +418,7 @@ export default function Home() {
                 const left = (colWeights.slice(0, i + 1).reduce((a, b) => a + b, 0) / total) * 100;
                 return <span key={i} className="col-handle" style={{ left: `${left}%` }} onPointerDown={dragCol(i)} title="Drag to resize column" />;
               })}
-            </div>
-          ) : (
-            <div className="canvas-empty">No streams on the wall yet. Pick streams in the left rail and Play All / Watch Selected.</div>
-          )}
+          </div>
         </div>
 
         <aside className={`mon-alerts${regions.right ? '' : ' collapsed'}`}>
