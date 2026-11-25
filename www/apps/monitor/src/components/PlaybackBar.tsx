@@ -8,7 +8,7 @@ import './PlaybackBar.css';
 // The track/scale/playhead are visual; event ticks derive from the REAL audit ring
 // (geometry is data-driven and excluded from the parity contract, N2).
 const REASON = 'Playback review deferred — recording backend not ready (RECORDING_READY=false)';
-const HOURS = ['00:00', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00', '21:00'];
+const HOURS = ['00:00', '03:00', '06:00', '09:00', '12:00', '15:00', '18:00', '21:00', '24:00'];
 
 export default function PlaybackBar({ events, demo = false }: { events: AuditEventEntry[]; demo?: boolean }) {
   const now = new Date();
@@ -28,8 +28,13 @@ export default function PlaybackBar({ events, demo = false }: { events: AuditEve
         <Guard label="−" /><span className="pb-win">24h</span><Guard label="+" />
         <Guard label="‹" /><span className="pb-date">{now.toISOString().slice(0, 10)}</span><Guard label="›" />
         <Guard label="−" /><span className="pb-win">1×</span><Guard label="+" />
+        <Guard label="📅" />
         <Guard label="Solo" /><Guard label="Sync" />
-        <button className="pb-live" aria-disabled="true" title={REASON}>● LIVE</button>
+        <Guard label="⛶" /><Guard label="▤" />
+        <button className="pb-live" aria-disabled="true" title={REASON} data-reason={REASON}>● LIVE</button>
+      </div>
+      <div className="ctl-bot">
+        <Guard label="⏮" /><Guard label="⏸" /><Guard label="⏭" />
       </div>
       <div className="tl-track">
         {demo && DEMO_BLOCKS.map(([s, w], i) => <span key={`b${i}`} className="tl-block" style={{ left: `${s * 100}%`, width: `${w * 100}%` }} />)}
