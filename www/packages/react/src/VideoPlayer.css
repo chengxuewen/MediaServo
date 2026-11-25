@@ -26,6 +26,9 @@
 }
 .vp-status-dot { width: 10px; height: 10px; border-radius: 50%; }
 .vp-title { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* V9j: NVR tile name — allow 2 lines (narrow tiles no longer cut to "strea…");
+   full name always available via the title tooltip. */
+.video-player.nvr .vp-title { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; line-height: 1.15; font-size: 11px; }
 .vp-bitrate { color: var(--ms-color-text-faint); font-size: .75rem; }
 .vp-close { background: none; border: none; color: var(--ms-color-text-inverse); font-size: 1.1rem; cursor: pointer; padding: 2px 8px; }
 .vp-close:hover { color: var(--ms-color-danger); }

@@ -202,7 +202,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         {/* Top bar */}
         <div className="vp-top-bar" style={{ background: isDisconnected ? '#c0392b' : '#2c3e50' }}>
           <span className="vp-status-dot" style={{ background: statusColor }} />
-          <span className="vp-title">{streamLabel ? `${roomId} · ${streamLabel}` : roomId}</span>
+          <span className="vp-title" title={streamLabel ? `${roomId} · ${streamLabel}` : roomId}>{streamLabel ? `${roomId} · ${streamLabel}` : roomId}</span>
           {nvr && isTile && <span className="tile-glyph" aria-hidden="true">{degraded ? '▮▮▯' : isDisconnected ? '⊘' : ''}</span>}
           {!isTile && metrics && !isDisconnected && (
             <span className="vp-bitrate">{metrics.resolution} · {Math.round(metrics.bitrate)}Kbps</span>
