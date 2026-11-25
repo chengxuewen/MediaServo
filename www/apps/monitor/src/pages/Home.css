@@ -2,7 +2,7 @@
 .monitor-home { display: flex; flex-direction: column; gap: var(--ms-space-3); }
 
 /* Top bar (V2 stage-bar): title + healthChip + LIVE clock + iconbtn region toggles */
-.mh-bar { display: flex; align-items: center; gap: var(--ms-space-3); flex-wrap: wrap; min-height: 52px; }
+.mh-bar { display: flex; align-items: center; gap: var(--ms-space-3); flex-wrap: wrap; min-height: 52px; position: relative; z-index: 40; }
 .mh-bar h1 { font-size: var(--ms-font-size-md); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); margin: 0; }
 .health-chip { font-size: var(--ms-font-size-xs); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-full); border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); background: var(--ms-color-surface); cursor: pointer; }
 .health-chip.warn { border-color: var(--ms-color-warning); color: var(--ms-color-text); background: var(--ms-color-warning-soft); }
@@ -39,11 +39,33 @@
 .bottom-zone { background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); overflow: hidden; }
 .bottom-zone .rail-body { max-height: 40vh; overflow: auto; }
 
-/* Narrow screens: stack the panels (overlay-drawer refinement deferred). */
+/* V3 (L3/I1): on-wall stream cards — whole-row drag to reorder, × / drop-zone to remove. */
+.rail-cards { display: flex; flex-direction: column; gap: var(--ms-space-1); margin-bottom: var(--ms-space-2); }
+.rail-card { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-2); border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); border-radius: 6px; cursor: grab; }
+.rail-card:active { cursor: grabbing; opacity: .6; }
+.rc-name { flex: 1; font-size: var(--ms-font-size-xs); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rc-del { opacity: 0; background: none; border: none; color: var(--ms-color-text-secondary); cursor: pointer; font-size: var(--ms-font-size-sm); line-height: 1; transition: opacity .12s; }
+.rail-card:hover .rc-del, .rail-card:focus-within .rc-del { opacity: 1; }
+.rc-del:hover { color: var(--ms-color-danger); }
+.rail-drop-remove { border: 1px dashed var(--ms-color-border-strong); border-radius: 6px; padding: var(--ms-space-2); text-align: center; font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); }
+.rail-drop-remove:hover { border-color: var(--ms-color-danger); color: var(--ms-color-danger); background: var(--ms-color-danger-soft); }
+.pin-btn { display: none; background: none; border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); width: 24px; height: 24px; cursor: pointer; }
+.rail-pinmsg { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); padding: var(--ms-space-1) 0; }
+
+/* V3 (L5): mid-width narrows the rails. */
+@media (min-width: 1200px) and (max-width: 1500px) {
+  .stream-rail { width: 210px; }
+  .mon-alerts { width: 260px; }
+}
+/* V3 (L5): narrow = overlay drawers + pin; mutual exclusion handled in toggleRegion. */
 @media (max-width: 1199px) {
   .monitor-three-panel { grid-template-columns: 1fr; }
-  .stream-rail, .mon-alerts { width: auto; }
+  .stream-rail, .mon-alerts { position: fixed; top: 0; bottom: 0; z-index: 30; width: min(248px, 82vw); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
+  .stream-rail { left: 0; }
+  .mon-alerts { right: 0; width: min(300px, 86vw); }
+  .stream-rail.collapsed, .mon-alerts.collapsed { display: none; }
   .stream-rail .rail-body { max-height: none; }
+  .pin-btn { display: inline-flex; align-items: center; justify-content: center; }
 }
 
 /* Wall toolbar / grid / offline tile (unchanged mechanics) */

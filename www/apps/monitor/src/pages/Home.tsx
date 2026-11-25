@@ -45,10 +45,14 @@ function loadLayout(): string {
   return 'auto';
 }
 function loadRegions() {
+  // V3 (L5): narrow defaults to both drawers CLOSED (prototype), so they don't cover
+  // the topbar; wide defaults open. Stored preference wins when present.
+  const narrow = window.matchMedia('(max-width: 1199px)').matches;
   try {
-    const v = JSON.parse(localStorage.getItem(REGION_KEY) || '{}');
-    return { left: v.left !== false, right: v.right !== false, bottom: v.bottom !== false };
-  } catch { return { left: true, right: true, bottom: true }; }
+    const raw = localStorage.getItem(REGION_KEY);
+    if (raw) { const v = JSON.parse(raw); return { left: v.left !== false, right: v.right !== false, bottom: v.bottom !== false }; }
+  } catch { /* fall through */ }
+  return { left: !narrow, right: !narrow, bottom: true };
 }
 function wsServerUrl(): string {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -123,9 +127,20 @@ export default function Home() {
   const [regions, setRegions] = useState(loadRegions);
   const toggleRegion = (k: 'left' | 'right' | 'bottom') => setRegions((prev) => {
     const next = { ...prev, [k]: !prev[k] };
+    // V3 (L5): narrow overlay-drawer mutual exclusion — opening one side closes the other.
+    if (window.matchMedia('(max-width: 1199px)').matches) {
+      if (k === 'left' && next.left) next.right = false;
+      if (k === 'right' && next.right) next.left = false;
+    }
     try { localStorage.setItem(REGION_KEY, JSON.stringify(next)); } catch { /* silent degrade */ }
     return next;
   });
+  const [pinMsg, setPinMsg] = useState('');
+  // V3 (I1): drag-reorder the on-wall list; drag onto the remove zone closes a tile.
+  const reorderPlaying = (from: string, to: string) => {
+    if (!from || from === to) return;
+    setPlaying((prev) => { const a = [...prev]; const fi = a.indexOf(from); const ti = a.indexOf(to); if (fi < 0 || ti < 0) return prev; a.splice(fi, 1); a.splice(ti, 0, from); return a; });
+  };
 
   const [clock, setClock] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setClock(new Date()), 1000); return () => clearInterval(t); }, []);
@@ -236,10 +251,29 @@ export default function Home() {
         <aside className={`stream-rail${regions.left ? '' : ' collapsed'}`}>
           <div className="rail-head">
             <span className="rail-title">Selected streams</span>
+            <button className="pin-btn" onClick={() => setPinMsg('Pinned — resize wider to dock')} title="Pin panel (dock when wide)" aria-label="Pin left panel">⤓</button>
             <button className="region-collapse" onClick={() => toggleRegion('left')} aria-label={regions.left ? 'Hide left panel' : 'Show left panel'}>{regions.left ? '‹' : '›'}</button>
           </div>
           <div className="rail-body">
             <button className="open-picker" onClick={() => setPickerOpen(true)}>＋ Select streams</button>
+            {playing.length > 0 && (
+              <div className="rail-cards" aria-label="On-wall streams (drag to reorder)">
+                {playing.map((id) => { const p = byId.get(id); return (
+                  <div key={id} className="rail-card" draggable
+                    onDragStart={(e) => e.dataTransfer.setData('text/plain', id)}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => { e.preventDefault(); reorderPlaying(e.dataTransfer.getData('text/plain'), id); }}>
+                    <span className="rc-name">{p ? `${p.room} · ${p.kind}` : id}</span>
+                    <button className="rc-del" onClick={() => closeTile(id)} aria-label={`Remove ${p?.room ?? id}`}>×</button>
+                  </div>
+                ); })}
+                <div className="rail-drop-remove" onDragOver={(e) => e.preventDefault()}
+                  onDrop={(e) => { e.preventDefault(); const id = e.dataTransfer.getData('text/plain'); if (id) closeTile(id); }}>
+                  Drop here to remove
+                </div>
+              </div>
+            )}
+            {pinMsg && <div className="rail-pinmsg" role="status">{pinMsg}</div>}
             <StreamTree
               producers={producers}
               loading={loading}

@@ -18,7 +18,7 @@ export default defineConfig({
     // authenticated shell smoke + single-stream wall (admin storageState from globalSetup)
     {
       name: 'monitor-admin',
-      testMatch: /(shell|wall.*|timeline|picker|alert|finishing)\.spec\.ts/,
+      testMatch: /(shell|wall.*|timeline|picker|alert|finishing|rail)\.spec\.ts/,
       use: { baseURL: 'http://localhost:5176', storageState: '.auth/admin.json' },
     },
   ],
