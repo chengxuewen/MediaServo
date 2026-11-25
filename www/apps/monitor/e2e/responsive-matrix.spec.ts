@@ -48,6 +48,32 @@ test.describe('responsive matrix', () => {
         // both rails reach the panel bottom (full height columns)
         expect(Math.abs(rail.y + rail.height - (panel.y + panel.height))).toBeLessThanOrEqual(2);
         expect(Math.abs(alerts.y + alerts.height - (panel.y + panel.height))).toBeLessThanOrEqual(2);
+
+        // V30: a CLOSED rail must not shift the grid — canvas keeps column 2 and the
+        // alerts stay on the RIGHT (this regressed at 768..1023 when only the left rail
+        // was closed: canvas fell into the auto track at 0 width, alerts jumped left).
+        await page.locator('[aria-label="Toggle stream rail"]').click(); // close left
+        await expect(page.locator('.stream-rail')).toBeHidden();
+        let g2 = await rect(page, '.wall-grid');
+        let a2 = await rect(page, '.mon-alerts');
+        expect(g2.width, 'grid keeps width when the left rail is closed').toBeGreaterThan(200);
+        expect(a2.x, 'alerts stay right of the grid').toBeGreaterThanOrEqual(g2.x + g2.width - 1);
+        expect(Math.abs(a2.x + a2.width - (panel.x + panel.width))).toBeLessThanOrEqual(2);
+
+        await page.locator('[aria-label="Toggle stream rail"]').click();  // reopen left
+        await page.locator('[aria-label="Toggle alert panel"]').click();  // close right
+        await expect(page.locator('.mon-alerts')).toBeHidden();
+        const r2 = await rect(page, '.stream-rail');
+        g2 = await rect(page, '.wall-grid');
+        expect(g2.width, 'grid keeps width when the right rail is closed').toBeGreaterThan(200);
+        expect(g2.x, 'grid right of the rail').toBeGreaterThanOrEqual(r2.x + r2.width - 1);
+
+        await page.locator('[aria-label="Toggle stream rail"]').click();  // both closed
+        await expect(page.locator('.stream-rail')).toBeHidden();
+        const g3 = await rect(page, '.wall-grid');
+        expect(g3.width, 'grid takes the full panel width when both rails are closed').toBeGreaterThan(panel.width - 40);
+        const ox = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+        expect(ox).toBeLessThanOrEqual(1);
       } else {
         // overlay: closed by default; rails hidden
         await expect(page.locator('.stream-rail')).toBeHidden();

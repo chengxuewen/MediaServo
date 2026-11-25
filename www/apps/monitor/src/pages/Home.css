@@ -42,9 +42,11 @@
 .stream-rail { border: 0; border-right: 1px solid var(--ms-color-border); border-radius: 0; }
 /* V12: pin each panel to its own grid column. Without this, hiding a rail makes the
    remaining items shift left (canvas lands in the `auto` track and stops filling).
-   V26: DESKTOP ONLY — the narrow grid has a single column, so pinning the canvas to
-   column 2 put it in an implicit track and the wall vanished (narrow regression). */
-@media (min-width: 1024px) {
+   V26/V30: applies to every THREE-COLUMN mode (>=768). Below 768 the grid is a single
+   column with absolute drawers, so pins must not apply there (they created an implicit
+   0-width track and the wall vanished). At 768..1023 a closed rail is display:none and,
+   without pins, the canvas shifted into the auto track and the alerts jumped LEFT. */
+@media (min-width: 768px) {
   .stream-rail { grid-column: 1; }
   .canvas { grid-column: 2; }
   .mon-alerts { grid-column: 3; }
