@@ -11,7 +11,7 @@ import { useAuth } from '../hooks/useAuth';
 import Timeline from '../components/Timeline';
 import PlaybackBar from '../components/PlaybackBar';
 import { isDemo, DEMO_PRODUCERS, DEMO_PLAYING, DEMO_EVENTS } from '../demo';
-import { PanelLeft, Bell, Rows3, RefreshCw } from 'lucide-react';
+import { PanelLeft, Bell, Rows3 } from 'lucide-react';
 import './Home.css';
 
 // Playback cap (browser soft-decode guard): 16 = a 4x4 grid scale (B5 contract).
@@ -179,6 +179,8 @@ export default function Home() {
 
   const byId = new Map(producers.map((p) => [p.id, p]));
   const degraded = producers.filter((p) => p.score < 8).length;
+  // K11/K13 (healthChip parity): offline = on-wall ids whose producer is gone; red when any issue, hidden when healthy (prototype).
+  const offline = playing.filter((id) => !byId.has(id)).length;
   // V2 (I6): unread-style alert badge count from the audit ring (alert-worthy kinds).
   const ALERT_KINDS = ['device_offline', 'estop_audit', 'emergency_command', 'auth_failure', 'authorization_denied', 'stream_destroy', 'device_revoked'];
   const alertCount = events.filter((e) => ALERT_KINDS.includes(e.kind)).length;
@@ -304,7 +306,6 @@ export default function Home() {
             {alertCount > 0 && <span className="al-badge" aria-label={`${alertCount} alerts`}>{alertCount}</span>}
           </button>
           <button aria-pressed={regions.bottom} onClick={() => toggleRegion('bottom')} title="Toggle event feed" aria-label="Toggle event feed"><Rows3 size={15} /></button>
-          <button aria-disabled="true" title="Drift sync display — multi-stream sync-seek deferred (RECORDING_READY=false)" aria-label="Sync (deferred)"><RefreshCw size={15} /></button>
         </div>
       </div>
       <p className="mh-note" role="note">
@@ -367,9 +368,11 @@ export default function Home() {
                   <button onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={curPage >= pages - 1 || pages <= 1 || !!zoomedId} aria-label="Next page">›</button>
                   <button className={`wt-carousel${carousel ? ' active' : ''}`} aria-pressed={carousel} onClick={() => setCarousel((c) => !c)} title="Carousel" aria-label="Carousel">⟳</button>
                 </div>
-                <button className={`health-chip${degraded > 0 ? ' warn' : ''}`} role="status" onClick={focusDegraded} title={degraded > 0 ? 'Focus first degraded stream' : 'All streams healthy'}>
-                  {degraded > 0 ? `${degraded} degraded` : 'Healthy'}
-                </button>
+                {(degraded > 0 || offline > 0) && (
+                  <button className="health-chip warn" role="status" onClick={focusDegraded} title="Focus first problem stream">
+                    {[degraded > 0 ? `${degraded} degraded` : '', offline > 0 ? `${offline} offline` : ''].filter(Boolean).join(' · ')}
+                  </button>
+                )}
                 {zoomedId && <button className="wt-exit-zoom" onClick={() => setZoomedId(null)}>Exit zoom</button>}
                 {playHint && <span className="wt-hint" role="status">{playHint}</span>}
                 <span className="wt-spacer" />

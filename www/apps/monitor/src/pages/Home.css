@@ -14,7 +14,7 @@
 .iconbtn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
 .iconbtn.on { border-color: var(--ms-color-accent); color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
 .health-chip { font-size: var(--ms-font-size-xs); padding: var(--ms-space-1) var(--ms-space-2); border-radius: var(--ms-radius-full); border: 1px solid var(--ms-color-border); color: var(--ms-color-text-secondary); background: var(--ms-color-surface); cursor: pointer; }
-.health-chip.warn { border-color: var(--ms-color-warning); color: var(--ms-color-text); background: var(--ms-color-warning-soft); }
+.health-chip.warn { border-color: var(--ms-color-danger); color: var(--ms-color-danger); background: var(--ms-color-danger-soft); font-weight: 600; }
 .live-clock { display: inline-flex; align-items: center; gap: var(--ms-space-1); font-size: var(--ms-font-size-xs); color: var(--ms-color-text-secondary); font-variant-numeric: tabular-nums; font-family: var(--ms-font-family-mono); }
 .theme-toggle { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 6px; cursor: pointer; }
 /* V5 (S8): faint ambient radials (prototype), tokens-only. */
@@ -33,8 +33,10 @@
 .mh-note { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); margin: 0; }
 
 /* Three-panel: left stream rail | center canvas (wall) | right alerts */
-.monitor-three-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: var(--ms-space-3); align-items: stretch; }
-.stream-rail, .mon-alerts { background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); overflow: hidden; transition: width .18s; }
+.monitor-three-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0; align-items: stretch; }
+.stream-rail, .mon-alerts { background: var(--ms-color-surface); overflow: hidden; transition: width .18s; }
+.stream-rail { border: 0; border-right: 1px solid var(--ms-color-border); border-radius: 0; }
+.mon-alerts { border: 0; border-left: 1px solid var(--ms-color-border); border-radius: 0; }
 .stream-rail { width: 248px; }
 .mon-alerts { width: 300px; }
 /* V4: collapsed rail takes zero grid track (prototype), reopen via topbar toggle. */
