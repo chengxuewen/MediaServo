@@ -47,7 +47,9 @@
 
 .content { flex: 1; padding: 16px; overflow-y: auto; min-width: 0; --monitor-chrome: 86px; /* 54 header + 2*16 padding (monitor page fills the rest) */ }
 /* V20: the wall console gets a tighter gutter (8px) than regular admin pages. */
-.content:has(.monitor-home) { padding: 8px; --monitor-chrome: 70px; /* 54 + 2*8 */ }
+/* V33 (ruling A): the wall console is media-first -> NO outer gutter; the prototype's
+   16px inset lives on the toolbar/wall themselves. --monitor-chrome = header only. */
+.content:has(.monitor-home) { padding: 0; --monitor-chrome: 54px; }
 
 /* P0 shell convergence: grouped navigation (tokens only) */
 .nav-group {

@@ -1,8 +1,8 @@
 /* P3 slice ① thin-shell topbar — tokens only (no raw values; PIT-258 guard). */
 .monitor-shell { display: flex; flex-direction: column; min-height: 100vh; --monitor-chrome: 80px; /* 48 header + 2*16 padding */ }
 /* V20: tighter gutter for the wall console (8px). */
-.monitor-shell:has(.monitor-home) { --monitor-chrome: 64px; /* 48 + 2*8 */ }
-.monitor-content:has(.monitor-home) { padding: 8px; }
+.monitor-shell:has(.monitor-home) { --monitor-chrome: 48px; /* V33: header only */ }
+.monitor-content:has(.monitor-home) { padding: 0; }
 .header { display: flex; align-items: center; justify-content: space-between; padding: 0 var(--ms-space-6); height: 48px; background: var(--ms-color-text); color: var(--ms-color-text-inverse); }
 .header .logo { display: inline-flex; align-items: center; font-size: var(--ms-font-size-md); font-weight: var(--ms-font-weight-semibold); }
 .logo-mark { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: var(--ms-radius-md); background: linear-gradient(135deg, var(--ms-color-accent), var(--ms-color-info)); color: var(--ms-color-text-inverse); margin-inline-end: var(--ms-space-2); }
