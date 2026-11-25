@@ -266,6 +266,9 @@ export default function Home() {
     setPlaying(merged);
     setPlayHint(dropped > 0 ? `Playback cap of ${MAX_PLAYING} reached; skipped ${dropped} (close tiles to play more)` : '');
   };
+  // V13: Apply in the picker SYNCHRONISES the wall to the checked set (adds new, removes
+// unchecked), so reopening shows the current selection instead of losing it.
+  const applyPlaying = (ids: string[]) => setPlaying(ids.slice(0, MAX_PLAYING));
   // V9c (K11=A): alert click focuses ONE camera — add its first producer to the wall if
   // absent, then zoom that single tile (prototype focusAlertCam).
   const focusRoom = (room: string) => {
@@ -444,7 +447,7 @@ export default function Home() {
       </div>
 
       {pickerOpen && (
-        <Picker producers={producers} playing={playing} onClose={() => setPickerOpen(false)} onAdd={addPlaying} onPlay={playRoom} />
+        <Picker producers={producers} playing={playing} onClose={() => setPickerOpen(false)} onAdd={applyPlaying} onPlay={playRoom} />
       )}
       {modal && (
         <VideoPlayer

@@ -23,12 +23,14 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
 }) {
   const [query, setQuery] = useState('');
   const [selQuery, setSelQuery] = useState('');
-  const [chosen, setChosen] = useState<string[]>([]);
+  // V13: seed from what is already on the wall, and show ALL streams (prototype) so the
+// user can check/uncheck freely — reopening reflects the current selection.
+  const [chosen, setChosen] = useState<string[]>(playing);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [focusIdx, setFocusIdx] = useState(0);
 
   const q = query.trim().toLowerCase();
-  const playable = producers.filter((p) => !playing.includes(p.id));
+  const playable = producers;
   const rooms = useMemo(() => [...new Set(playable.map((p) => p.room))]
     .filter((r) => !q || playable.some((p) => p.room === r && `${p.room} ${p.peer_id} ${p.kind}`.toLowerCase().includes(q))), [playable, q]);
   const byId = useMemo(() => new Map(producers.map((p) => [p.id, p])), [producers]);
@@ -70,7 +72,7 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
       actions={<>
         <span className="picker-foot-count">{chosen.length} selected</span>
         <button className="picker-cancel" onClick={onClose}>Cancel</button>
-        <button className="picker-add" disabled={chosen.length === 0} onClick={() => { onAdd(chosen); onClose(); }}>Apply</button>
+        <button className="picker-add" onClick={() => { onAdd(chosen); onClose(); }}>Apply</button>
       </>}>
       <div className="picker-cols">
         <div className="picker-pane">
@@ -96,7 +98,7 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
                       onClick={(e) => { e.stopPropagation(); toggleExpand(room); }}>{open ? '▾' : '▸'}</button>
                     <input type="checkbox" readOnly checked={allChosen(room)} tabIndex={-1} aria-hidden="true" />
                     <span className="st-device-name">{room}</span>
-                    <span className="picker-dev-count">{list.length}/{list.length}</span>
+                    <span className="picker-dev-count">{list.filter((p) => chosen.includes(p.id)).length}/{list.length}</span>
                     <span className={`pick-status ${st}`}><span className="pick-dot" aria-hidden="true" />{st}</span>
                     <button className="st-play-all" title="Play all streams of this device" onClick={(e) => { e.stopPropagation(); onPlay(room); onClose(); }}>Play</button>
                   </div>
