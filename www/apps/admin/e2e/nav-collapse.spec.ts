@@ -34,3 +34,12 @@ test('nav collapses to 58px rail, persists, and auto-rails at <=900px', async ({
   await page.setViewportSize({ width: 1280, height: 900 });
   await expect.poll(async () => Math.round(await width(page))).toBeGreaterThan(120);
 });
+
+// V22 (prototype topbar): the brand is followed by the current page name.
+test('header shows the current page name beside the brand', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.header-page')).toHaveText('Overview');
+  await page.locator('nav a', { hasText: 'Monitor' }).click();
+  await expect(page.locator('.header-page')).toHaveText('Monitor Center');
+  await expect(page.locator('.sidebar')).toBeVisible();
+});

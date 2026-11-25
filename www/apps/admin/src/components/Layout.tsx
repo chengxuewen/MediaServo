@@ -12,6 +12,16 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const notices = (location.state as { notice?: string } | null)?.notice;
+  // V22 (prototype topbar): brand is followed by the CURRENT page name.
+  const pageLabel = (() => {
+    const p = location.pathname.replace(/\/+$/, '').split('/').pop() || '';
+    const map: Record<string, string> = {
+      '': 'Overview', monitor: 'Monitor Center', intercom: 'Intercom', admin: 'Admin',
+      settings: 'Settings', devices: 'Devices', rooms: 'Rooms', accounts: 'Accounts',
+      'api-keys': 'API keys', evidence: 'Evidence', vehicles: 'Vehicles',
+    };
+    return map[p] ?? (p ? p.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : 'Overview');
+  })();
   // V21 (prototype nav): collapsible sidebar -> 58px icon rail; auto-rail at <=900px.
   const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem('msrv_nav_collapsed') === '1'; } catch { return false; } });
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
@@ -50,6 +60,7 @@ export default function Layout() {
       {notices && <div className="notice-banner">ℹ️ {notices}</div>}
       <header className="header">
         <span className="logo"><span className="logo-mark" aria-hidden="true"><Radio size={16} /></span> MediaServo</span>
+        <span className="header-page" aria-current="page">{pageLabel}</span>
         <div className="header-right">
           <FloorNotifChips />
           <span className="version">
