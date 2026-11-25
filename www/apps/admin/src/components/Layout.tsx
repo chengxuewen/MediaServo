@@ -26,9 +26,9 @@ export default function Layout() {
   useEffect(() => { document.title = `${pageLabel} · MediaServo`; }, [pageLabel]);
   // V21 (prototype nav): collapsible sidebar -> 58px icon rail; auto-rail at <=900px.
   const [navCollapsed, setNavCollapsed] = useState(() => { try { return localStorage.getItem('msrv_nav_collapsed') === '1'; } catch { return false; } });
-  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
+  const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1024px)').matches);
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 900px)');
+    const mq = window.matchMedia('(max-width: 1024px)');
     const on = () => setNarrow(mq.matches);
     mq.addEventListener('change', on);
     return () => mq.removeEventListener('change', on);

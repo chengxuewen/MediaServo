@@ -39,7 +39,8 @@ test.describe('V3 rail cards + drag + drawer', () => {
   });
 
   test('narrow drawer mutual exclusion + pin visible', async ({ page }) => {
-    await page.setViewportSize({ width: 900, height: 800 });
+    // V28: 3 columns stay docked down to 768px; drawers only below that.
+    await page.setViewportSize({ width: 700, height: 800 });
     await page.goto('/');
     // narrow defaults both closed; open left -> pin visible (pin lives in the rail head)
     await page.locator('.region-toggles [aria-label="Toggle stream rail"]').click();

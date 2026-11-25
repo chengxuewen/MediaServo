@@ -29,19 +29,36 @@ test.describe('pixel alignment (rendered ink)', () => {
     expect(Math.abs(left.bottom - right.bottom)).toBeLessThanOrEqual(1);
   });
 
-  test('narrow viewport keeps the wall visible (rails become drawers)', async ({ page }) => {
-    await page.setViewportSize({ width: 900, height: 860 }); // < 1024 -> drawer mode
+  test('900px stays 3 docked columns (rails not overlaying the page)', async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 860 });
     await page.goto('/?demo=1');
     const toolbar = page.locator('.wall-toolbar');
     const grid = page.locator('.wall-grid');
     await expect(toolbar).toBeVisible();
-    await expect(grid).toBeVisible();
+    // V28: rails dock inside the monitor area down to 768px (prototype behaviour).
+    await expect(page.locator('.stream-rail')).toBeVisible();
+    await expect(page.locator('.mon-alerts')).toBeVisible();
+    const rail = (await page.locator('.stream-rail').boundingBox())!;
+    const alerts = (await page.locator('.mon-alerts').boundingBox())!;
     const tb = (await toolbar.boundingBox())!;
     const gb = (await grid.boundingBox())!;
-    expect(tb.width).toBeGreaterThan(300); // canvas not collapsed into a 0-width track
-    expect(gb.width).toBeGreaterThan(300);
+    // docked columns share the toolbar's top; the wall sits between them
+    expect(Math.abs(rail.y - tb.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs(alerts.y - tb.y)).toBeLessThanOrEqual(2);
+    expect(tb.width).toBeGreaterThan(250);
+    expect(gb.width).toBeGreaterThan(200);
     expect(gb.height).toBeGreaterThan(200);
-    // drawers start closed on narrow (a stored desktop state must not cover the wall)
+    // rails are in-flow columns, not overlays: the wall starts right of the rail
+    expect(Math.round(gb.x)).toBeGreaterThanOrEqual(Math.round(rail.x + rail.width));
+  });
+
+  test('below 768px the wall is visible and drawers start closed', async ({ page }) => {
+    await page.setViewportSize({ width: 700, height: 860 });
+    await page.goto('/?demo=1');
+    const grid = page.locator('.wall-grid');
+    await expect(page.locator('.wall-toolbar')).toBeVisible();
+    await expect(grid).toBeVisible();
+    expect((await grid.boundingBox())!.width).toBeGreaterThan(300);
     await expect(page.locator('.stream-rail')).toBeHidden();
     await expect(page.locator('.mon-alerts')).toBeHidden();
   });

@@ -37,7 +37,7 @@
 .mh-note { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); margin: 0; }
 
 /* Three-panel: left stream rail | center canvas (wall) | right alerts */
-.monitor-three-panel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0; align-items: stretch; flex: 1; min-height: 0; }
+.monitor-three-panel { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0; align-items: stretch; flex: 1; min-height: 0; }
 .stream-rail, .mon-alerts { background: var(--ms-color-surface); overflow: hidden; transition: width .18s; display: flex; flex-direction: column; }
 .stream-rail { border: 0; border-right: 1px solid var(--ms-color-border); border-radius: 0; }
 /* V12: pin each panel to its own grid column. Without this, hiding a rail makes the
@@ -107,15 +107,20 @@
 .rail-pinmsg { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); padding: var(--ms-space-1) 0; }
 
 /* V3 (L5): mid-width narrows the rails. */
+/* V28: keep 3 docked columns down to 768px (prototype) by narrowing the rails. */
 @media (min-width: 1024px) and (max-width: 1500px) {
   .stream-rail { width: 210px; }
   .mon-alerts { width: 260px; }
 }
+@media (min-width: 768px) and (max-width: 1100px) {
+  .stream-rail { width: 190px; }
+  .mon-alerts { width: 230px; }
+}
 /* V3 (L5): narrow = overlay drawers + pin; mutual exclusion handled in toggleRegion. */
-@media (max-width: 1023px) {
+@media (max-width: 767px) {
   .monitor-three-panel { grid-template-columns: 1fr; }
   /* V9f (2): drawers start BELOW the stage-bar so the top-left region toggles stay visible. */
-  .stream-rail, .mon-alerts { position: fixed; top: 128px; bottom: 0; z-index: 30; width: min(248px, 82vw); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
+  .stream-rail, .mon-alerts { position: absolute; top: 60px; /* below the 52px stage-bar so its toggles stay clickable */ bottom: 0; z-index: 30; width: min(248px, 82%); box-shadow: 0 8px 30px rgba(0,0,0,.45); }
   .stream-rail { left: 0; }
   .mon-alerts { right: 0; width: min(300px, 86vw); }
   .stream-rail.collapsed, .mon-alerts.collapsed { display: none; }

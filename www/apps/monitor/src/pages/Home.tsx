@@ -54,7 +54,7 @@ function loadLayout(): string {
 function loadRegions() {
   // V3 (L5): narrow defaults to both drawers CLOSED (prototype), so they don't cover
   // the topbar; wide defaults open. Stored preference wins when present.
-  const narrow = window.matchMedia('(max-width: 1023px)').matches;
+  const narrow = window.matchMedia('(max-width: 767px)').matches;
   // V27: on narrow screens a stored desktop state must NOT reopen both drawers at once
   // (they float over the wall and hide it). Narrow always starts closed; the stage-bar
   // toggles stay mutually exclusive.
@@ -146,7 +146,7 @@ export default function Home() {
   const toggleRegion = (k: 'left' | 'right' | 'bottom') => setRegions((prev) => {
     const next = { ...prev, [k]: !prev[k] };
     // V3 (L5): narrow overlay-drawer mutual exclusion — opening one side closes the other.
-    if (window.matchMedia('(max-width: 1023px)').matches) {
+    if (window.matchMedia('(max-width: 767px)').matches) {
       if (k === 'left' && next.left) next.right = false;
       if (k === 'right' && next.right) next.left = false;
     }

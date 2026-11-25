@@ -126,7 +126,7 @@
 .main.nav-min .nav-title, .main.nav-min .nav-label, .main.nav-min .nav-badge, .main.nav-min .nav-group-label, .main.nav-min .nav-foot span { display: none; }
 .main.nav-min .nav-head { justify-content: center; padding-inline: 0; }
 .main.nav-min .nav-item { justify-content: center; padding-inline: 0; }
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .sidebar { width: 58px; }
   .nav-title, .nav-label, .nav-badge, .nav-group-label, .nav-foot span { display: none; }
   .nav-head, .nav-item { justify-content: center; }
