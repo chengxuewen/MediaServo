@@ -40,6 +40,10 @@ test.describe('wall empty-slot parity', () => {
     const b = (await ic.boundingBox())!;
     expect(Math.round(b.width)).toBe(14);
     expect(Math.round(b.height)).toBe(14);
+    // V37: prototype #i-grid is stroked, four 7px squares on a 24 grid
+    expect(await style(page, '.te-ic', 'fill')).toBe('none');
+    expect(await style(page, '.te-ic', 'stroke-width')).toBe('1.8px');
+    expect(await ic.locator('rect').count()).toBe(4);
   });
 
   test('wall grid gap is 12px (prototype .tiles)', async ({ page }) => {

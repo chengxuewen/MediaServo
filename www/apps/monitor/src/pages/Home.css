@@ -183,7 +183,8 @@
   color: var(--ms-color-text-tertiary);
   font-size: 11px; font-family: var(--ms-font-family-mono); letter-spacing: .2px;
 }
-.te-ic { width: 14px; height: 14px; fill: currentColor; opacity: .9; }
+/* V37: prototype #i-grid is a STROKED glyph (not filled). */
+.te-ic { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; opacity: .9; }
 /* V6 (I3): elastic column-weight drag handles. */
 .col-handle { position: absolute; top: 0; bottom: 0; width: 12px; margin-left: -6px; cursor: col-resize; z-index: 14; }
 .col-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: var(--ms-color-accent); opacity: 0; transition: opacity .12s; }

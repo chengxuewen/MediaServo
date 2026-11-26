@@ -78,4 +78,19 @@ test.describe('live tile chrome', () => {
     await page.locator('.wall-grid .video-player.nvr').first().hover();
     await expect.poll(async () => style(page, '.video-player.nvr .vp-mini-stats', 'opacity')).toBe('1');
   });
+
+  test('action glyphs are the prototype symbols (verbatim paths, stroked 1.8)', async ({ page }) => {
+    const zoom = await page.locator('.wall-grid .video-player.nvr [aria-label="Zoom this stream"] path').first().getAttribute('d');
+    const del = await page.locator('.wall-grid .video-player.nvr [aria-label="Remove from wall"] path').first().getAttribute('d');
+    expect(zoom).toBe('M9 3H3v6M15 3h6v6M21 15v6h-6M3 15v6h6'); // #i-zoom
+    expect(del).toBe('M6 6l12 12M18 6L6 18'); // #i-close
+    expect(await style(page, '.video-player.nvr .tile-btn .ic', 'stroke-width')).toBe('1.8px');
+    expect(await style(page, '.video-player.nvr .tile-btn .ic', 'fill')).toBe('none');
+    // the 2x2 button only exists in elastic layouts; switch to Custom to check #i-resize
+    await page.locator('.layout-menu').click();
+    await page.getByRole('option', { name: 'Custom', exact: true }).click();
+    await page.locator('.wall-grid .video-player.nvr').first().hover();
+    const span = await page.locator('.wall-grid .video-player.nvr [aria-label="Enlarge to 2×2"] path').first().getAttribute('d');
+    expect(span).toBe('M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7'); // #i-resize
+  });
 });

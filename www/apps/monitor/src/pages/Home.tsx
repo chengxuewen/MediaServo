@@ -433,7 +433,7 @@ export default function Home() {
                   <div className="tile-empty" key={`empty-${i}`} style={cellStyle(visible.length + i)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => { e.preventDefault(); dropToWall(e.dataTransfer.getData('text/plain'), visible.length + i); }}>
-                    <svg className="te-ic" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1" /><rect x="9" y="1" width="6" height="6" rx="1" /><rect x="1" y="9" width="6" height="6" rx="1" /><rect x="9" y="9" width="6" height="6" rx="1" /></svg>
+                    <svg className="te-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></svg>
                     <span>Empty slot</span>
                   </div>
                 ))}

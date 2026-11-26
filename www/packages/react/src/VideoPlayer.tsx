@@ -3,7 +3,17 @@ import { createPortal } from 'react-dom';
 import { SfuConsumerClient, type StreamMetrics } from '@mediaservo/client';
 import { Modal } from './Modal';
 import './VideoPlayer.css';
-import { X, VolumeX, Volume2, Pause, Maximize, Maximize2, ZoomIn, Zap, Package, Clapperboard } from 'lucide-react';
+import { X, VolumeX, Volume2, Pause, Maximize, Zap, Package, Clapperboard } from 'lucide-react';
+
+// V37: tile action glyphs copied verbatim from portal-unified.html symbols so the
+// icons match the prototype exactly (lucide approximations were wrong).
+// .ic { stroke: currentColor; fill: none; stroke-width: 1.8; round caps/joins }
+const ICON_RESIZE = 'M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7'; // #i-resize (2x2 span)
+const ICON_ZOOM = 'M9 3H3v6M15 3h6v6M21 15v6h-6M3 15v6h6'; // #i-zoom
+const ICON_CLOSE = 'M6 6l12 12M18 6L6 18'; // #i-close
+const TileIcon = ({ d }: { d: string }) => (
+  <svg className="ic" viewBox="0 0 24 24" aria-hidden="true"><path d={d} /></svg>
+);
 
 // P3 slice ③a (admin-prototype-restyle): extracted verbatim from apps/admin
 // components/VideoPlayer.tsx so admin + monitor share ONE player (reuse-first).
@@ -224,9 +234,9 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           )}
           {nvr && isTile && (
             <div className="tile-actions">
-              {onSpan && <button className={`tile-btn size-b${spanned ? ' on' : ''}`} title={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-label={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-pressed={spanned} onClick={(e) => { e.stopPropagation(); onSpan(); }}><Maximize2 size={12} /></button>}
-              {onZoom && <button className="tile-btn zoom-b" title="Zoom this stream" aria-label="Zoom this stream" onClick={(e) => { e.stopPropagation(); onZoom(); }}><ZoomIn size={12} /></button>}
-              {onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><X size={12} /></button>}
+              {onSpan && <button className={`tile-btn size-b${spanned ? ' on' : ''}`} title={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-label={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-pressed={spanned} onClick={(e) => { e.stopPropagation(); onSpan(); }}><TileIcon d={ICON_RESIZE} /></button>}
+              {onZoom && <button className="tile-btn zoom-b" title="Zoom this stream" aria-label="Zoom this stream" onClick={(e) => { e.stopPropagation(); onZoom(); }}><TileIcon d={ICON_ZOOM} /></button>}
+              {onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><TileIcon d={ICON_CLOSE} /></button>}
             </div>
           )}
           {nvr && isTile && (
