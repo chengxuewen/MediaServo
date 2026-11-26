@@ -55,13 +55,9 @@ test.describe('live tile chrome', () => {
     expect(await style(page, '.video-player.nvr .tile-actions', 'gap')).toBe('6px');
   });
 
-  test('status glyph is 12x12 and green on a playing tile', async ({ page }) => {
-    const g = page.locator('.video-player.nvr .tile-glyph.online').first();
-    await expect(g).toBeAttached();
-    const b = await g.boundingBox();
-    expect(Math.round(b!.width)).toBe(12);
-    expect(Math.round(b!.height)).toBe(12);
-    expect(await style(page, '.video-player.nvr .tile-glyph.online', 'background-color')).toContain('31, 157, 85');
+  test('no status glyph in the bar — the LIVE badge is the single indicator (V41)', async ({ page }) => {
+    await expect(page.locator('.video-player.nvr .tile-glyph')).toHaveCount(0);
+    await expect(page.locator('.video-player.nvr .tile-live.live').first()).toBeVisible();
   });
 
   test('LIVE badge 11px/600 2px-6px r2; degraded tile has a dashed border', async ({ page }) => {

@@ -221,12 +221,6 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           {nvr && isTile && (
             <span className="tile-drift" aria-hidden="true">{driftMs == null ? '' : `${driftMs >= 0 ? '+' : ''}${driftMs} ms`}</span>
           )}
-          {nvr && isTile && !zoomed && (
-            <span className={`tile-glyph ${degraded ? 'warn' : isDisconnected ? 'offline' : (simulated || status === 'playing') ? 'online' : ''}`} aria-hidden="true" />
-          )}
-          {!isTile && metrics && !isDisconnected && (
-            <span className="vp-bitrate">{metrics.resolution} · {Math.round(metrics.bitrate)}Kbps</span>
-          )}
           {/* V36: the single action cluster lives top-right (.tile-actions), as in the
               prototype — no duplicate close in the bar. */}
         </div>

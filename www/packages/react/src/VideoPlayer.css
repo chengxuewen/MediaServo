@@ -137,6 +137,9 @@
 .video-player.nvr .tile-btn { width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.22); background: rgba(0,0,0,.55); color: rgba(255,255,255,.85); border-radius: 4px; cursor: pointer; }
 .video-player.nvr .tile-btn:hover { background: rgba(0,0,0,.8); color: #fff; }
 .video-player.nvr .tile-btn.tile-del:hover { background: rgba(200,45,45,.9); color: #fff; }
+/* V41: no status marker in the NVR bar at all — the bottom-left LIVE badge is the
+   single indicator (the legacy base-player dot is hidden for nvr tiles). */
+.video-player.nvr .vp-status-dot { display: none; }
 /* V39: prototype .tile-drift — amber mono, right before the status glyph. */
 .video-player.nvr .tile-drift { font-family: var(--ms-font-family-mono); font-size: 11px; color: var(--ms-color-warning); flex: none; }
 /* V37: prototype .ic — stroked glyph, 12px inside the 22px button. */
@@ -145,7 +148,6 @@
 .video-player.nvr .tile-btn.on { border-color: var(--ms-color-accent); color: var(--ms-color-accent); }
 /* V8: degraded amber dashed border + signal-bars glyph; center idle codec text. */
 .video-player.nvr.degraded { border: 1px dashed var(--ms-color-warning); }
-.video-player.nvr .tile-glyph { margin-left: auto; color: var(--ms-color-warning); font-size: 10px; letter-spacing: 1px; }
 .video-player.nvr .tile-idle { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: rgba(255,255,255,.45); font-family: var(--ms-font-family-mono); font-size: 11px; letter-spacing: 1px; pointer-events: none; }
 /* V6 (I4): region drag-box zoom + double-click reset. */
 .video-player.nvr .vp-body { cursor: crosshair; }
@@ -205,18 +207,6 @@
   white-space: nowrap; display: block; -webkit-line-clamp: unset;
 }
 
-.video-player.nvr .tile-glyph { width: 12px; height: 12px; flex: none; position: relative; display: inline-block; }
-.video-player.nvr .tile-glyph.online { border-radius: 50%; background: var(--ms-color-success); }
-.video-player.nvr .tile-glyph.offline { border-radius: 50%; border: 2px solid var(--ms-palette-video-ok); }
-.video-player.nvr .tile-glyph.offline::after {
-  content: ''; position: absolute; left: -1px; top: 4px; width: 12px; height: 2px;
-  background: var(--ms-palette-video-ok); transform: rotate(-45deg);
-}
-.video-player.nvr .tile-glyph.warn {
-  width: 0; height: 0; background: none;
-  border-left: 6px solid transparent; border-right: 6px solid transparent;
-  border-bottom: 11px solid var(--ms-color-warning);
-}
 
 .video-player.nvr .tile-live {
   left: 6px; bottom: 6px; font-size: 11px; font-weight: 600; letter-spacing: normal;
