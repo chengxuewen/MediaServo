@@ -49,8 +49,8 @@ test.describe('Monitor finishing (B6)', () => {
     await expect(page.locator('.wall-grid .video-player')).toHaveCount(1, { timeout: 15000 });
     await page.locator('.wall-grid .video-player').first().hover();
     await page.locator('.tile-actions [aria-label="Zoom this stream"]').click();
-    await expect(page.locator('.wt-exit-zoom')).toBeVisible();
+    await expect(page.locator('.wall-grid [aria-label="Exit zoom"]')).toBeVisible(); // V38
     await page.keyboard.press('Escape');
-    await expect(page.locator('.wt-exit-zoom')).toHaveCount(0);
+    await expect(page.locator('.wall-grid [aria-label="Exit zoom"]')).toHaveCount(0);
   });
 });

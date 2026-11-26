@@ -139,7 +139,7 @@ export default function Home() {
     setBarH(Math.round(el.getBoundingClientRect().height));
     return () => ro.disconnect();
   }, []);
-  const [statsVisible, setStatsVisible] = useState(true);
+  const [statsVisible, setStatsVisible] = useState(false); // V38: prototype default = hover-only; the toggle pins it on
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [playHint, setPlayHint] = useState('');
   const [pendingPlay, setPendingPlay] = useState<{ room: string; ids: string[] } | null>(null);
@@ -386,7 +386,6 @@ export default function Home() {
                     {[degraded > 0 ? `${degraded} degraded` : '', offline > 0 ? `${offline} offline` : ''].filter(Boolean).join(' · ')}
                   </button>
                 )}
-                {zoomedId && <button className="wt-exit-zoom" onClick={() => setZoomedId(null)}>Exit zoom</button>}
                 {playHint && <span className="wt-hint" role="status">{playHint}</span>}
                 <span className="live-chip" title="Live"><span className="live-dot" aria-hidden="true" />LIVE</span>
                 <span className="live-clock">{clock.toLocaleTimeString('en-GB', { hour12: false })}</span>
@@ -396,7 +395,7 @@ export default function Home() {
                 {/* V20: no Demo / theme buttons on the wall toolbar (prototype right = sync/stats). */}
           </div>
           <div className="wall-wrap">
-              <div className={`wall-grid${statsVisible ? '' : ' stats-hidden'}`} style={gridStyle}>
+              <div className={`wall-grid${statsVisible ? ' stats-on' : ''}`} style={gridStyle}>
                 {visible.map((id, idx) => {
                   const p = byId.get(id);
                   if (!p) return (
@@ -416,7 +415,8 @@ export default function Home() {
                         token={getToken() ?? ''}
                         variant="tile"
                         nvr
-                        onZoom={() => setZoomedId(id)}
+                        onZoom={() => setZoomedId((prev) => (prev === id ? null : id))}
+                        zoomed={zoomedId === id}
                         onRemove={() => closeTile(id)}
                         onSpan={layout.elastic ? () => toggleSpan(id) : undefined}
                         spanned={!!tileSpans[id]}

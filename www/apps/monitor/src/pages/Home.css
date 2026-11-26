@@ -143,7 +143,6 @@
 .layout-menu .lm-label { color: var(--ms-color-text-tertiary); }
 .layout-menu .lm-value { font-weight: 600; font-family: var(--ms-font-family-mono); }
 .layout-menu .lm-caret { margin-left: auto; color: var(--ms-color-text-tertiary); }
-.wt-exit-zoom { border: 1px solid var(--ms-color-accent); background: var(--ms-color-accent); color: var(--ms-color-text-inverse); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
 .wt-pager { display: flex; align-items: center; gap: var(--ms-space-1); }
 .wt-pager button { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 4px; cursor: pointer; }
 .wt-pager button:disabled { opacity: .45; cursor: default; }
@@ -154,7 +153,9 @@
 .wt-carousel.active { border-color: var(--ms-color-accent); color: var(--ms-color-text); }
 .global-stats-toggle { border: 1px solid var(--ms-color-border); background: var(--ms-color-surface); color: var(--ms-color-text-secondary); border-radius: var(--ms-radius-sm); padding: var(--ms-space-1) var(--ms-space-2); font-size: var(--ms-font-size-xs); cursor: pointer; }
 .global-stats-toggle.on { border-color: var(--ms-color-accent); color: var(--ms-color-text); }
-.wall-grid.stats-hidden .vp-mini-stats { display: none; }
+/* V38: prototype .tiles.show-stats — the toolbar toggle pins the stats card ON
+   (default stays hover-revealed, matching the prototype's default). */
+.wall-grid.stats-on .video-player.nvr .vp-mini-stats { opacity: 1; }
 /* B2: grid columns set inline per layout; min-tile (230px) horizontal-scroll on narrow. V2 gap 12. */
 /* V16: uniform rows — live tiles used to be taller than empty slots (top bar + 16:9
    body vs pure 16:9), so rows misaligned. Rows now share 1fr and every cell fills. */

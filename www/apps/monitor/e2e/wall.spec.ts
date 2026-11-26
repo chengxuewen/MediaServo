@@ -78,10 +78,10 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
 
     await page.locator('.wall-grid .video-player').first().hover();
     await page.locator('.tile-actions [aria-label="Zoom this stream"]').first().click();
-    await expect(page.locator('.wt-exit-zoom')).toBeVisible();
+    await expect(page.locator('.wall-grid [aria-label="Exit zoom"]')).toBeVisible(); // V38: exit lives on the tile
     const cols = await page.locator('.wall-grid').evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(' ').length);
     expect(cols).toBe(1);
-    await page.locator('.wt-exit-zoom').click();
-    await expect(page.locator('.wt-exit-zoom')).toHaveCount(0);
+    await page.locator('.wall-grid [aria-label="Exit zoom"]').click();
+    await expect(page.locator('.wall-grid [aria-label="Exit zoom"]')).toHaveCount(0);
   });
 });
