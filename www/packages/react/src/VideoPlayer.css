@@ -216,6 +216,7 @@
 
 .video-player.nvr .tile-idle { color: rgba(255, 255, 255, .26); letter-spacing: normal; }
 
-.video-player.nvr .vp-mini-stats { opacity: 0; transition: opacity .15s; }
-.video-player.nvr:hover .vp-mini-stats,
-.video-player.nvr .vp-mini-stats:focus-within { opacity: 1; }
+/* V42: the mini-stats card is OPT-IN ONLY — no hover reveal. It shows while the
+   toolbar stats toggle is on (.wall-grid.stats-on), like YouTube's "stats for nerds". */
+.video-player.nvr .vp-mini-stats { opacity: 0; transition: opacity .15s; pointer-events: none; }
+.wall-grid.stats-on .video-player.nvr .vp-mini-stats { opacity: 1; pointer-events: auto; }
