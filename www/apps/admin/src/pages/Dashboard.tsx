@@ -3,12 +3,10 @@ import type { CSSProperties } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDevices } from '../hooks/useDevices';
 import { useAdminWS } from '../hooks/useAdminWS';
-import { useAuth } from '../hooks/useAuth';
 import {
   getAdminDevices, getPendingDevices, listManagedRooms, getVehicleStatus, getAuditEvents,
 } from '../api/client';
 import type { AuditEventEntry, StatusReport } from '../api/client';
-import { VideoPlayer } from '@mediaservo/react';
 import { fleetCounts } from '../fleet';
 import './Dashboard.css';
 import { RefreshCw } from 'lucide-react';
@@ -16,7 +14,8 @@ import { RefreshCw } from 'lucide-react';
 /**
  * Overview (admin-prototype-restyle W1): fleet health at a glance — the
  * prototype shape, not a resource counter. Six health stats + Fleet summary +
- * Alerts (last 24 h, audit ring) + Quick check (≤4 live tiles). The device
+ * Alerts (last 24 h, audit ring). V52: the Quick check mini-wall was removed to match
+ * the prototype overview. The device
  * long-list/playback wall relocated to Admin → Devices (ActiveDevices).
  *
  * Health derivation (real data, no new backend):
@@ -42,7 +41,6 @@ const ALERT_SEV: Record<string, 'danger' | 'warn'> = {
 
 const DAY_SECS = 24 * 3600;
 const ALERTS_SHOWN = 8;
-const QUICK_CAP = 4;
 
 interface Alert { sev: 'danger' | 'warn'; txt: string; time: string; ts: number; }
 
@@ -83,7 +81,6 @@ function toAlerts(events: AuditEventEntry[]): Alert[] {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
   const { devices, loading, error, refetch: refetchDevices } = useDevices();
   // aux faces: null = unknown (loading or failed) → render '—', never a fake 0
   const [registered, setRegistered] = useState<string[] | null>(null);
@@ -91,8 +88,6 @@ export default function Dashboard() {
   const [roomCount, setRoomCount] = useState<number | null>(null);
   const [reports, setReports] = useState<{ room_id: string; report: StatusReport }[] | null>(null);
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
-  // quick check: dismissed tiles stay dismissed; the next live stream fills in
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   const fetchAux = useCallback(() => {
     getAdminDevices().then((r) => setRegistered(r.devices.map((d) => d.device_id))).catch(() => setRegistered(null));
@@ -136,10 +131,6 @@ export default function Dashboard() {
     { k: 'Active alerts', v: alerts ? alerts.length : '—', d: 'last 24 h', c: 'var(--ms-color-warning)' },
   ];
 
-  const quick = devices
-    .flatMap((d) => d.streams.filter((s) => s.online).map((s) => ({ key: `${d.device_id}_${s.stream_id}`, deviceId: d.device_id, streamId: s.stream_id })))
-    .filter((q) => !dismissed.has(q.key))
-    .slice(0, QUICK_CAP);
 
   return (
     <div className="dashboard">
@@ -194,40 +185,8 @@ export default function Dashboard() {
           )}
         </div>
 
-        <div className="ov-card">
-          <div className="ov-card-title">Quick check <span className="ov-chip">≤4 tiles</span></div>
-          {quick.length === 0 ? (
-            <p className="ov-empty">No live streams</p>
-          ) : (
-            <div className="ov-quick">
-              {quick.map((q) => (
-                <VideoPlayer
-                  key={q.key}
-                  roomId={q.deviceId}
-                  streamLabel={q.streamId}
-                  serverUrl={wsServerUrl()}
-                  token={localStorage.getItem('mediaservo_admin_token') || ''}
-                  variant="tile"
-                  onClose={() => setDismissed((prev) => new Set(prev).add(q.key))}
-                />
-              ))}
-            </div>
-          )}
-          <p className="ov-note">
-            Full device wall lives in{' '}
-            {isAdmin ? (
-              <button className="ov-link" onClick={() => navigate('/admin', { state: { tab: 'devices' } })}>Admin → Devices</button>
-            ) : (
-              <span>Admin → Devices (admin access)</span>
-            )}.
-          </p>
-        </div>
+
       </div>
     </div>
   );
-}
-
-function wsServerUrl(): string {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}`;
 }

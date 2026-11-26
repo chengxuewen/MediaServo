@@ -47,14 +47,19 @@ test.describe('Overview health summary (W1 prototype parity)', () => {
     await expect(page.locator('.stats-card')).toHaveCount(0);
   });
 
-  test('fleet / alerts / quick-check cards render; no device table on overview', async ({ page }) => {
+  test('fleet / alerts cards render; NO quick-check card (prototype); no device table', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('.ov-fleet .ov-card-title')).toHaveText('Fleet');
     await expect(page.locator('.ov-fleet-summary')).toContainText('vehicles');
     await expect(page.getByRole('button', { name: 'Open fleet lens' })).toBeVisible();
     await expect(page.locator('.ov-card-title', { hasText: 'Alerts · last 24 h' })).toBeVisible();
-    await expect(page.locator('.ov-card-title', { hasText: 'Quick check' })).toBeVisible();
-    await expect(page.locator('.ov-chip')).toHaveText('≤4 tiles');
+    // V52: the prototype overview has no Quick check mini-wall — it must be gone
+    await expect(page.locator('.ov-card-title', { hasText: 'Quick check' })).toHaveCount(0);
+    await expect(page.locator('.ov-quick')).toHaveCount(0);
+    // and the Alerts card now spans the full row (prototype layout)
+    const alerts = (await page.locator('.ov-card', { hasText: 'Alerts · last 24 h' }).boundingBox())!;
+    const fleet = (await page.locator('.ov-fleet').boundingBox())!;
+    expect(Math.abs(alerts.width - fleet.width)).toBeLessThanOrEqual(2);
     // prototype overview does not list devices
     await expect(page.getByRole('heading', { name: 'Active Devices' })).toHaveCount(0);
     await expect(page.locator('.device-list')).toHaveCount(0);
