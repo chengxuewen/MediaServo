@@ -433,7 +433,7 @@ export default function Home() {
                 {visible.map((id, idx) => {
                   const p = byId.get(id);
                   if (!p) return (
-                    <div className="wall-offline" key={id} style={cellStyle(idx, id)}>
+                    <div className={`wall-offline${activeId === id ? ' selected' : ''}`} key={id} style={cellStyle(idx, id)} onClickCapture={() => setActiveId(id)}>
                       <span className="wo-title">SIGNAL LOST</span>
                       <span className="wo-reason">Producer left — stream ended or device offline</span>
                       <button className="wo-close" onClick={() => closeTile(id)}>Close</button>

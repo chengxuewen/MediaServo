@@ -100,4 +100,50 @@ test('rail selection highlights card + wall tile and locates it', async ({ page 
   // the rail card for THAT stream (wall order != rail order) is the selected one
   await expect(page.locator('.rail-card.selected .rc-name')).toHaveText(cellTitle);
 });
+
+// V48: prototype .stream-item — cards are sunken GREY by default; only the selected
+// card is accent-tinted with an accent border (being LIVE is not selection).
+test('rail cards default to grey; only the selected card is blue', async ({ page }) => {
+  await page.goto('/?demo=1');
+  const cards = page.locator('.rail-card');
+  await expect(cards.first()).toBeVisible();
+  const before = await cards.evaluateAll((els) => els.map((e) => {
+    const c = getComputedStyle(e);
+    return { bg: c.backgroundColor, bd: c.borderColor };
+  }));
+  for (const c of before) {
+    expect(c.bg).toBe('rgb(233, 237, 243)'); // --sunken
+    expect(c.bd).toBe('rgb(228, 232, 239)'); // --bd
+  }
+  await cards.nth(1).locator('.rc-name').click();
+  const sel = page.locator('.rail-card.selected');
+  await expect(sel).toHaveCount(1);
+  const cs = await sel.evaluate((e) => { const c = getComputedStyle(e); return { bg: c.backgroundColor, bd: c.borderColor }; });
+  expect(cs.bg).toBe('rgb(238, 241, 255)'); // --accent-tint
+  expect(cs.bd).toBe('rgb(67, 97, 238)'); // --accent
+  // the other cards stay grey
+  const others = await page.locator('.rail-card:not(.selected)').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+  for (const bg of others) expect(bg).toBe('rgb(233, 237, 243)');
+});
+
+// V48: selecting a card that lives on ANOTHER wall page flips to that page and the
+// selected tile is on screen (prototype gotoStream).
+test('selecting a stream on another page flips the pager and shows the tile', async ({ page }) => {
+  await page.goto('/?demo=1');
+  await page.locator('.layout-menu').click();
+  await page.getByRole('option', { name: '4', exact: true }).click();
+  await expect(page.locator('.wt-page')).toHaveText('1 / 2');
+  // the 6th card (index 5) is on page 2
+  await page.locator('.rail-card').nth(5).locator('.rc-name').click();
+  await expect(page.locator('.wt-page')).toHaveText('2 / 2');
+  const sel = page.locator('.wall-cell.selected, .wall-offline.selected');
+  await expect(sel).toHaveCount(1);
+  const box = (await sel.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
+  // back to a page-1 stream
+  await page.locator('.rail-card').nth(0).locator('.rc-name').click();
+  await expect(page.locator('.wt-page')).toHaveText('1 / 2');
+  await expect(page.locator('.wall-cell.selected, .wall-offline.selected')).toHaveCount(1);
+});
 });
