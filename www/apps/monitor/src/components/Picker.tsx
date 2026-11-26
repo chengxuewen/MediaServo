@@ -141,7 +141,7 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
           <div className="picker-chosen" aria-label="Chosen streams">
             {chosenView.length === 0 && <div className="picker-empty">Nothing selected yet.</div>}
             {chosenView.map(({ id, order, p }) => p && (
-              <div key={id} className="picker-chosen-item">
+              <div key={id} className="picker-chosen-item" title={`${p.room} · ${p.label ?? p.kind}`}>
                 <span className="pc-order">{order + 1}</span>
                 {/* V50: prototype .pick-row .pr-name = "<device> · <b>stream</b>" (device grey,
                     stream bold); .pr-st is the status DOT only (no text). */}

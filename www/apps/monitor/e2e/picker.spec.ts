@@ -99,4 +99,37 @@ test('selected rows read "<device> · <stream>" with a bold stream and a dot-onl
   expect(Math.round(btn.height)).toBe(24);
   expect(await rows.nth(0).locator('.pc-acts button').first().evaluate((e) => getComputedStyle(e).borderRadius)).toBe('4px');
 });
+
+// V51: long real device names must not ellipsize the stream ('gener…'). Same strategy
+// as the left rail: single line when it fits, WRAP when it does not.
+test('selected rows wrap long "<device> · <stream>" names instead of truncating', async ({ page }) => {
+  const streams = ['generator2', 'generator10'].map((label, i) => ({
+    room: 'stream-media-dev', owner: null, peer_id: `host-${i}`, role: 'producer', id: `L${i}`, kind: 'video', label,
+    byte_count: 1, packet_count: 1, score: 10, transport_id: `t${i}`, local_port: 1,
+    remote_ip: '127.0.0.1', remote_port: 1, rtp_packet_loss_sent: 0, rtp_packet_loss_received: 0,
+    available_outgoing_bitrate: null, available_incoming_bitrate: 1000000,
+  }));
+  await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams } }));
+  await page.goto('/');
+  await openPicker(page);
+  await page.locator('.picker-dev .pick-caret').first().click();
+  await page.locator('.picker-child').nth(0).click();
+  await page.locator('.picker-child').nth(1).click();
+
+  const rows = page.locator('.picker-chosen-item');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0).locator('.pc-stream')).toHaveText('generator2');
+  await expect(rows.nth(1).locator('.pc-stream')).toHaveText('generator10');
+  await expect(rows.nth(1)).toHaveAttribute('title', 'stream-media-dev · generator10');
+
+  const geo = await rows.evaluateAll((els) => els.map((e) => {
+    const n = e.querySelector('.pc-name')!;
+    return { sw: n.scrollWidth, cw: n.clientWidth, ws: getComputedStyle(n).whiteSpace, h: Math.round(e.getBoundingClientRect().height) };
+  }));
+  for (const g of geo) {
+    expect(g.ws).toBe('normal');            // wraps, never nowrap+ellipsis
+    expect(g.sw).toBeLessThanOrEqual(g.cw + 1); // nothing clipped
+    expect(g.h).toBeGreaterThanOrEqual(34); // row still readable
+  }
+});
 });
