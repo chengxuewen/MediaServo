@@ -221,4 +221,10 @@
 /* V47: selection parity — prototype .stream-item.active and .tile.selected */
 .rail-card { cursor: pointer; }
 .rail-card.selected { background: var(--ms-color-primary-soft); border-color: var(--ms-color-accent); }
-.wall-cell.selected, .wall-offline.selected { box-shadow: inset 0 0 0 2px var(--ms-color-accent); border-radius: 2px; }
+/* V49: prototype .tile.selected = a 2px accent BORDER around the tile. An inset
+   box-shadow on the grid cell was painted UNDER the tile's own background (invisible);
+   draw it as a top overlay pseudo-element instead (no layout shift, pointer-through). */
+.wall-cell.selected::after, .wall-offline.selected::after {
+  content: ''; position: absolute; inset: 0; z-index: 30; pointer-events: none;
+  border: 2px solid var(--ms-color-accent); border-radius: 2px;
+}
