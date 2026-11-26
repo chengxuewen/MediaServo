@@ -56,4 +56,24 @@ test.describe('wall empty-slot parity', () => {
     expect(heights.length).toBeGreaterThan(2);
     expect(Math.max(...heights) - Math.min(...heights)).toBeLessThanOrEqual(2);
   });
+
+// V54: prototype #wallScroll { padding: 16px } — the grid is inset 16px on ALL four
+// sides of the wall container (top used to be 0 while the others were 16).
+for (const vp of [{ width: 1600, height: 900 }, { width: 1280, height: 720 }] as const) {
+  test(`wall inset is 16px on all four sides @${vp.width}x${vp.height}`, async ({ page }) => {
+    await page.setViewportSize(vp);
+    await page.goto('/?demo=1');
+    await expect(page.locator('.wall-grid')).toBeVisible();
+    const inset = await page.evaluate(() => {
+      const w = document.querySelector('.wall-wrap')!.getBoundingClientRect();
+      const g = document.querySelector('.wall-grid')!.getBoundingClientRect();
+      return { top: Math.round(g.top - w.top), bottom: Math.round(w.bottom - g.bottom), left: Math.round(g.left - w.left), right: Math.round(w.right - g.right), pad: getComputedStyle(document.querySelector('.wall-wrap')!).padding };
+    });
+    expect(inset.pad).toBe('16px');
+    for (const k of ['top', 'bottom', 'left', 'right'] as const) expect(inset[k], k).toBe(16);
+    // V54: and the page must NOT scroll at this height (a tall nav used to stretch .main)
+    const sc = await page.evaluate(() => ({ sh: document.documentElement.scrollHeight, ih: window.innerHeight }));
+    expect(sc.sh).toBeLessThanOrEqual(sc.ih + 1);
+  });
+}
 });

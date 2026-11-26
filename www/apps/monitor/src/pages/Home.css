@@ -186,7 +186,9 @@
 .layout-gallery .ic.lo-check { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; margin: 0; color: var(--ms-color-accent); opacity: 0; }
 .lo-opt[aria-selected="true"] .ic.lo-check { opacity: 1; }
 .lo-sep { grid-column: 1 / -1; height: 1px; background: var(--ms-color-border); }
-.wall-wrap { position: relative; flex: 1; min-height: 0; padding: 0 16px 16px; }
+/* V54: prototype #wallScroll { padding: 16px } — uniform inset on ALL four sides (top
+   was 0, which made the wall hug the stage-bar while the other sides had 16). */
+.wall-wrap { position: relative; flex: 1; min-height: 0; padding: 16px; }
 /* V6 (K10): empty-slot parity for 25/36/custom under cap16. */
 /* V8: empty slots are part of the dark video island (prototype look), honest placeholders. */
 .tile-empty {
