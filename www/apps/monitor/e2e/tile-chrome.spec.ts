@@ -27,7 +27,7 @@ test.describe('live tile chrome', () => {
   test('top bar is an absolute gradient overlay that does not push the video down', async ({ page }) => {
     expect(await style(page, '.video-player.nvr .vp-top-bar', 'position')).toBe('absolute');
     expect(await style(page, '.video-player.nvr .vp-top-bar', 'background-image')).toContain('linear-gradient');
-    expect(await style(page, '.video-player.nvr .vp-top-bar', 'padding')).toBe('6px 34px 6px 8px');
+    expect(await style(page, '.video-player.nvr .vp-top-bar', 'padding')).toBe('6px 96px 6px 8px'); // room for 3 buttons
     expect(await style(page, '.video-player.nvr .vp-top-bar', 'font-size')).toBe('12px');
     expect(await style(page, '.video-player.nvr .vp-top-bar', 'color')).toBe('rgba(255, 255, 255, 0.84)');
     const tile = await box(page, '.wall-grid .video-player.nvr');
@@ -41,13 +41,18 @@ test.describe('live tile chrome', () => {
     expect(await style(page, '.video-player.nvr .vp-title', 'white-space')).toBe('nowrap');
     expect(await style(page, '.video-player.nvr .vp-title', 'text-shadow')).not.toBe('none');
 
-    const cb = await box(page, '.video-player.nvr .vp-close');
-    expect(Math.round(cb.width)).toBe(22);
-    expect(Math.round(cb.height)).toBe(22);
-    expect(await style(page, '.video-player.nvr .vp-close', 'border-radius')).toBe('4px');
-    expect(await style(page, '.video-player.nvr .vp-close', 'opacity')).toBe('0');
+    // V36: ONE action cluster top-right (2x2 / zoom / remove), hover-revealed
+    const cluster = page.locator('.wall-grid .video-player.nvr .tile-actions').first();
+    expect(await style(page, '.video-player.nvr .tile-actions', 'opacity')).toBe('0');
     await page.locator('.wall-grid .video-player.nvr').first().hover();
-    await expect.poll(async () => style(page, '.video-player.nvr .vp-close', 'opacity')).toBe('1');
+    await expect.poll(async () => style(page, '.video-player.nvr .tile-actions', 'opacity')).toBe('1');
+    await expect(cluster.getByRole('button', { name: 'Zoom this stream' })).toBeVisible();
+    await expect(cluster.getByRole('button', { name: 'Remove from wall' })).toBeVisible();
+    const btn = await box(page, '.video-player.nvr .tile-btn');
+    expect(Math.round(btn.width)).toBe(22);
+    expect(Math.round(btn.height)).toBe(22);
+    expect(await style(page, '.video-player.nvr .tile-btn', 'border-radius')).toBe('4px');
+    expect(await style(page, '.video-player.nvr .tile-actions', 'gap')).toBe('6px');
   });
 
   test('status glyph is 12x12 and green on a playing tile', async ({ page }) => {

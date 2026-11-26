@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { SfuConsumerClient, type StreamMetrics } from '@mediaservo/client';
 import { Modal } from './Modal';
 import './VideoPlayer.css';
-import { X, VolumeX, Volume2, Pause, Maximize, Zap, Package, Clapperboard } from 'lucide-react';
+import { X, VolumeX, Volume2, Pause, Maximize, Maximize2, ZoomIn, Zap, Package, Clapperboard } from 'lucide-react';
 
 // P3 slice ③a (admin-prototype-restyle): extracted verbatim from apps/admin
 // components/VideoPlayer.tsx so admin + monitor share ONE player (reuse-first).
@@ -209,7 +209,8 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           {!isTile && metrics && !isDisconnected && (
             <span className="vp-bitrate">{metrics.resolution} · {Math.round(metrics.bitrate)}Kbps</span>
           )}
-          <button className="vp-close" aria-label="Remove from grid" title="Remove from grid" onClick={onClose}><X size={14} /></button>
+          {/* V36: the single action cluster lives top-right (.tile-actions), as in the
+              prototype — no duplicate close in the bar. */}
         </div>
 
         {/* Video */}
@@ -223,8 +224,8 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           )}
           {nvr && isTile && (
             <div className="tile-actions">
-              {onSpan && <button className={`tile-btn${spanned ? ' on' : ''}`} title="Toggle 2x2 span" aria-label="Toggle 2x2 span" aria-pressed={spanned} onClick={(e) => { e.stopPropagation(); onSpan(); }}><Maximize size={12} /></button>}
-              {onZoom && <button className="tile-btn" title="Zoom this stream" aria-label="Zoom this stream" onClick={(e) => { e.stopPropagation(); onZoom(); }}><Maximize size={12} /></button>}
+              {onSpan && <button className={`tile-btn size-b${spanned ? ' on' : ''}`} title={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-label={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-pressed={spanned} onClick={(e) => { e.stopPropagation(); onSpan(); }}><Maximize2 size={12} /></button>}
+              {onZoom && <button className="tile-btn zoom-b" title="Zoom this stream" aria-label="Zoom this stream" onClick={(e) => { e.stopPropagation(); onZoom(); }}><ZoomIn size={12} /></button>}
               {onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><X size={12} /></button>}
             </div>
           )}

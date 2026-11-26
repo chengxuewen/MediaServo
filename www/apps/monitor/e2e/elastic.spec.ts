@@ -30,7 +30,7 @@ test.describe('V6 elastic/custom + region zoom', () => {
     await page.locator('.st-play-all').first().click();
     await pick(page, 'Custom');
     await page.locator('.wall-grid .video-player').first().hover();
-    await page.locator('[aria-label="Toggle 2x2 span"]').click();
+    await page.locator('[aria-label="Enlarge to 2×2"]').click(); // V36 label
     await expect(page.locator('.wall-cell').first()).toHaveCSS('grid-column-start', 'span 2');
   });
 

@@ -27,7 +27,9 @@ test.describe.serial('Monitor wall (S13, slice ③b)', () => {
     const tile = page.locator('.wall-grid .video-player');
     await expect(tile).toHaveCount(1, { timeout: 15000 });
 
-    await page.locator('.wall-grid .vp-close').first().click();
+    // V36: removal lives in the tile's hover action cluster
+    await page.locator('.wall-grid .video-player').first().hover();
+    await page.locator('.wall-grid .tile-del').first().click();
     await expect(tile).toHaveCount(0);
 
     await playAllFirst(page);
