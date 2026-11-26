@@ -220,3 +220,22 @@
    toolbar stats toggle is on (.wall-grid.stats-on), like YouTube's "stats for nerds". */
 .video-player.nvr .vp-mini-stats { opacity: 0; transition: opacity .15s; pointer-events: none; }
 .wall-grid.stats-on .video-player.nvr .vp-mini-stats { opacity: 1; pointer-events: auto; }
+/* V43: the centered idle line duplicates the card -> hide it while stats are on */
+.wall-grid.stats-on .video-player.nvr .tile-idle { opacity: 0; }
+
+/* V43: prototype .tile-stats — below the bar (never covers the title), translucent
+   scrim, 4-column grid of 8 pairs, mono 11px, keys 50% / values 95% white. */
+.video-player.nvr .vp-mini-stats {
+  left: 8px; top: 30px; z-index: 4;
+  max-width: calc(100% - 16px);
+  padding: 6px 9px 7px; border-radius: 4px;
+  background: rgba(8, 12, 20, .58);
+  border: 1px solid rgba(255, 255, 255, .08);
+  backdrop-filter: none;
+  font-family: var(--ms-font-family-mono); font-size: 11px; line-height: 1.35;
+}
+.video-player.nvr .ms-grid { display: grid; grid-template-columns: auto 40px auto 40px; column-gap: 8px; row-gap: 0; align-items: baseline; }
+.video-player.nvr .ms-cell { display: contents; }
+.video-player.nvr .ms-k { color: rgba(255, 255, 255, .5); }
+.video-player.nvr .ms-v { color: rgba(255, 255, 255, .95); text-align: right; white-space: nowrap; }
+.video-player.nvr .ms-empty { color: rgba(255, 255, 255, .45); }

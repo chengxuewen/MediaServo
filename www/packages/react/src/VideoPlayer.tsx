@@ -232,7 +232,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           {status === 'connecting' && !idleText && <div className="vp-status-msg">Connecting…</div>}
           {idleText && (simulated || status === 'connecting' || status === 'stalled') && <div className="tile-idle">{idleText}</div>}
           {isTile && (simulated || status === 'connected' || status === 'playing' || status === 'stalled') && (
-            <MiniStatsCard status={simulated ? 'playing' : status} metrics={metrics} onExpand={() => setShowStats(true)} />
+            <MiniStatsCard status={simulated ? 'playing' : status} metrics={metrics ?? (simulated ? SIMULATED_METRICS : null)} onExpand={() => setShowStats(true)} />
           )}
           {nvr && isTile && (
             <div className="tile-actions">
@@ -310,37 +310,49 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
   );
 }
 
+// Demo (labelled simulated preview) has no real getStats feed; give it a static,
+// clearly-simulated metrics object so the card renders its real 8-cell layout.
+const SIMULATED_METRICS: StreamMetrics = {
+  rtt: 12, packetLoss: 0, fps: 15, bitrate: 252, jitter: 7, resolution: '1920x1080',
+};
+
 function MiniStatsCard({ status, metrics, onExpand }: {
   status: ConnectionStatus; metrics: StreamMetrics | null; onExpand: () => void;
 }) {
-  // T1-a resolution: render as soon as connected, do not wait for the first getStats tick (2s); metrics null → placeholders.
-  // Product refinement (adopted 2026-09-01): the core six metrics stay resident in a 2x3 grid; codec/system details live in the large panel behind a second click.
-  const fmtKbps = (k: number) => (k >= 1000 ? `${(k / 1000).toFixed(1)}M` : `${Math.round(k)}K`);
+  // V43: prototype .tile-stats — a 4-column grid of 8 pairs (FPS/RES/BIT/JIT/LAT/RTT/
+  // DEC/LOSS), mono 11px, keys 50% white, values 95% white right-aligned. No "LIVE"
+  // header (the badge already carries state). DEC has no source yet -> '—'.
+  const fmtBit = (kbps: number) => (kbps >= 1000 ? `${(kbps / 1000).toFixed(1)}M` : `${Math.round(kbps)}k`);
+  const resShort = (r: string) => {
+    if (!r || r === 'unknown') return '—';
+    const mm = /(\d+)x(\d+)/i.exec(r);
+    if (!mm) return r;
+    return `${Number(mm[2])}p`;
+  };
   const live = status === 'playing';
-  const offline = status === 'stalled'; // F2: link alive but media not growing — not a red screen, degrade to a gray badge
+  const offline = status === 'stalled'; // link alive but media not growing — gray badge
   const cells: Array<[string, string]> | null = metrics && (live || offline)
     ? [
-        ['FPS', `${metrics.fps}fps`],
-        ['Resolution', metrics.resolution === 'unknown' ? '—' : metrics.resolution],
-        ['Bitrate', fmtKbps(metrics.bitrate)],
-        ['Jitter', `${metrics.jitter}ms`],
-        ['Latency', `${metrics.rtt}ms`],
-        ['Loss', `${metrics.packetLoss}%`],
+        ['FPS', `${metrics.fps}`],
+        ['RES', resShort(metrics.resolution)],
+        ['BIT', fmtBit(metrics.bitrate)],
+        ['JIT', `${metrics.jitter} ms`],
+        ['LAT', `${metrics.rtt} ms`],
+        ['RTT', `${metrics.rtt} ms`],
+        ['DEC', '—'],
+        ['LOSS', `${metrics.packetLoss}%`],
       ]
     : null;
   return (
     <div className="vp-mini-stats" onClick={(e) => { e.stopPropagation(); onExpand(); }} title={status === 'stalled' ? 'Source offline (waiting for the stream to recover or media stopped updating; click for details)' : 'Click for detailed stats'}>
-      <div className="ms-head">
-        <span className={`ms-dot ms-${status}`} />
-        <span>{live ? 'LIVE' : offline ? 'Source offline' : '…'}</span>
-        {!cells && <span className="ms-vals">Waiting for data…</span>}
-      </div>
-      {cells && (
+      {cells ? (
         <div className="ms-grid">
           {cells.map(([k, v]) => (
             <div key={k} className="ms-cell"><span className="ms-k">{k}</span><span className="ms-v">{v}</span></div>
           ))}
         </div>
+      ) : (
+        <div className="ms-empty">Waiting for data…</div>
       )}
     </div>
   );
