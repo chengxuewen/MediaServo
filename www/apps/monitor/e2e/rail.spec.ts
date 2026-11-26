@@ -79,6 +79,12 @@ test('rail selection highlights card + wall tile and locates it', async ({ page 
   await expect(page.locator('.rail-card.selected .rc-name')).toHaveText(second);
   const sel = page.locator('.wall-cell.selected');
   await expect(sel).toHaveCount(1);
+  // V49: live tile selection ring = top overlay 2px accent border
+  const liveRing = await sel.evaluate((e) => {
+    const a = getComputedStyle(e, '::after');
+    return `${a.borderTopWidth} ${a.borderTopStyle} ${a.borderTopColor} z=${a.zIndex}`;
+  });
+  expect(liveRing).toBe('2px solid rgb(67, 97, 238) z=30');
   const device = second.split(' · ')[0];
   await expect(sel.locator('.vp-title').first()).toContainText(device);
   // the selected tile is brought into the viewport
@@ -138,6 +144,16 @@ test('selecting a stream on another page flips the pager and shows the tile', as
   await expect(page.locator('.wt-page')).toHaveText('2 / 2');
   const sel = page.locator('.wall-cell.selected, .wall-offline.selected');
   await expect(sel).toHaveCount(1);
+  // V49: the ring is a TOP overlay (::after), not an inset shadow hidden under the tile
+  const ring = await sel.evaluate((e) => {
+    const a = getComputedStyle(e, '::after');
+    return { bw: a.borderTopWidth, bs: a.borderTopStyle, bc: a.borderTopColor, pos: a.position, z: parseInt(a.zIndex, 10) };
+  });
+  expect(ring.bw).toBe('2px');
+  expect(ring.bs).toBe('solid');
+  expect(ring.bc).toBe('rgb(67, 97, 238)');
+  expect(ring.pos).toBe('absolute');
+  expect(ring.z).toBeGreaterThanOrEqual(20);
   const box = (await sel.boundingBox())!;
   expect(box.y).toBeGreaterThanOrEqual(0);
   expect(box.y + box.height).toBeLessThanOrEqual(page.viewportSize()!.height + 1);
