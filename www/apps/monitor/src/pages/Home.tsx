@@ -10,7 +10,7 @@ import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
 import PlaybackBar from '../components/PlaybackBar';
 import { isDemo, DEMO_PRODUCERS, DEMO_PLAYING, DEMO_EVENTS, DEMO_OFFLINE_NAMES } from '../demo';
-import { PanelLeft, Bell, Rows3 } from 'lucide-react';
+
 import './Home.css';
 
 // Playback cap (browser soft-decode guard): 16 = a 4x4 grid scale (B5 contract).
@@ -18,6 +18,18 @@ const MAX_PLAYING = 16;
 const PLAY_ALL_CONFIRM = 8;
 const DROP_GRACE_MS = 6000;
 const REGION_KEY = 'mediaservo_monitor_regions';
+
+// V46: toolbar glyphs copied verbatim from portal-unified.html symbols so shapes and
+// sizes match the prototype (.ic = 15px, stroke currentColor, fill none, 1.8).
+const TbIcon = ({ children }: { children: React.ReactNode }) => (
+  <svg className="ic" viewBox="0 0 24 24" aria-hidden="true">{children}</svg>
+);
+const TB_PANEL_LEFT = <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>; // #i-panel-left
+const TB_PANEL_RIGHT = <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>; // #i-panel-right
+const TB_TIMELINE = <><rect x="3" y="14" width="18" height="6" rx="1" /><path d="M3 6h18M7 14v-3M12 14v-3M17 14v-3" /></>; // #i-timeline
+const TB_REFRESH = <><path d="M20 12a8 8 0 1 1-2.34-5.66" /><path d="M20 4v4h-4" /></>; // #i-refresh (carousel)
+const TB_SWAP = <path d="M16 3l4 4-4 4M20 7H4M8 21l-4-4 4-4M4 17h16" />; // #i-swap (sync)
+const TB_INFO = <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.5" /></>; // #i-info (stats)
 // B2 (R1): named-layout persistence uses a NEW key; migrate the legacy cols key.
 const LAYOUT_KEY = 'mediaservo_monitor_layout';
 const LEGACY_COLS_KEY = 'mediaservo_monitor_cols';
@@ -359,12 +371,12 @@ export default function Home() {
         <div className="canvas">
           <div className="wall-toolbar" ref={barRef}>
                 <div className="region-toggles">
-                  <button aria-pressed={regions.left} onClick={() => toggleRegion('left')} title="Toggle stream rail" aria-label="Toggle stream rail"><PanelLeft size={15} /></button>
+                  <button aria-pressed={regions.left} onClick={() => toggleRegion('left')} title="Toggle stream rail" aria-label="Toggle stream rail"><TbIcon>{TB_PANEL_LEFT}</TbIcon></button>
                   <button aria-pressed={regions.right} onClick={() => toggleRegion('right')} title="Toggle alert panel" aria-label="Toggle alert panel">
-                    <Bell size={15} />
+                    <TbIcon>{TB_PANEL_RIGHT}</TbIcon>
                     {alertCount > 0 && <span className="al-badge" aria-label={`${alertCount} alerts`}>{alertCount}</span>}
                   </button>
-                  <button aria-pressed={regions.bottom} onClick={() => toggleRegion('bottom')} title="Toggle playback bar" aria-label="Toggle playback bar"><Rows3 size={15} /></button>
+                  <button aria-pressed={regions.bottom} onClick={() => toggleRegion('bottom')} title="Toggle playback bar" aria-label="Toggle playback bar"><TbIcon>{TB_TIMELINE}</TbIcon></button>
                 </div>
                 <span className="wt-sep" aria-hidden="true" />
                 <div className="layout-combo">
@@ -379,7 +391,7 @@ export default function Home() {
                   <button onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={curPage === 0 || pages <= 1 || !!zoomedId} aria-label="Previous page">‹</button>
                   <span className="wt-page">{curPage + 1} / {pages}</span>
                   <button onClick={() => setPage((p) => Math.min(pages - 1, p + 1))} disabled={curPage >= pages - 1 || pages <= 1 || !!zoomedId} aria-label="Next page">›</button>
-                  <button className={`wt-carousel${carousel ? ' active' : ''}`} aria-pressed={carousel} onClick={() => setCarousel((c) => !c)} title="Carousel" aria-label="Carousel">⟳</button>
+                  <button className={`wt-carousel${carousel ? ' active' : ''}`} aria-pressed={carousel} onClick={() => setCarousel((c) => !c)} title="Carousel" aria-label="Carousel"><TbIcon>{TB_REFRESH}</TbIcon></button>
                 </div>
                 {(degraded > 0 || offline > 0) && (
                   <button className="health-chip warn" role="status" onClick={focusDegraded} title="Focus first problem stream">
@@ -391,8 +403,8 @@ export default function Home() {
                 <span className="live-chip" title="Live"><span className="live-dot" aria-hidden="true" />LIVE</span>
                 <span className="live-clock">{clock.toLocaleTimeString('en-GB', { hour12: false })}</span>
                 <span className="wt-spacer" />
-                <button className="iconbtn" aria-disabled="true" title="Drift sync display — deferred (RECORDING_READY=false)" aria-label="Sync (deferred)">⇄</button>
-                <button className={`global-stats-toggle iconbtn${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)} title="Stats" aria-label="Stats">ⓘ</button>
+                <button className="iconbtn" aria-disabled="true" title="Drift sync display — deferred (RECORDING_READY=false)" aria-label="Sync (deferred)"><TbIcon>{TB_SWAP}</TbIcon></button>
+                <button className={`global-stats-toggle iconbtn${statsVisible ? ' on' : ''}`} aria-pressed={statsVisible} onClick={() => setStatsVisible((s) => !s)} title="Stats" aria-label="Stats"><TbIcon>{TB_INFO}</TbIcon></button>
                 {/* V20: no Demo / theme buttons on the wall toolbar (prototype right = sync/stats). */}
           </div>
           <div className="wall-wrap">
