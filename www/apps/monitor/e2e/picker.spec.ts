@@ -66,4 +66,37 @@ test.describe.serial('Monitor picker (B3)', () => {
     await page.locator('.st-retry').first().click();
     await expect(page.locator('.st-stale')).toHaveCount(0, { timeout: 15000 });
   });
+
+// V50: the Selected pane rows follow the prototype .pick-row — "<device> · <b>stream</b>"
+// (device secondary ink, stream bold), a status DOT only (no text), 24x24 r4 actions.
+test('selected rows read "<device> · <stream>" with a bold stream and a dot-only status', async ({ page }) => {
+  const streams = Array.from({ length: 3 }, (_, i) => ({
+    room: 'cam-geo', owner: null, peer_id: `host-${i}`, role: 'producer', id: `g${i}`, kind: 'video', label: ['front', 'rear', 'cabin'][i],
+    byte_count: 1, packet_count: 1, score: 10, transport_id: `t${i}`, local_port: 1,
+    remote_ip: '127.0.0.1', remote_port: 1, rtp_packet_loss_sent: 0, rtp_packet_loss_received: 0,
+    available_outgoing_bitrate: null, available_incoming_bitrate: 1000000,
+  }));
+  await page.route('**/api/admin/sfu/stats', (r) => r.fulfill({ json: { streams } }));
+  await page.goto('/');
+  await openPicker(page);
+  await page.locator('.picker-dev .pick-caret').first().click();
+  await page.locator('.picker-child').nth(0).click();
+  await page.locator('.picker-child').nth(2).click();
+
+  const rows = page.locator('.picker-chosen-item');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0).locator('.pc-name')).toHaveText('cam-geo · front');
+  await expect(rows.nth(1).locator('.pc-name')).toHaveText('cam-geo · cabin');
+  const stream = rows.nth(0).locator('.pc-stream');
+  expect(await stream.evaluate((e) => getComputedStyle(e).fontWeight)).toBe('600');
+  // status is a dot only
+  const st = rows.nth(0).locator('.pick-status');
+  expect((await st.textContent())!.trim()).toBe('');
+  await expect(st.locator('.pick-dot')).toBeVisible();
+  // 24x24 r4 action buttons (prototype .pick-row .acts button)
+  const btn = (await rows.nth(0).locator('.pc-acts button').first().boundingBox())!;
+  expect(Math.round(btn.width)).toBe(24);
+  expect(Math.round(btn.height)).toBe(24);
+  expect(await rows.nth(0).locator('.pc-acts button').first().evaluate((e) => getComputedStyle(e).borderRadius)).toBe('4px');
+});
 });

@@ -46,10 +46,11 @@
 /* right selected rows */
 .picker-chosen-item { display: flex; align-items: center; gap: var(--ms-space-2); padding: 6px var(--ms-space-2); border: 1px solid var(--ms-color-border); border-radius: 6px; margin-bottom: var(--ms-space-1); font-size: var(--ms-font-size-sm); background: var(--ms-color-surface); }
 .pc-order { width: 18px; text-align: center; font-size: 11px; color: var(--ms-color-text-tertiary); font-variant-numeric: tabular-nums; }
-.pc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pc-sub { color: var(--ms-color-text-tertiary); }
+/* V50: prototype .pick-row .pr-name — device in secondary ink, stream name BOLD. */
+.pc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ms-color-text-secondary); font-size: 13px; }
+.pc-name .pc-stream { color: var(--ms-color-text); font-weight: 600; }
 .pc-acts { display: inline-flex; gap: 2px; }
-.pc-acts button { width: 22px; height: 22px; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 4px; cursor: pointer; font-size: 11px; line-height: 1; }
+.pc-acts button { width: 24px; height: 24px; border-radius: 4px; border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); color: var(--ms-color-text-secondary); border-radius: 4px; cursor: pointer; font-size: 11px; line-height: 1; }
 .pc-acts button:hover:not(:disabled) { border-color: var(--ms-color-accent); color: var(--ms-color-accent); }
 .pc-acts button:disabled { opacity: .35; cursor: default; }
 

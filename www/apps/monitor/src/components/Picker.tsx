@@ -143,8 +143,10 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
             {chosenView.map(({ id, order, p }) => p && (
               <div key={id} className="picker-chosen-item">
                 <span className="pc-order">{order + 1}</span>
-                <span className="pc-name">{p.room} · <span className="pc-sub">{p.kind}</span></span>
-                <span className={`pick-status ${statusOf(p.score)}`}><span className="pick-dot" aria-hidden="true" />{statusOf(p.score)}</span>
+                {/* V50: prototype .pick-row .pr-name = "<device> · <b>stream</b>" (device grey,
+                    stream bold); .pr-st is the status DOT only (no text). */}
+                <span className="pc-name">{p.room} · <b className="pc-stream">{p.label ?? p.kind}</b></span>
+                <span className={`pick-status ${statusOf(p.score)}`} role="img" aria-label={statusOf(p.score)}><span className="pick-dot" aria-hidden="true" /></span>
                 <span className="pc-acts">
                   <button onClick={() => move(chosen.indexOf(id), -1)} aria-label="Move up" disabled={order === 0}>↑</button>
                   <button onClick={() => move(chosen.indexOf(id), 1)} aria-label="Move down" disabled={order === chosen.length - 1}>↓</button>
