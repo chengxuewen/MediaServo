@@ -83,7 +83,7 @@
 /* V3 (L3/I1): on-wall stream cards — whole-row drag to reorder, × / drop-zone to remove. */
 .rail-cards { display: flex; flex-direction: column; gap: var(--ms-space-1); margin-bottom: var(--ms-space-2); }
 .rail-empty { font-size: var(--ms-font-size-xs); color: var(--ms-color-text-tertiary); padding: var(--ms-space-2); }
-.rail-card.active { border-color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
+.rail-card.live { border-color: var(--ms-color-accent); background: var(--ms-color-primary-soft); }
 .rc-glyph { width: 12px; height: 12px; flex: 0 0 auto; }
 .rc-glyph.live { background: var(--ms-color-success); border-radius: 50%; }
 .rc-glyph.degraded { background: repeating-linear-gradient(90deg, var(--ms-color-warning) 0 2px, transparent 2px 4px); }
@@ -215,3 +215,8 @@
 .canvas { container-type: inline-size; }
 .layout-menu, .wt-page { white-space: nowrap; }
 .wall-toolbar > * { flex: 0 0 auto; }
+
+/* V47: selection parity — prototype .stream-item.active and .tile.selected */
+.rail-card { cursor: pointer; }
+.rail-card.selected { background: var(--ms-color-primary-soft); border-color: var(--ms-color-accent); }
+.wall-cell.selected { box-shadow: inset 0 0 0 2px var(--ms-color-accent); border-radius: 2px; }

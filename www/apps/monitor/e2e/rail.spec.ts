@@ -63,4 +63,41 @@ test('rail card names show device and stream', async ({ page }) => {
     .filter((e) => e.scrollWidth > e.clientWidth + 1).length);
   expect(clipped).toBe(0);
 });
+
+// V47: selecting a rail card highlights it AND the matching wall tile (prototype
+// .stream-item.active / .tile.selected), pages/scrolls to it, and a wall tile click
+// selects back into the rail. Clicks target .rc-name (the card is draggable, so a
+// centre click can be swallowed by the drag gesture).
+test('rail selection highlights card + wall tile and locates it', async ({ page }) => {
+  await page.goto('/?demo=1');
+  const cards = page.locator('.rail-card');
+  await expect(cards.first()).toBeVisible();
+
+  const second = (await cards.nth(1).locator('.rc-name').textContent())!.trim();
+  await cards.nth(1).locator('.rc-name').click();
+  await expect(page.locator('.rail-card.selected')).toHaveCount(1);
+  await expect(page.locator('.rail-card.selected .rc-name')).toHaveText(second);
+  const sel = page.locator('.wall-cell.selected');
+  await expect(sel).toHaveCount(1);
+  const device = second.split(' · ')[0];
+  await expect(sel.locator('.vp-title').first()).toContainText(device);
+  // the selected tile is brought into the viewport
+  const box = (await sel.boundingBox())!;
+  const vh = page.viewportSize()!.height;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(vh + 1);
+
+  // selection moves when another card is clicked
+  const third = (await cards.nth(2).locator('.rc-name').textContent())!.trim();
+  await cards.nth(2).locator('.rc-name').click();
+  await expect(page.locator('.rail-card.selected .rc-name')).toHaveText(third);
+  await expect(page.locator('.rail-card.selected')).toHaveCount(1);
+
+  // clicking a wall tile selects the matching rail card
+  const cellTitle = (await page.locator('.wall-cell').nth(3).locator('.vp-title').first().textContent())!.trim();
+  await page.locator('.wall-cell').nth(3).locator('.vp-title').first().click();
+  await expect(page.locator('.rail-card.selected')).toHaveCount(1);
+  // the rail card for THAT stream (wall order != rail order) is the selected one
+  await expect(page.locator('.rail-card.selected .rc-name')).toHaveText(cellTitle);
+});
 });

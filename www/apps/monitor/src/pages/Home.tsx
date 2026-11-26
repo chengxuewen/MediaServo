@@ -151,7 +151,10 @@ export default function Home() {
     setBarH(Math.round(el.getBoundingClientRect().height));
     return () => ro.disconnect();
   }, []);
-  const [statsVisible, setStatsVisible] = useState(false); // V38: prototype default = hover-only; the toggle pins it on
+  const [statsVisible, setStatsVisible] = useState(false);
+  // V47: rail selection (prototype activeStream) — highlights the rail card AND the
+  // matching wall tile, paging/scrolling to it.
+  const [activeId, setActiveId] = useState<string | null>(null); // V38: prototype default = hover-only; the toggle pins it on
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [playHint, setPlayHint] = useState('');
   const [pendingPlay, setPendingPlay] = useState<{ room: string; ids: string[] } | null>(null);
@@ -314,6 +317,22 @@ export default function Home() {
     if (ids.length > PLAY_ALL_CONFIRM) { setPendingPlay({ room, ids }); return; }
     addPlaying(ids);
   };
+  // V47: selecting a rail card pages to the tile and scrolls it into view.
+  const selectFromRail = (id: string) => {
+    setActiveId(id);
+    const idx = playing.indexOf(id);
+    if (idx >= 0) {
+      const target = Math.floor(idx / layout.slots);
+      if (target !== curPage) setPage(target);
+    }
+    setZoomedId(null);
+  };
+  useEffect(() => {
+    if (!activeId) return;
+    const el = document.querySelector('.wall-cell.selected');
+    el?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }, [activeId, curPage]);
+
   const closeTile = (id: string) => {
     setPlaying((prev) => prev.filter((x) => x !== id));
     setModal((prev) => (prev?.producerId === id ? null : prev));
@@ -344,7 +363,9 @@ export default function Home() {
                 const p = byId.get(id);
                 const state = !p ? 'offline' : p.score < 8 ? 'degraded' : 'live';
                 return (
-                  <div key={id} className={`rail-card${state === 'live' ? ' active' : ''}`} draggable
+                  <div key={id} className={`rail-card${state === 'live' ? ' live' : ''}${activeId === id ? ' selected' : ''}`} draggable
+                    onClick={() => selectFromRail(id)} role="button" tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectFromRail(id); } }}
                     onDragStart={(e) => e.dataTransfer.setData('text/plain', id)}
                     onDragOver={(e) => e.preventDefault()}
                     onDrop={(e) => { e.preventDefault(); reorderPlaying(e.dataTransfer.getData('text/plain'), id); }}>
@@ -419,7 +440,7 @@ export default function Home() {
                     </div>
                   );
                   return (
-                    <div className="wall-cell" key={id} style={cellStyle(idx, id)}
+                    <div className={`wall-cell${activeId === id ? ' selected' : ''}`} key={id} style={cellStyle(idx, id)} onClickCapture={() => setActiveId(id)}
                       onDragOver={(e) => e.preventDefault()}
                       onDrop={(e) => { e.preventDefault(); dropToWall(e.dataTransfer.getData('text/plain'), idx); }}>
                       <VideoPlayer
