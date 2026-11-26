@@ -172,3 +172,57 @@
 .vp-modal-wide { width: min(92vw, 1240px); background: #111; border: none; }
 .vp-modal-wide .msr-modal__body { padding: 0; }
 .vp-modal-wide .video-player { width: 100%; box-shadow: none; }
+/* V35: NVR tile chrome = prototype .tile-bar / .tile-btn / .tile-live / .tile-idle.
+   The bar becomes an absolute gradient overlay (it used to be an opaque strip that
+   pushed the video down); the close button is a 22px translucent square revealed on
+   hover; a 12px status glyph (online dot / warn triangle / offline slash) sits at the
+   bar's right; the LIVE badge is 11px with a 2px radius; degraded is a dashed amber
+   border; the mini-stats card is hover-revealed like the prototype's .tile-stats. */
+.video-player.nvr .vp-top-bar {
+  position: absolute; left: 0; right: 0; top: 0; z-index: 6;
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 8px; padding-right: 34px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, .6), transparent);
+  font-size: 12px; color: rgba(255, 255, 255, .84);
+}
+.video-player.nvr .vp-top-bar.disconnected { background: linear-gradient(180deg, rgba(160, 30, 30, .85), transparent); }
+.video-player.nvr .vp-title {
+  font-size: 12px; font-weight: 600; line-height: 1.2;
+  color: rgba(255, 255, 255, .92);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, .8);
+  white-space: nowrap; display: block; -webkit-line-clamp: unset;
+}
+.video-player.nvr .vp-close {
+  width: 22px; height: 22px; padding: 0; border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, .22); background: rgba(0, 0, 0, .55);
+  color: rgba(255, 255, 255, .85); display: grid; place-items: center;
+  opacity: 0; transition: opacity .15s;
+}
+.video-player.nvr:hover .vp-close,
+.video-player.nvr .vp-close:focus-visible { opacity: 1; }
+.video-player.nvr .vp-close:hover { background: rgba(200, 45, 45, .9); color: #fff; }
+
+.video-player.nvr .tile-glyph { width: 12px; height: 12px; flex: none; position: relative; display: inline-block; }
+.video-player.nvr .tile-glyph.online { border-radius: 50%; background: var(--ms-color-success); }
+.video-player.nvr .tile-glyph.offline { border-radius: 50%; border: 2px solid var(--ms-palette-video-ok); }
+.video-player.nvr .tile-glyph.offline::after {
+  content: ''; position: absolute; left: -1px; top: 4px; width: 12px; height: 2px;
+  background: var(--ms-palette-video-ok); transform: rotate(-45deg);
+}
+.video-player.nvr .tile-glyph.warn {
+  width: 0; height: 0; background: none;
+  border-left: 6px solid transparent; border-right: 6px solid transparent;
+  border-bottom: 11px solid var(--ms-color-warning);
+}
+
+.video-player.nvr .tile-live {
+  left: 6px; bottom: 6px; font-size: 11px; font-weight: 600; letter-spacing: normal;
+  padding: 2px 6px; border-radius: 2px; display: flex; align-items: center; gap: 4px;
+}
+.video-player.nvr .tile-live.live { background: var(--ms-color-success); color: #04140c; }
+
+.video-player.nvr .tile-idle { color: rgba(255, 255, 255, .26); letter-spacing: normal; }
+
+.video-player.nvr .vp-mini-stats { opacity: 0; transition: opacity .15s; }
+.video-player.nvr:hover .vp-mini-stats,
+.video-player.nvr .vp-mini-stats:focus-within { opacity: 1; }

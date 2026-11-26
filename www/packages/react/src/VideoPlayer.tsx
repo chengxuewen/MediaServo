@@ -200,14 +200,16 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
         onMouseLeave={() => setShowControls(false)}
       >
         {/* Top bar */}
-        <div className="vp-top-bar" style={{ background: isDisconnected ? '#c0392b' : '#2c3e50' }}>
+        <div className={`vp-top-bar${isDisconnected ? ' disconnected' : ''}`}>
           <span className="vp-status-dot" style={{ background: statusColor }} />
           <span className="vp-title" title={streamLabel ? `${roomId} · ${streamLabel}` : roomId}>{streamLabel ? `${roomId} · ${streamLabel}` : roomId}</span>
-          {nvr && isTile && <span className="tile-glyph" aria-hidden="true">{degraded ? '▮▮▯' : isDisconnected ? '⊘' : ''}</span>}
+          {nvr && isTile && (
+            <span className={`tile-glyph ${degraded ? 'warn' : isDisconnected ? 'offline' : (simulated || status === 'playing') ? 'online' : ''}`} aria-hidden="true" />
+          )}
           {!isTile && metrics && !isDisconnected && (
             <span className="vp-bitrate">{metrics.resolution} · {Math.round(metrics.bitrate)}Kbps</span>
           )}
-          <button className="vp-close" onClick={onClose}><X size={14} /></button>
+          <button className="vp-close" aria-label="Remove from grid" title="Remove from grid" onClick={onClose}><X size={14} /></button>
         </div>
 
         {/* Video */}
