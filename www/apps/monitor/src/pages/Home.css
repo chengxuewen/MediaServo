@@ -100,7 +100,9 @@
 .st-retry:hover { background: var(--ms-color-surface-hover); }
 .rail-card { display: flex; align-items: center; gap: var(--ms-space-2); padding: var(--ms-space-2); border: 1px solid var(--ms-color-border); background: var(--ms-color-surface-muted); border-radius: 6px; cursor: grab; }
 .rail-card:active { cursor: grabbing; opacity: .6; }
-.rc-name { flex: 1; font-size: var(--ms-font-size-xs); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* V45: '<device> · <stream>' must stay READABLE in the narrow rail — wrap instead of
+   ellipsis (the old nowrap clipped every card to 'stream-media-dev · …'). */
+.rc-name { flex: 1; font-size: var(--ms-font-size-xs); font-weight: var(--ms-font-weight-semibold); color: var(--ms-color-text); white-space: normal; overflow-wrap: anywhere; line-height: 1.25; }
 .rc-del { opacity: 0; background: none; border: none; color: var(--ms-color-text-secondary); cursor: pointer; font-size: var(--ms-font-size-sm); line-height: 1; transition: opacity .12s; }
 .rail-card:hover .rc-del, .rail-card:focus-within .rc-del { opacity: 1; }
 .rc-del:hover { color: var(--ms-color-danger); }

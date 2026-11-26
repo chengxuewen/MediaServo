@@ -9,7 +9,7 @@ import { useAudit } from '../hooks/useAudit';
 import { useAdminWS } from '../hooks/useAdminWS';
 import { useAuth } from '../hooks/useAuth';
 import PlaybackBar from '../components/PlaybackBar';
-import { isDemo, DEMO_PRODUCERS, DEMO_PLAYING, DEMO_EVENTS } from '../demo';
+import { isDemo, DEMO_PRODUCERS, DEMO_PLAYING, DEMO_EVENTS, DEMO_OFFLINE_NAMES } from '../demo';
 import { PanelLeft, Bell, Rows3 } from 'lucide-react';
 import './Home.css';
 
@@ -338,7 +338,8 @@ export default function Home() {
                     onDrop={(e) => { e.preventDefault(); reorderPlaying(e.dataTransfer.getData('text/plain'), id); }}>
                     <span className={`rc-glyph ${state}`} aria-hidden="true" />
                     <span className="rc-main">
-                      <span className="rc-name">{p ? p.room : id}</span>
+                      {/* V45: prototype rail card = "<device> · <stream>" ( Produce.label ) */}
+                      <span className="rc-name" title={p ? `${p.room}${p.label ? ` · ${p.label}` : ''}` : (demo ? DEMO_OFFLINE_NAMES[id] ?? id : id)}>{p ? `${p.room}${p.label ? ` · ${p.label}` : ''}` : (demo ? DEMO_OFFLINE_NAMES[id] ?? id : id)}</span>
                       <span className="rc-sub">{p ? `${p.kind} · ${state}` : 'offline'}</span>
                     </span>
                     <button className="rc-del" onClick={() => closeTile(id)} aria-label={`Remove ${p?.room ?? id}`}>×</button>

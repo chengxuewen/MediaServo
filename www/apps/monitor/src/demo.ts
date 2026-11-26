@@ -28,6 +28,8 @@ export const DEMO_PRODUCERS: SfuStreamStatRow[] = [
 ];
 // d6 is on the wall but absent from producers -> SIGNAL LOST tile (prototype parity).
 export const DEMO_PLAYING = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6'];
+/** Demo-only display name for the offline tile (no producer row -> no label). */
+export const DEMO_OFFLINE_NAMES: Record<string, string> = { d6: 'VH-11 · cabin' };
 
 const now = Math.floor(Date.now() / 1000);
 export const DEMO_EVENTS: AuditEventEntry[] = [

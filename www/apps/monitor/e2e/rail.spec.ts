@@ -51,4 +51,16 @@ test.describe('V3 rail cards + drag + drawer', () => {
     await expect(page.locator('.mon-alerts')).toBeVisible();
     await expect(page.locator('.stream-rail')).toBeHidden();
   });
+
+// V45: rail cards show "<device> · <stream>" (the Produce.label), not just the room.
+test('rail card names show device and stream', async ({ page }) => {
+  await page.goto('/?demo=1');
+  const names = await page.locator('.rail-card .rc-name').allTextContents();
+  expect(names.length).toBeGreaterThan(2);
+  for (const n of names) expect(n).toMatch(/^VH-\d{2} · (front|rear|cabin)$/);
+  // and the full name is not clipped (no ellipsis) inside the narrow rail
+  const clipped = await page.evaluate(() => [...document.querySelectorAll('.rail-card .rc-name')]
+    .filter((e) => e.scrollWidth > e.clientWidth + 1).length);
+  expect(clipped).toBe(0);
+});
 });
