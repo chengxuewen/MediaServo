@@ -221,7 +221,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           {nvr && isTile && (
             <span className="tile-drift" aria-hidden="true">{driftMs == null ? '' : `${driftMs >= 0 ? '+' : ''}${driftMs} ms`}</span>
           )}
-          {nvr && isTile && (
+          {nvr && isTile && !zoomed && (
             <span className={`tile-glyph ${degraded ? 'warn' : isDisconnected ? 'offline' : (simulated || status === 'playing') ? 'online' : ''}`} aria-hidden="true" />
           )}
           {!isTile && metrics && !isDisconnected && (
@@ -247,7 +247,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
               )}
               {!zoomed && onSpan && <button className={`tile-btn size-b${spanned ? ' on' : ''}`} title={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-label={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-pressed={spanned} onClick={(e) => { e.stopPropagation(); onSpan(); }}><TileIcon d={ICON_RESIZE} /></button>}
               {!zoomed && onZoom && <button className="tile-btn zoom-b" title="Zoom this stream" aria-label="Zoom this stream" onClick={(e) => { e.stopPropagation(); onZoom(); }}><TileIcon d={ICON_ZOOM} /></button>}
-              {onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><TileIcon d={ICON_CLOSE} /></button>}
+              {!zoomed && onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><TileIcon d={ICON_CLOSE} /></button>}
             </div>
           )}
           {nvr && isTile && (

@@ -128,8 +128,12 @@
 /* V36: prototype .tile-actions — top-right cluster, hover-revealed, 22px buttons. */
 .video-player.nvr .tile-actions { position: absolute; top: 0; right: 4px; height: 28px; display: flex; align-items: center; gap: 6px; opacity: 0; transition: opacity .12s; z-index: 12; }
 .video-player.nvr:hover .tile-actions, .video-player.nvr:focus-within .tile-actions { opacity: 1; }
-/* V38: the zoomed tile keeps its single Exit-zoom button visible (prototype .tile.zoomed). */
+/* V38/V40: zoomed tile — one Exit-zoom button, always visible; prototype metrics
+   (.tile.zoomed .tile-btn 28x28, .ic 15px, bar padding-right 40). */
 .video-player.nvr.zoomed .tile-actions { opacity: 1; }
+.video-player.nvr.zoomed .tile-btn { width: 28px; height: 28px; }
+.video-player.nvr.zoomed .tile-btn .ic { width: 15px; height: 15px; }
+.video-player.nvr.zoomed .vp-top-bar { padding-right: 40px; }
 .video-player.nvr .tile-btn { width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.22); background: rgba(0,0,0,.55); color: rgba(255,255,255,.85); border-radius: 4px; cursor: pointer; }
 .video-player.nvr .tile-btn:hover { background: rgba(0,0,0,.8); color: #fff; }
 .video-player.nvr .tile-btn.tile-del:hover { background: rgba(200,45,45,.9); color: #fff; }

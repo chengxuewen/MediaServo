@@ -23,13 +23,20 @@ test.describe('zoom + stats toggle', () => {
 
     const zoomed = page.locator('.wall-grid .video-player.nvr.zoomed').first();
     await expect(zoomed).toBeVisible();
-    // V39: prototype zoomed = Exit zoom + remove (the 2x2 span button is gone)
-    await expect(zoomed.locator('.tile-actions .tile-btn')).toHaveCount(2);
+    // V40: prototype .tile.zoomed — ONE button (Exit zoom), no remove, no status glyph
+    await expect(zoomed.locator('.tile-actions .tile-btn')).toHaveCount(1);
     await expect(zoomed.getByRole('button', { name: 'Exit zoom' })).toBeVisible();
-    await expect(zoomed.getByRole('button', { name: 'Remove from wall' })).toBeVisible();
+    await expect(zoomed.getByRole('button', { name: 'Remove from wall' })).toHaveCount(0);
     await expect(zoomed.locator('[aria-label="Enlarge to 2×2"]')).toHaveCount(0);
-    // drift slot exists but stays empty (no backend value — never faked)
-    await expect(zoomed.locator('.tile-drift')).toHaveText('');
+    await expect(zoomed.locator('.tile-glyph')).toHaveCount(0); // no green dot when zoomed
+    await expect(zoomed.locator('.tile-drift')).toHaveText(''); // no fake drift
+    // prototype zoomed metrics: 28x28 button, 15px glyph, bar padding-right 40
+    const zb = await zoomed.getByRole('button', { name: 'Exit zoom' }).boundingBox();
+    expect(Math.round(zb!.width)).toBe(28);
+    expect(Math.round(zb!.height)).toBe(28);
+    const ic = await zoomed.locator('[aria-label="Exit zoom"] .ic').boundingBox();
+    expect(Math.round(ic!.width)).toBe(15);
+    expect(await style(page, '.video-player.nvr.zoomed .vp-top-bar', 'padding')).toBe('6px 40px 6px 8px');
     expect(await style(page, '.video-player.nvr.zoomed .tile-actions', 'opacity')).toBe('1');
     const d = await zoomed.locator('[aria-label="Exit zoom"] path').first().getAttribute('d');
     expect(d).toBe(ICON_ZOOM_OUT);
