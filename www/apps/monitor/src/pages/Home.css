@@ -172,7 +172,18 @@
 .wall-wrap { position: relative; flex: 1; min-height: 0; padding: 0 16px 16px; }
 /* V6 (K10): empty-slot parity for 25/36/custom under cap16. */
 /* V8: empty slots are part of the dark video island (prototype look), honest placeholders. */
-.tile-empty { display: flex; align-items: center; justify-content: center; height: 100%; border: 1px solid var(--ms-color-border); background: var(--ms-palette-video-bg); border-radius: 0; color: rgba(255,255,255,.35); font-size: var(--ms-font-size-xs); font-family: var(--ms-font-family-mono); letter-spacing: 1px; }
+.tile-empty {
+  /* V34: prototype .tile-empty — light sunken fill, DASHED strong border, r6,
+     2x2 grid glyph + label (was a dark video-bg block with plain text). */
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  height: 100%; min-height: 0;
+  border: 1px dashed var(--ms-color-border-strong);
+  border-radius: 6px;
+  background: var(--ms-color-surface-muted);
+  color: var(--ms-color-text-tertiary);
+  font-size: 11px; font-family: var(--ms-font-family-mono); letter-spacing: .2px;
+}
+.te-ic { width: 14px; height: 14px; fill: currentColor; opacity: .9; }
 /* V6 (I3): elastic column-weight drag handles. */
 .col-handle { position: absolute; top: 0; bottom: 0; width: 12px; margin-left: -6px; cursor: col-resize; z-index: 14; }
 .col-handle::after { content: ''; position: absolute; top: 0; bottom: 0; left: 5px; width: 2px; background: var(--ms-color-accent); opacity: 0; transition: opacity .12s; }

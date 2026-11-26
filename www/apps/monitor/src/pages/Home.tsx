@@ -432,7 +432,10 @@ export default function Home() {
                 {Array.from({ length: emptyCount }).map((_, i) => (
                   <div className="tile-empty" key={`empty-${i}`} style={cellStyle(visible.length + i)}
                     onDragOver={(e) => e.preventDefault()}
-                    onDrop={(e) => { e.preventDefault(); dropToWall(e.dataTransfer.getData('text/plain'), visible.length + i); }}>Empty slot</div>
+                    onDrop={(e) => { e.preventDefault(); dropToWall(e.dataTransfer.getData('text/plain'), visible.length + i); }}>
+                    <svg className="te-ic" viewBox="0 0 16 16" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1" /><rect x="9" y="1" width="6" height="6" rx="1" /><rect x="1" y="9" width="6" height="6" rx="1" /><rect x="9" y="9" width="6" height="6" rx="1" /></svg>
+                    <span>Empty slot</span>
+                  </div>
                 ))}
               </div>
               {layout.elastic && !zoomedId && colWeights.slice(0, -1).map((_, i) => {
