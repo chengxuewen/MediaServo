@@ -75,6 +75,9 @@ export interface SfuStreamStatRow {
   rtp_packet_loss_received: number | null;
   available_outgoing_bitrate: number | null;
   available_incoming_bitrate: number | null;
+  /** V44: business label the Host sent with Produce (producer rows only; the stream /
+   *  camera id). Absent when the producer was created without one. */
+  label?: string;
 }
 export interface SfuStatsListResponse { streams: SfuStreamStatRow[]; }
 

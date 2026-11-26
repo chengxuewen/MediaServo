@@ -119,7 +119,7 @@ export default function Picker({ producers, playing, onClose, onAdd, onPlay }: {
                         return (
                           <div key={p.id} className={`picker-child${on ? ' chosen' : ''}`} onClick={() => toggleStream(p.id)}>
                             <input type="checkbox" readOnly checked={on} tabIndex={-1} aria-hidden="true" />
-                            <span className="picker-child-name">{p.kind} · {p.peer_id}</span>
+                            <span className="picker-child-name">{p.label ?? `${p.kind} · ${p.peer_id}`}</span>
                             <span className={`pick-status ${s}`}><span className="pick-dot" aria-hidden="true" />{s}</span>
                           </div>
                         );

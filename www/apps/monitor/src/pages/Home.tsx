@@ -411,6 +411,7 @@ export default function Home() {
                       onDrop={(e) => { e.preventDefault(); dropToWall(e.dataTransfer.getData('text/plain'), idx); }}>
                       <VideoPlayer
                         roomId={p.room}
+                        streamLabel={p.label}
                         serverUrl={wsServerUrl()}
                         token={getToken() ?? ''}
                         variant="tile"

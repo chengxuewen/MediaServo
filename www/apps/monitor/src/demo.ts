@@ -10,19 +10,21 @@ export function isDemo(): boolean {
   } catch { return false; }
 }
 
-const row = (id: string, room: string, score: number, bit: number | null): SfuStreamStatRow => ({
-  room, owner: null, peer_id: 'demo-host', role: 'producer', id, kind: 'video',
+// V44: room = DEVICE name, label = CAMERA/stream name (what the real Host sends with
+// Produce.label). The tile title is "<device> · <camera>", as in the prototype.
+const row = (id: string, room: string, label: string, score: number, bit: number | null): SfuStreamStatRow => ({
+  room, label, owner: null, peer_id: 'demo-host', role: 'producer', id, kind: 'video',
   byte_count: 1e6, packet_count: 1e4, score, transport_id: `t-${id}`, local_port: 20000,
   remote_ip: '127.0.0.1', remote_port: 40000, rtp_packet_loss_sent: 0, rtp_packet_loss_received: 0,
   available_outgoing_bitrate: null, available_incoming_bitrate: bit,
 });
 
 export const DEMO_PRODUCERS: SfuStreamStatRow[] = [
-  row('d1', 'VH-07 · front', 10, 2100000),
-  row('d2', 'VH-07 · rear', 10, 2100000),
-  row('d3', 'VH-07 · cabin', 10, 900000),
-  row('d4', 'VH-11 · front', 10, 2100000),
-  row('d5', 'VH-11 · rear', 6, 600000), // degraded
+  row('d1', 'VH-07', 'front', 10, 2100000),
+  row('d2', 'VH-07', 'rear', 10, 2100000),
+  row('d3', 'VH-07', 'cabin', 10, 900000),
+  row('d4', 'VH-11', 'front', 10, 2100000),
+  row('d5', 'VH-11', 'rear', 6, 600000), // degraded
 ];
 // d6 is on the wall but absent from producers -> SIGNAL LOST tile (prototype parity).
 export const DEMO_PLAYING = ['d1', 'd2', 'd3', 'd4', 'd5', 'd6'];

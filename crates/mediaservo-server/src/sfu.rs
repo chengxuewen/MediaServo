@@ -1543,7 +1543,7 @@ mod imp {
                             MediaKind::Audio => "audio",
                             MediaKind::Video => "video",
                         };
-                        rows.push(Self::stream_stat_row(
+                        let mut row = Self::stream_stat_row(
                             room_id,
                             peer_id,
                             "producer",
@@ -1554,7 +1554,16 @@ mod imp {
                             score,
                             owner.as_deref(),
                             &tfields,
-                        ));
+                        );
+                        // V44 (producer-label T3 follow-up): expose the business label the
+                        // Host sent with Produce (host-streamer sends the stream/camera id)
+                        // so the monitor can title tiles "<device> · <camera>".
+                        if let Some(label) = sfu_room.producer_labels.get(pid.as_str()) {
+                            if let Some(obj) = row.as_object_mut() {
+                                obj.insert("label".to_string(), serde_json::json!(*label.value()));
+                            }
+                        }
+                        rows.push(row);
                     }
                     for consumer in peer.consumers.iter() {
                         if consumer.transport().closed() {

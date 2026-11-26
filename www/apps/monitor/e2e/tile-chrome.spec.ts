@@ -80,4 +80,10 @@ test.describe('live tile chrome', () => {
     await page.locator('[aria-label="Stats"]').click();
     await expect.poll(async () => style(page, '.video-player.nvr .vp-mini-stats', 'opacity')).toBe('0');
   });
+
+  test('tile title is "<device> · <camera>" (V44)', async ({ page }) => {
+    const t = page.locator('.wall-grid .video-player.nvr .vp-title').first();
+    await expect(t).toHaveText(/^VH-\d{2} · (front|rear|cabin)$/);
+    await expect(t).toHaveAttribute('title', /^VH-\d{2} · /);
+  });
 });
