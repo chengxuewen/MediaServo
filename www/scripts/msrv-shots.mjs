@@ -38,6 +38,17 @@ const shot = async (name, target) => {
 };
 
 await shot('full.png');
+// layout gallery (prototype #colsPop) + a featured wall template
+await page.locator('.layout-menu').click();
+await page.waitForTimeout(300);
+await shot('layout-gallery.png', '.layout-gallery');
+await page.locator('.layout-gallery [role="option"]', { hasText: /^1\+12$/ }).click();
+await page.waitForTimeout(500);
+await shot('wall-1plus12.png');
+await page.locator('.layout-menu').click();
+await page.waitForTimeout(200);
+await page.locator('.layout-gallery [role="option"]', { hasText: /^Auto$/ }).click();
+await page.waitForTimeout(400);
 await shot('toolbar.png', '.wall-toolbar');
 await shot('rail.png', '.stream-rail');
 // select the 2nd rail card -> selected card + selected tile ring

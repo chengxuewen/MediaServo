@@ -38,7 +38,7 @@ test('wall cells are uniform height (live vs empty slot)', async ({ page }) => {
 test('1+5 featured layout geometry (big spans 2 cols, rows even)', async ({ page }) => {
   await page.goto('/?demo=1');
   await page.locator('.layout-menu').click();
-  await page.getByRole('option', { name: '1 + 5', exact: true }).click();
+  await page.getByRole('option', { name: '1+5', exact: true }).click();
   await expect(page.locator('.wall-grid .wall-cell, .wall-grid .wall-offline').first()).toBeVisible();
 
   const geo = await page.evaluate(() => {

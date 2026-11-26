@@ -35,19 +35,26 @@ const LAYOUT_KEY = 'mediaservo_monitor_layout';
 const LEGACY_COLS_KEY = 'mediaservo_monitor_cols';
 
 
-interface Layout { id: string; name: string; cols: number; slots: number; areas?: string[]; elastic?: boolean; }
-const sym = (id: string, n: number): Layout => { const c = Math.round(Math.sqrt(n)); return { id, name: id, cols: c, slots: n }; };
-// V6 (K6): full LAYOUTS — R6 set + 25/36 + custom elastic (cap16 + empty-slot parity, K10).
+interface Layout { id: string; name: string; cols: number; slots: number; areas?: string[]; rows?: number; big?: { c: number; r: number }; elastic?: boolean; }
+// V53: LAYOUTS mirror portal-unified.html verbatim (ids, cols/rows, grid areas) so the
+// wall renders the same templates: sym n×n; 1+3 / 1+5 / 1+7 / 1+9 / 1+12 featured
+// areas; Custom elastic (4 columns). `big` is the gallery thumbnail's big-cell span.
+const sym = (id: string, n: number): Layout => { const c = Math.round(Math.sqrt(n)); return { id, name: id, cols: c, rows: c, slots: n }; };
 const LAYOUTS: Layout[] = [
-  sym('1', 1), sym('4', 4), sym('9', 9), sym('16', 16), sym('25', 25), sym('36', 36),
-  { id: '1+3', name: '1 + 3', cols: 3, slots: 4, areas: ['big big s1', 'big big s2', 'big big s3'] },
-  { id: '1+5', name: '1 + 5', cols: 4, slots: 6, areas: ['big big s1 s2', 'big big s3 s4', 'big big s5 .'] },
-  { id: '1+7', name: '1 + 7', cols: 4, slots: 8, areas: ['big big s1 s2', 'big big s3 s4', 'big big s5 s6', 'big big s7 .'] },
-  { id: 'custom', name: 'Custom', cols: 3, slots: 9, elastic: true },
+  sym('1', 1), sym('4', 4), sym('9', 9), sym('16', 16),
+  { id: '1+3', name: '1+3', cols: 2, rows: 3, slots: 4, areas: ['big s1', 'big s2', 'big s3'], big: { c: 1, r: 3 } },
+  { id: '1+5', name: '1+5', cols: 3, rows: 3, slots: 6, areas: ['big big s1', 'big big s2', 's3 s4 s5'], big: { c: 2, r: 2 } },
+  { id: '1+7', name: '1+7', cols: 4, rows: 3, slots: 9, areas: ['big big s1 s2', 'big big s3 s4', 's5 s6 s7 s8'], big: { c: 2, r: 2 } },
+  { id: '1+9', name: '1+9', cols: 5, rows: 3, slots: 10, areas: ['big big s1 s2 s3', 'big big s4 s5 s6', 'big big s7 s8 s9'], big: { c: 2, r: 3 } },
+  { id: '1+12', name: '1+12', cols: 6, rows: 3, slots: 13, areas: ['big big s1 s2 s3 s4', 'big big s5 s6 s7 s8', 'big big s9 s10 s11 s12'], big: { c: 2, r: 3 } },
+  sym('25', 25), sym('36', 36),
+  { id: 'custom', name: 'Custom', cols: 4, slots: 9, elastic: true },
 ];
+// Gallery order (prototype renderLayoutPicker): Auto | sym | featured | Custom, with separators.
+const GALLERY: Array<string | '|'> = ['auto', '|', '1', '4', '9', '16', '25', '36', '|', '1+3', '1+5', '1+7', '1+9', '1+12', '|', 'custom'];
 const WEIGHTS_KEY = 'ms_col_weights';
 const SPANS_KEY = 'ms_tile_spans';
-function loadWeights(): number[] { try { const v = JSON.parse(localStorage.getItem(WEIGHTS_KEY) || 'null'); if (Array.isArray(v) && v.length === 3) return v; } catch { /* silent */ } return [1, 1, 1]; }
+function loadWeights(): number[] { try { const v = JSON.parse(localStorage.getItem(WEIGHTS_KEY) || 'null'); if (Array.isArray(v) && v.length === 4) return v; } catch { /* silent */ } return [1, 1, 1, 1]; }
 function loadSpans(): Record<string, boolean> { try { return JSON.parse(localStorage.getItem(SPANS_KEY) || '{}'); } catch { return {}; } }
 // V8: with zero streams Auto still shows the prototype's featured 1+5 grid (dark empty
 // slots), so the real default page is a layout, not an empty box.
@@ -85,32 +92,58 @@ function wsServerUrl(): string {
 }
 
 // V2 (I2): Synology-style layout gallery combo with keyboard nav (arrows/Home/End/Enter/Esc).
+const ICON_GRID = <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>; // #i-grid
+const ICON_CHECK = <path d="M5 12.5l4.5 4.5L19 7.5" />; // #i-check
+
+/** Prototype layoutThumb: 48x32 grid of cells; the featured "big" cell spans. */
+function LayoutThumb({ id }: { id: string }) {
+  if (id === 'auto') return <svg className="ic lo-auto" viewBox="0 0 24 24" aria-hidden="true">{ICON_GRID}</svg>;
+  const l = findLayout(id);
+  if (l.elastic) {
+    return (
+      <span className="lo-thumb" style={{ gridTemplateColumns: 'repeat(4, 1fr)', gridTemplateRows: 'repeat(4, 1fr)', gridAutoFlow: 'dense' }}>
+        <i className="big" style={{ gridColumn: '1 / 3', gridRow: '1 / 3' }} />
+        {Array.from({ length: 12 }).map((_, k) => <i key={k} />)}
+      </span>
+    );
+  }
+  const cols = l.cols; const rows = l.rows ?? l.cols;
+  const big = l.big; const small = l.slots - (big ? 1 : 0);
+  return (
+    <span className="lo-thumb" style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}>
+      {big && <i className="big" style={{ gridColumn: `1 / ${big.c + 1}`, gridRow: `1 / ${big.r + 1}` }} />}
+      {Array.from({ length: small }).map((_, k) => <i key={k} />)}
+    </span>
+  );
+}
+
 function LayoutGallery({ current, onSelect, onClose }: { current: string; onSelect: (id: string) => void; onClose: () => void }) {
-  const items = ['auto', ...LAYOUTS.map((l) => l.id)];
+  const items = GALLERY.filter((g) => g !== '|');
   const [idx, setIdx] = useState(Math.max(0, items.indexOf(current)));
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { (ref.current?.querySelectorAll('button')[idx] as HTMLElement | undefined)?.focus(); }, [idx]);
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowRight') { e.preventDefault(); setIdx((i) => Math.min(items.length - 1, i + 1)); }
     else if (e.key === 'ArrowLeft') { e.preventDefault(); setIdx((i) => Math.max(0, i - 1)); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setIdx((i) => Math.min(items.length - 1, i + 4)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setIdx((i) => Math.max(0, i - 4)); }
     else if (e.key === 'Home') { e.preventDefault(); setIdx(0); }
     else if (e.key === 'End') { e.preventDefault(); setIdx(items.length - 1); }
     else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(items[idx]); }
     else if (e.key === 'Escape') { e.preventDefault(); onClose(); }
   };
+  let n = 0;
   return (
     <div className="layout-gallery" role="listbox" aria-label="Layout gallery" ref={ref} onKeyDown={onKey}>
-      {items.map((id, i) => {
-        const l = id === 'auto' ? null : findLayout(id);
-        return (
-          <button key={id} role="option" aria-selected={id === current} className="lo-thumb" tabIndex={i === idx ? 0 : -1} onClick={() => onSelect(id)}>
-            <span className="lo-grid" style={{ gridTemplateColumns: `repeat(${l ? l.cols : 2}, 1fr)` }}>
-              {Array.from({ length: l ? l.slots : 4 }).map((_, c) => <span key={c} className={`lo-cell${l?.areas && c === 0 ? ' big' : ''}`} />)}
-            </span>
-            {l ? l.name : 'Auto'}
-          </button>
-        );
-      })}
+      {GALLERY.map((g, i) => g === '|' ? (
+        <div key={`sep${i}`} className="lo-sep" role="separator" />
+      ) : (() => { const k = n++; const l = g === 'auto' ? null : findLayout(g); return (
+        <button key={g} role="option" aria-selected={g === current} className="lo-opt" tabIndex={k === idx ? 0 : -1} onClick={() => onSelect(g)}>
+          <LayoutThumb id={g} />
+          <span className="lo-label">{l ? l.name : 'Auto'}</span>
+          <svg className="ic lo-check" viewBox="0 0 24 24" aria-hidden="true">{ICON_CHECK}</svg>
+        </button>
+      ); })())}
     </div>
   );
 }

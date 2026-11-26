@@ -170,13 +170,22 @@
 .wall-grid { display: grid; gap: 12px; height: 100%; grid-auto-rows: minmax(0, 1fr); }
 /* V2 layout gallery combo (Synology-style thumbnails) */
 .layout-combo { position: relative; }
-.layout-gallery { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; background: var(--ms-color-surface); border: 1px solid var(--ms-color-border); border-radius: var(--ms-radius-md); box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: var(--ms-space-2); display: grid; grid-template-columns: repeat(4, auto); gap: var(--ms-space-2); }
-.lo-thumb { display: flex; flex-direction: column; align-items: center; gap: 4px; background: none; border: 1px solid transparent; border-radius: var(--ms-radius-sm); padding: 4px; cursor: pointer; color: var(--ms-color-text-secondary); font-size: var(--ms-font-size-xs); }
-.lo-thumb:hover, .lo-thumb:focus-visible { border-color: var(--ms-color-border-strong); }
-.lo-thumb[aria-selected="true"] { border-color: var(--ms-color-accent); color: var(--ms-color-accent); }
-.lo-grid { display: grid; gap: 2px; width: 48px; height: 32px; }
-.lo-cell { background: var(--ms-color-border-strong); border-radius: 1px; }
-.lo-thumb[aria-selected="true"] .lo-cell, .lo-cell.big { background: var(--ms-color-accent); }
+/* V53: layout picker = prototype #colsPop icon-thumbnail gallery (measured: 4 columns,
+   300px wide, padding 6, gap 4, white, 1px #B9C1CE, r8; option pad 6 r6; selected =
+   accent tint + accent ink; thumb 48x32 gap 1; label 10px mono; check 10px top-right). */
+.layout-gallery { position: absolute; top: calc(100% + 4px); left: 0; z-index: 40; width: 300px; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 6px; background: var(--ms-color-surface); border: 1px solid var(--ms-color-border-strong); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.18); }
+.lo-opt { position: relative; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px; border: 0; border-radius: 6px; background: none; color: var(--ms-color-text-secondary); cursor: pointer; font-size: 12px; }
+.lo-opt:hover, .lo-opt:focus-visible { background: var(--ms-color-surface-hover); color: var(--ms-color-text); }
+.lo-opt[aria-selected="true"] { background: var(--ms-color-primary-soft); color: var(--ms-color-accent); }
+.lo-thumb { display: grid; gap: 1px; width: 48px; height: 32px; }
+.lo-thumb i { display: block; min-width: 0; min-height: 0; background: var(--ms-color-border-strong); border-radius: 1px; }
+.lo-thumb i.big, .lo-opt[aria-selected="true"] .lo-thumb i { background: var(--ms-color-accent); }
+.lo-label { font-size: 10px; font-family: var(--ms-font-family-mono); color: var(--ms-color-text-secondary); }
+.lo-opt[aria-selected="true"] .lo-label { color: var(--ms-color-accent); font-weight: 600; }
+.layout-gallery .ic.lo-auto { width: 20px; height: 20px; margin: 6px 0; color: var(--ms-color-text-secondary); }
+.layout-gallery .ic.lo-check { position: absolute; top: 2px; right: 2px; width: 10px; height: 10px; margin: 0; color: var(--ms-color-accent); opacity: 0; }
+.lo-opt[aria-selected="true"] .ic.lo-check { opacity: 1; }
+.lo-sep { grid-column: 1 / -1; height: 1px; background: var(--ms-color-border); }
 .wall-wrap { position: relative; flex: 1; min-height: 0; padding: 0 16px 16px; }
 /* V6 (K10): empty-slot parity for 25/36/custom under cap16. */
 /* V8: empty slots are part of the dark video island (prototype look), honest placeholders. */
