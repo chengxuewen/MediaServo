@@ -39,8 +39,10 @@ export interface VideoPlayerProps {
   nvr?: boolean;
   /** V1/K9: wall-internal single-stream zoom (nvr tile action). */
   onZoom?: () => void;
-  /** V38: this tile IS the zoomed one -> the cluster shows only "Exit zoom". */
+  /** V38: this tile IS the zoomed one -> the cluster shows Exit zoom + remove. */
   zoomed?: boolean;
+  /** V39: A/V drift in ms (prototype '+20 ms'). No backend value yet -> omitted. */
+  driftMs?: number | null;
   /** V1/K9: remove this stream from the wall (nvr tile action). */
   onRemove?: () => void;
   /** V6 (I3): toggle 2x2 span (elastic layouts only); size-b action. */
@@ -65,7 +67,7 @@ const STATUS_COLORS: Record<ConnectionStatus, string> = {
   error: '#e74c3c',
 };
 
-export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand, nvr = false, onZoom, onRemove, onSpan, spanned = false, zoomed = false, simulated = false, degraded = false, idleText }: VideoPlayerProps) {
+export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onClose, variant = 'modal', onExpand, nvr = false, onZoom, onRemove, onSpan, spanned = false, zoomed = false, driftMs = null, simulated = false, degraded = false, idleText }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const clientRef = useRef<SfuConsumerClient | null>(null);
   const controlsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -217,6 +219,9 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
           <span className="vp-status-dot" style={{ background: statusColor }} />
           <span className="vp-title" title={streamLabel ? `${roomId} · ${streamLabel}` : roomId}>{streamLabel ? `${roomId} · ${streamLabel}` : roomId}</span>
           {nvr && isTile && (
+            <span className="tile-drift" aria-hidden="true">{driftMs == null ? '' : `${driftMs >= 0 ? '+' : ''}${driftMs} ms`}</span>
+          )}
+          {nvr && isTile && (
             <span className={`tile-glyph ${degraded ? 'warn' : isDisconnected ? 'offline' : (simulated || status === 'playing') ? 'online' : ''}`} aria-hidden="true" />
           )}
           {!isTile && metrics && !isDisconnected && (
@@ -242,7 +247,7 @@ export default function VideoPlayer({ roomId, serverUrl, token, streamLabel, onC
               )}
               {!zoomed && onSpan && <button className={`tile-btn size-b${spanned ? ' on' : ''}`} title={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-label={spanned ? 'Shrink to 1×1' : 'Enlarge to 2×2'} aria-pressed={spanned} onClick={(e) => { e.stopPropagation(); onSpan(); }}><TileIcon d={ICON_RESIZE} /></button>}
               {!zoomed && onZoom && <button className="tile-btn zoom-b" title="Zoom this stream" aria-label="Zoom this stream" onClick={(e) => { e.stopPropagation(); onZoom(); }}><TileIcon d={ICON_ZOOM} /></button>}
-              {!zoomed && onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><TileIcon d={ICON_CLOSE} /></button>}
+              {onRemove && <button className="tile-btn tile-del" title="Remove from wall" aria-label="Remove from wall" onClick={(e) => { e.stopPropagation(); onRemove(); }}><TileIcon d={ICON_CLOSE} /></button>}
             </div>
           )}
           {nvr && isTile && (

@@ -133,6 +133,8 @@
 .video-player.nvr .tile-btn { width: 22px; height: 22px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,.22); background: rgba(0,0,0,.55); color: rgba(255,255,255,.85); border-radius: 4px; cursor: pointer; }
 .video-player.nvr .tile-btn:hover { background: rgba(0,0,0,.8); color: #fff; }
 .video-player.nvr .tile-btn.tile-del:hover { background: rgba(200,45,45,.9); color: #fff; }
+/* V39: prototype .tile-drift — amber mono, right before the status glyph. */
+.video-player.nvr .tile-drift { font-family: var(--ms-font-family-mono); font-size: 11px; color: var(--ms-color-warning); flex: none; }
 /* V37: prototype .ic — stroked glyph, 12px inside the 22px button. */
 .video-player.nvr .tile-btn .ic { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .video-player.nvr .tile-del:hover { background: rgba(200,45,45,.9); }
